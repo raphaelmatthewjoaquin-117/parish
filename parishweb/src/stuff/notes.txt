@@ -1,0 +1,14 @@
+event calendar admin pass = token
+    http://localhost:5173/admin/events
+    color pallet: white, black, gold
+
+
+
+
+    codes just incase something breaks
+
+
+    
+    // submitbooking
+    const numericId = Number(active);
+    const selectedService = Number.isInteger(numericId) ? numericId : active;
