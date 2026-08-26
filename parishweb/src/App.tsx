@@ -7,6 +7,7 @@ import { GalleryPage } from './pages/GalleryPage'
 import { HomePage } from './pages/HomePage'
 import { NewsPage } from './pages/NewsPage'
 import ServicePage from './pages/ServicePage'
+import { PrayerRequest } from './pages/PrayerRequest'
 
 const navItems = [
   { label: 'Home', to: '/' },
@@ -15,6 +16,7 @@ const navItems = [
   { label: 'Gallery', to: '/gallery' },
   { label: 'Services', to: '/services' },
   { label: 'Contact Us', to: '/contact' },
+  { label: 'Prayer Requests', to: '/prayerRequests' },
 ]
 
 function App() {
@@ -46,6 +48,7 @@ function App() {
             <Route path="/services" element={<ServicePage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/admin/events" element={<AdminEventsPage />} />
+            <Route path="/prayerRequests" element={<PrayerRequest />} />
           </Routes>
         </main>
       </div>

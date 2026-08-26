@@ -138,7 +138,12 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
           AND Status IN ('PendingVerification', 'Confirmed')
       `;
 
-      bookedSet = new Set(bookedResult.recordset.map((row) => `${row.ScheduledDate.toISOString().slice(0,10)}|${row.ScheduledTime.slice(0,5)}`));
+      bookedSet = new Set(bookedResult.recordset.map((row) => {
+        const timeText = row.ScheduledTime instanceof Date
+          ? formatTime(row.ScheduledTime)
+          : String(row.ScheduledTime).slice(0, 5);
+        return `${row.ScheduledDate.toISOString().slice(0,10)}|${timeText}`;
+      }));
     }
 
     const slots = [];
@@ -351,4 +356,4 @@ app.get('/health', (req, res) => {
 
 app.listen(5000, () => {
   console.log('API running on http://localhost:5000');
-})
+});
