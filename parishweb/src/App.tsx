@@ -1,4 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
+import { useState } from 'react'
 import './App.css'
 import { AboutPage } from './pages/AboutPage'
 import { AdminEventsPage } from './pages/AdminEventsPage'
@@ -20,17 +21,34 @@ const navItems = [
 ]
 
 function App() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const closeMobileMenu = () => setMobileMenuOpen(false)
   return (
     <BrowserRouter>
       <div className="page-shell">
         <header className="topbar">
           <div className="header-arch">
-            <nav className="main-nav" aria-label="Main navigation">
+            <button
+              className={`hamburger ${mobileMenuOpen ? 'open' : ''}`}
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle navigation menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+            <nav
+              className={`main-nav ${mobileMenuOpen ? 'mobile-open' : ''}`}
+              aria-label="Main navigation"
+            >
               {navItems.map(({ label, to }) => (
                 <NavLink
                   key={label}
                   to={to}
                   className={({ isActive }) => (isActive ? 'active' : '')}
+                  onClick={closeMobileMenu}
                 >
                   {label}
                 </NavLink>
@@ -51,6 +69,31 @@ function App() {
             <Route path="/prayerRequests" element={<PrayerRequest />} />
           </Routes>
         </main>
+
+        <footer className="footer">
+          <div className="footer-content">
+            <div className="footer-section">
+              <h3>Parish Information</h3>
+              <p>145 Church Avenue<br />Saint John Parish<br />Phone: (555) 123-4567<br />Email: office@saintjohnparish.org</p>
+            </div>
+            <div className="footer-section">
+              <h3>Quick Links</h3>
+              <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About Us</a></li>
+                <li><a href="/contact">Contact</a></li>
+                <li><a href="/prayerRequests">Prayer Requests</a></li>
+              </ul>
+            </div>
+            <div className="footer-section">
+              <h3>Service Times</h3>
+              <p>Saturday: 5:30 PM<br />Sunday: 8:00 AM<br />Sunday: 10:30 AM<br />Weekday: 7:00 AM</p>
+            </div>
+          </div>
+          <div className="footer-bottom">
+            <p>&copy; 2026 Saint John Parish. All rights reserved.</p>
+          </div>
+        </footer>
       </div>
     </BrowserRouter>
   )

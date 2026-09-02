@@ -202,41 +202,82 @@ export default function ServicePage(): React.JSX.Element {
     }
   };
 
-  const submitBooking = (event: React.FormEvent<HTMLFormElement>) => {
+  // Client-side sanitization helper
+  const sanitizeText = (text: string): string => {
+    return text
+      .trim()
+      .slice(0, 500)
+      .replace(/[<>&"']/g, '');
+  };
+
+  const submitBooking = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBookingMessage(null);
+
     if (!servicesLoaded) {
       setBookingMessage('Unable to create booking: services not loaded. Please refresh the page.');
       return;
     }
 
+    // 1. Email Validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setBookingMessage('Please provide a valid email address.');
+      return;
+    }
 
-    fetch(`${API_URL}/api/service-requests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serviceId: selectedService.dbId,
-        firstName,
-        lastName,
-        email,
-        mobileNumber,
-        address,
-        scheduledDate: selectedSlot.split(' ')[0],
-        scheduledTime: selectedSlot.split(' ')[1],
-        notes,
-      }),
-    })
-      .then(response => response.json())
-      .then((data: any) => {
-        if (data.requestId) {
-          setBookingMessage(`Booking created. Verify it by visiting: ${data.verificationLink}`);
-        } else {
-          setBookingMessage(data.message || 'Unable to book appointment.');
-        }
-      })
-      .catch(() => {
-        setBookingMessage('Unable to submit booking. Please try again later.');
+    // 2. Phone Number (10-15 digits)
+    const phoneDigits = mobileNumber.replace(/\D/g, '');
+    if (phoneDigits.length < 10 || phoneDigits.length > 15) {
+      setBookingMessage('Please provide a valid phone number (10-15 digits).');
+      return;
+    }
+
+    // 3. Name required
+    if (!firstName.trim() || !lastName.trim()) {
+      setBookingMessage('First and Last name are required.');
+      return;
+    }
+
+    // 4. Notes length limit
+    if (notes && notes.length > 500) {
+      setBookingMessage('Notes cannot exceed 500 characters.');
+      return;
+    }
+
+    // Sanitize inputs before sending
+    const sanitizedFirstName = sanitizeText(firstName);
+    const sanitizedLastName = sanitizeText(lastName);
+    const sanitizedAddress = sanitizeText(address);
+    const sanitizedNotes = sanitizeText(notes);
+
+    try {
+      const response = await fetch(`${API_URL}/api/service-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceId: selectedService.dbId,
+          firstName: sanitizedFirstName,
+          lastName: sanitizedLastName,
+          email,
+          mobileNumber,
+          address: sanitizedAddress,
+          scheduledDate: selectedSlot.split(' ')[0],
+          scheduledTime: selectedSlot.split(' ')[1],
+          notes: sanitizedNotes,
+        }),
       });
+
+      const data = await response.json();
+
+      if (data.requestId) {
+        setBookingMessage(`Booking created.`);
+      } else {
+        setBookingMessage(data.message || 'Unable to book appointment.');
+      }
+    } catch {
+      setBookingMessage('Unable to submit booking. Please try again later.');
+    }
   };
 
   const calendarStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -327,12 +368,21 @@ export default function ServicePage(): React.JSX.Element {
                 const hasAvailability = dateSlots.some(slot => slot.available);
                 const isWeekday = day.getDay() > 0 && day.getDay() < 6;
 
+                // Check if date is today or in the past
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const dayAtMidnight = new Date(day);
+                dayAtMidnight.setHours(0, 0, 0, 0);
+                const isFutureDate = dayAtMidnight > today;
+
+                const isSelectable = isWeekday && isFutureDate && hasAvailability;
+
                 return (
                   <button
                     key={date}
                     type="button"
-                    disabled={slotsLoading || !isWeekday || !hasAvailability}
-                    className={`date-picker-day ${hasAvailability ? 'available' : ''} ${dateSlots.length > 0 && !hasAvailability ? 'fully-booked' : ''} ${selectedDate === date ? 'selected' : ''}`}
+                    disabled={slotsLoading || !isSelectable}
+                    className={`date-picker-day ${hasAvailability && isWeekday && isFutureDate ? 'available' : ''} ${dateSlots.length > 0 && !hasAvailability && isWeekday && isFutureDate ? 'fully-booked' : ''} ${selectedDate === date ? 'selected' : ''}`}
                     onClick={() => {
                       setSelectedDate(date);
                       setSelectedSlot('');

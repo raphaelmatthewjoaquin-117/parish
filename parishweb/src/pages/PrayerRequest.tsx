@@ -1,12 +1,13 @@
 import { useState } from 'react'
+import { PrayerWall } from '../components/PrayerWall'
 import '../PagesCSS/PrayerRequest.css'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 type PrayerCategory = 'healing' | 'thanksgiving' | 'guidance' | 'family' | 'deceased' | 'other'
 
 interface PrayerFormData {
   name: string
-  email: string
-  phone: string
   category: PrayerCategory
   request: string
   anonymous: boolean
@@ -15,7 +16,6 @@ interface PrayerFormData {
 
 interface FormErrors {
   name?: string
-  email?: string
   request?: string
 }
 
@@ -30,8 +30,6 @@ const CATEGORIES: { value: PrayerCategory; label: string }[] = [
 
 const INITIAL_FORM: PrayerFormData = {
   name: '',
-  email: '',
-  phone: '',
   category: 'healing',
   request: '',
   anonymous: false,
@@ -47,10 +45,6 @@ export function PrayerRequest() {
   const validate = (): boolean => {
     const newErrors: FormErrors = {}
     if (!form.name.trim()) newErrors.name = 'Please enter your name'
-    if (!form.email.trim()) newErrors.email = 'Please enter your email'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      newErrors.email = 'Please enter a valid email address'
-    }
     if (!form.request.trim()) newErrors.request = 'Please write your prayer request'
     else if (form.request.trim().length < 10) {
       newErrors.request = 'Prayer request must be at least 10 characters'
@@ -76,11 +70,31 @@ export function PrayerRequest() {
     if (!validate()) return
 
     setSubmitting(true)
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    setSubmitting(false)
-    setSubmitted(true)
-    setForm(INITIAL_FORM)
+    try {
+      const response = await fetch(`${API_URL}/api/prayers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          category: form.category,
+          request: form.request,
+          anonymous: form.anonymous,
+          shareWithCommunity: form.shareWithCommunity,
+        }),
+      })
+
+      const data = await response.json()
+      if (response.ok) {
+        setSubmitted(true)
+        setForm(INITIAL_FORM)
+      } else {
+        setErrors({ request: data.message || 'Failed to submit prayer' })
+      }
+    } catch (error) {
+      setErrors({ request: 'Unable to submit prayer. Please try again.' })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleReset = () => {
@@ -104,7 +118,7 @@ export function PrayerRequest() {
             Thank you for sharing your prayer intention with us. Our prayer team will lift up your request during our daily prayers and Masses.
           </p>
           <p className="success-note">
-            {form.anonymous ? 'Your request will remain completely anonymous.' : 'We may contact you at ' + form.email + ' if we need any clarification.'}
+            {form.anonymous ? 'Your request will remain completely anonymous.' : 'Thank you for sharing with us.'}
           </p>
           <button type="button" className="primary-btn" onClick={handleReset}>
             Submit Another Prayer
@@ -117,47 +131,9 @@ export function PrayerRequest() {
   return (
     <section className="prayer-request" id="prayer-request">
       <div className="prayer-layout">
-        <div className="prayer-info">
-          <p className="eyebrow">Prayer Ministry</p>
-          <h1>Share Your Prayer Request</h1>
-          <p className="lead">
-            "Whatever you ask for in prayer with faith, you will receive." — Matthew 21:22
-          </p>
-          <p className="description">
-            Our parish community believes in the power of prayer. Whether you're seeking healing, guidance, giving thanks,
-            or praying for a loved one, our dedicated prayer team is here to lift up your intentions before the Lord.
-          </p>
-
-          <div className="prayer-features">
-            <div className="feature">
-              <span className="feature-icon" aria-hidden="true">🕊️</span>
-              <div>
-                <strong>Confidential</strong>
-                <span>Your requests are treated with utmost confidentiality</span>
-              </div>
-            </div>
-            <div className="feature">
-              <span className="feature-icon" aria-hidden="true">🙏</span>
-              <div>
-                <strong>Prayed Over</strong>
-                <span>Our prayer team prays for each request daily</span>
-              </div>
-            </div>
-            <div className="feature">
-              <span className="feature-icon" aria-hidden="true">✝️</span>
-              <div>
-                <strong>Included in Mass</strong>
-                <span>Intentions offered during Holy Mass upon request</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="prayer-verse">
-            <blockquote>
-              <p>"Do not be anxious about anything, but in every situation, by prayer and petition, with thanksgiving, present your requests to God."</p>
-              <cite>— Philippians 4:6</cite>
-            </blockquote>
-          </div>
+        <div className="prayer-wall-container">
+          <h1 className="prayer-wall-title">Share Your Prayer Request</h1>
+          <PrayerWall />
         </div>
 
         <div className="prayer-form-container">
@@ -203,19 +179,20 @@ export function PrayerRequest() {
               )}
             </div>
 
-             <div className="form-row">
+            <div className="form-row">
               <div className="form-group">
-                <label htmlFor="name">Your Name</label>
+                <label htmlFor="name">Your Name <span className="required" aria-hidden="true">*</span></label>
                 <input
                   type="text"
                   id="name"
                   name="name"
                   value={form.name}
                   onChange={handleChange}
-                  placeholder="(OPTIONAL)"
+                  placeholder="Enter your name"
                   aria-invalid={!!errors.name}
                   aria-describedby={errors.name ? 'name-error' : undefined}
                   disabled={submitting}
+                  required
                 />
                 {errors.name && <span id="name-error" className="error-message" role="alert">{errors.name}</span>}
               </div>
