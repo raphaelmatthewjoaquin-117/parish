@@ -341,7 +341,7 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
   const date = req.query.date ? String(req.query.date) : null;
   const startDate = date ? new Date(date) : new Date();
 
-  const slotTimes = ['09:00', '11:00', '14:00', '16:00'];
+  const slotTimes = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
   const daysToShow = 30;
   const requestedDate = new Date(startDate);
 

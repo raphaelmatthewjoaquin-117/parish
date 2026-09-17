@@ -262,6 +262,11 @@
   color: white;
 }
 
+.pending-badge {
+  background: #fff3d2;
+  color: #795c13;
+}
+
 .prayer-text {
   color: #333;
   margin: 0.5rem 0;

@@ -10,6 +10,7 @@ type EventItem = {
   date: string
   time?: string
   location?: string
+  photoUrl?: string
 }
 
 type EventForm = {
@@ -18,6 +19,7 @@ type EventForm = {
   date: string
   time: string
   location: string
+  photoUrl: string
 }
 
 type PrayerItem = {
@@ -54,6 +56,7 @@ const initialForm: EventForm = {
   date: '',
   time: '',
   location: '',
+  photoUrl: '',
 }
 
 export function AdminEventsPage() {
@@ -63,6 +66,7 @@ export function AdminEventsPage() {
   // Event states
   const [events, setEvents] = useState<EventItem[]>([])
   const [form, setForm] = useState<EventForm>(initialForm)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
 
   // Prayer states
@@ -332,6 +336,7 @@ export function AdminEventsPage() {
   const resetForm = () => {
     setEditingId(null)
     setForm(initialForm)
+    setPhotoFile(null)
     setError(null)
   }
 
@@ -343,6 +348,7 @@ export function AdminEventsPage() {
       date: event.date,
       time: event.time ?? '',
       location: event.location ?? '',
+      photoUrl: event.photoUrl ?? '',
     })
     setError(null)
   }
@@ -375,11 +381,41 @@ export function AdminEventsPage() {
     const url = editingId ? `${API_URL}/api/events/${encodeURIComponent(editingId)}` : `${API_URL}/api/events`
     const method = editingId ? 'PUT' : 'POST'
 
-    fetch(url, {
-      method,
-      headers: adminHeaders,
-      body: JSON.stringify(form),
-    })
+    const uploadPhoto = photoFile
+      ? fetch(`${API_URL}/api/admin/uploads`, {
+          method: 'POST',
+          headers: { 'x-admin-token': adminToken },
+          body: (() => {
+            const data = new FormData()
+            data.append('photo', photoFile)
+            return data
+          })(),
+        }).then(response => {
+          return response.text().then(text => {
+            let body: { message?: string; photoUrl?: string } = {}
+            try {
+              body = JSON.parse(text) as { message?: string; photoUrl?: string }
+            } catch {
+              throw new Error('The upload server returned an unexpected response. Restart the backend and try again.')
+            }
+
+            if (!response.ok) {
+              throw new Error(body.message || 'Unable to upload photo')
+            }
+            if (!body.photoUrl) {
+              throw new Error('The upload server did not return a photo path.')
+            }
+            return { photoUrl: body.photoUrl }
+          })
+        })
+      : Promise.resolve({ photoUrl: form.photoUrl })
+
+    uploadPhoto
+      .then(({ photoUrl }) => fetch(url, {
+        method,
+        headers: adminHeaders,
+        body: JSON.stringify({ ...form, photoUrl }),
+      }))
       .then(response => {
         if (!response.ok) {
           return response.json().then(body => { throw new Error(body?.message || 'Unable to save event') })
@@ -505,6 +541,15 @@ export function AdminEventsPage() {
                   onChange={e => setForm({ ...form, location: e.target.value })}
                 />
               </label>
+              <label>
+                Event photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
+                />
+                {photoFile && <small>Selected: {photoFile.name}</small>}
+              </label>
               {error && <p className="error-message">{error}</p>}
               <div className="button-row">
                 <button type="submit" disabled={saving}>
@@ -564,7 +609,9 @@ export function AdminEventsPage() {
                       <div className="prayer-header">
                         <strong>{prayer.anonymous ? 'Anonymous' : prayer.name}</strong>
                         <span className="prayer-category">{prayer.category}</span>
-                        {prayer.isApproved && <span className="badge approved-badge">Approved</span>}
+                        <span className={`badge ${prayer.isApproved ? 'approved-badge' : 'pending-badge'}`}>
+                          {prayer.isApproved ? 'Approved' : 'Pending approval'}
+                        </span>
                       </div>
                       <div className="prayer-text">{prayer.request.substring(0, 100)}...</div>
                       <div className="prayer-meta">

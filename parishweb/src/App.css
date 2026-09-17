@@ -37,6 +37,20 @@
   clip-path: ellipse(80% 70% at 50% 0%);
 }
 
+.site-logo {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  z-index: 2;
+  width: 54px;
+  transform: translateY(-50%);
+}
+
+.site-logo img {
+  width: 100%;
+  height: auto;
+}
+
 .main-nav {
   position: relative;
   z-index: 1;
@@ -140,12 +154,16 @@
   padding: 4rem 5rem 3rem;
   background:
     linear-gradient(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.3)),
-    linear-gradient(135deg, #ffffff, #f5f5f5);
+    url("./images/heading%20page.JPG") center / cover no-repeat;
 }
 
 .hero-copy {
   max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
 }
+
 
 .eyebrow {
   margin: 0 0 1rem;
@@ -167,6 +185,8 @@
 
 .lead {
   margin-top: 1.5rem;
+  margin-left: auto;
+  margin-right: auto;
   max-width: 620px;
   font-size: 1.08rem;
   line-height: 1.8;
@@ -176,6 +196,7 @@
 .button-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 1rem;
   margin-top: 2rem;
 }
@@ -218,6 +239,7 @@
 .hero-meta {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 1rem;
   list-style: none;
   padding: 0;
@@ -343,7 +365,15 @@
   background: linear-gradient(180deg, #f9f9f9, #f5f5f5);
   border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 18px;
+  overflow: hidden;
   padding: 1.5rem;
+}
+
+.event-card-image {
+  width: calc(100% + 3rem);
+  height: 180px;
+  margin: -1.5rem -1.5rem 1.5rem;
+  object-fit: cover;
 }
 
 .date-tag {
@@ -372,6 +402,36 @@
 .event-card a {
   color: #d4af37;
   font-weight: 700;
+}
+
+.event-learn-more,
+.event-detail-close {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #d4af37;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.event-detail-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: #fff;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 12px;
+}
+
+.event-detail-card h3 {
+  margin: 1rem 0 0.75rem;
+}
+
+.event-detail-card p {
+  margin: 0.5rem 0;
 }
 
 .gallery-grid {

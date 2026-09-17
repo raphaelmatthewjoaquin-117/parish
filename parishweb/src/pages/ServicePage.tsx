@@ -34,8 +34,18 @@ const FALLBACK_SERVICES: Service[] = [
   { id: 'confirmation', dbId: 3, name: 'Confirmation' },
   { id: 'funeral', dbId: 4, name: 'Funeral Mass' },
   { id: 'house-blessing', dbId: 5, name: 'House Blessing' },
-  { id: 'anointing', dbId: 6, name: 'Anointing' },
 ];
+
+function formatSlotRange(startTime: string): string {
+  const [hours, minutes] = startTime.split(':').map(Number);
+  const endHours = hours + 1;
+  const format = (value: number) => {
+    const period = value >= 12 ? 'PM' : 'AM';
+    const hour = value % 12 || 12;
+    return `${hour}:${minutes.toString().padStart(2, '0')} ${period}`;
+  };
+  return `${format(hours)} - ${format(endHours)}`;
+}
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -412,7 +422,7 @@ export default function ServicePage(): React.JSX.Element {
                       className={`slot ${slot.available ? 'available' : 'disabled'} ${selectedSlot === `${slot.date} ${slot.time}` ? 'selected' : ''}`}
                       onClick={() => setSelectedSlot(`${slot.date} ${slot.time}`)}
                     >
-                      <span>{slot.time}</span>
+                      <span>{formatSlotRange(slot.time)}</span>
                       <strong>{slot.available ? 'Choose this time' : 'No availability'}</strong>
                     </button>
                   ))}
@@ -426,27 +436,27 @@ export default function ServicePage(): React.JSX.Element {
           <form onSubmit={submitBooking}>
             <label>
               First name
-              <input value={firstName} onChange={e => setFirstName(e.target.value)} required />
+              <input value={firstName} placeholder="Enter your first name" onChange={e => setFirstName(e.target.value)} required />
             </label>
             <label>
               Last name
-              <input value={lastName} onChange={e => setLastName(e.target.value)} required />
+              <input value={lastName} placeholder="Enter your last name" onChange={e => setLastName(e.target.value)} required />
             </label>
             <label>
               Email
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
             </label>
             <label>
               Phone
-              <input value={mobileNumber} onChange={e => setMobileNumber(e.target.value)} required />
+              <input value={mobileNumber} placeholder="Enter your phone number" onChange={e => setMobileNumber(e.target.value)} required />
             </label>
             <label>
               Address
-              <input value={address} onChange={e => setAddress(e.target.value)} />
+              <input value={address} placeholder="Enter your address" onChange={e => setAddress(e.target.value)} />
             </label>
             <label>
               Notes
-              <textarea value={notes} onChange={e => setNotes(e.target.value)} />
+              <textarea value={notes} placeholder="Add any optional notes" onChange={e => setNotes(e.target.value)} />
             </label>
             <div>
               <button type="submit" disabled={!selectedSlot || !servicesLoaded}>Book appointment</button>

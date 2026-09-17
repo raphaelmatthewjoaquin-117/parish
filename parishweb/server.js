@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import sql from 'mssql';
 import { Resend } from 'resend';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import multer from 'multer';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -148,6 +151,22 @@ const startTokenCleanupSchedule = (intervalMinutes = 60) => {
 dotenv.config();
 
 const app = express();
+const uploadDirectory = path.resolve('uploads');
+fs.mkdirSync(uploadDirectory, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: uploadDirectory,
+    filename: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase();
+      callback(null, `${randomUUID()}${extension}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    callback(null, file.mimetype.startsWith('image/'));
+  },
+});
 
 // CORS configuration - restrict to frontend origin for security
 const corsOptions = {
@@ -159,6 +178,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use('/uploads', express.static(uploadDirectory));
 
 // Add logging and monitoring middleware
 app.use(requestLoggingMiddleware);
@@ -268,6 +288,29 @@ function requireAdmin(req, res, next) {
   next()
 }
 
+app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
+  upload.single('photo')(req, res, (error) => {
+    if (error instanceof multer.MulterError) {
+      const message = error.code === 'LIMIT_FILE_SIZE'
+        ? 'Photo must be smaller than 5 MB.'
+        : 'Unable to upload the selected photo.';
+      return res.status(400).json({ message });
+    }
+
+    if (error) {
+      return res.status(400).json({ message: 'Only image files can be uploaded.' });
+    }
+
+    next();
+  });
+}, (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'Please select an image file.' });
+  }
+
+  res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
+});
+
 function formatEventDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -347,7 +390,7 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
   const date = req.query.date ? String(req.query.date) : null;
   const startDate = date ? new Date(date) : new Date();
 
-  const slotTimes = ['09:00', '11:00', '14:00', '16:00'];
+  const slotTimes = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
   const daysToShow = 30;
   const requestedDate = new Date(startDate);
 
@@ -498,7 +541,7 @@ app.post('/api/service-requests', async (req, res) => {
       parishionerId = insertResult.recordset[0].ParishionerId;
     }
 
-    // Step 2: Insert the request using the columns available in the current schema.
+    // Step 2: Save the submitted contact details with this booking.
     const insertRequest = await pool.request()
       .input('parishionerId', sql.Int, parishionerId)
       .input('serviceId', sql.Int, numericServiceId)
@@ -512,10 +555,12 @@ app.post('/api/service-requests', async (req, res) => {
       .input('address', sql.VarChar(500), address || null)
       .query(`
       INSERT INTO dbo.ServiceRequest
-        (ParishionerId, ServiceId, RequestDate, ScheduledDate, ScheduledTime, Venue, Status, Notes, CreatedAt)
+        (ParishionerId, ServiceId, RequestDate, ScheduledDate, ScheduledTime, Venue, Status, Notes, CreatedAt,
+         ContactFirstName, ContactLastName, ContactEmail, ContactMobile, ContactAddress)
       OUTPUT INSERTED.ServiceRequestId
       VALUES
-        (@parishionerId, @serviceId, GETDATE(), @scheduledDate, @scheduledTime, N'', N'PendingVerification', @notes, GETDATE())
+        (@parishionerId, @serviceId, GETDATE(), @scheduledDate, @scheduledTime, N'', N'PendingVerification', @notes, GETDATE(),
+         @firstName, @lastName, @email, @mobileNumber, @address)
     `);
 
     const requestId = insertRequest.recordset[0].ServiceRequestId;
@@ -600,6 +645,7 @@ app.get('/api/events', async (_req, res) => {
         const date = formatEventDate(dateValue);
         const time = String(row.EventTime ?? row.Time ?? row.eventTime ?? row.time ?? '').slice(0, 8);
         const location = row.Location ?? row.Venue ?? row.location ?? '';
+        const photoUrl = row.PhotoUrl ?? row.photoUrl ?? '';
 
         if (!date) return null;
 
@@ -610,6 +656,7 @@ app.get('/api/events', async (_req, res) => {
           date,
           time,
           location: String(location),
+          photoUrl: String(photoUrl),
         };
       })
       .filter(Boolean);
@@ -622,7 +669,7 @@ app.get('/api/events', async (_req, res) => {
 });
 
 app.post('/api/events', requireAdmin, async (req, res) => {
-  const { title, detail, date, time, location } = req.body;
+  const { title, detail, date, time, location, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -645,16 +692,17 @@ app.post('/api/events', requireAdmin, async (req, res) => {
       .input('detail', sql.NVarChar(sql.MAX), detail || '')
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
-      .input('location', sql.NVarChar(255), location || '');
+      .input('location', sql.NVarChar(255), location || '')
+      .input('photoUrl', sql.NVarChar(1000), photoUrl || '');
 
     const result = await request.query(`
-      INSERT INTO dbo.Events (Title, Body, EventDate, EventTime, Location)
+      INSERT INTO dbo.Events (Title, Body, EventDate, EventTime, Location, PhotoUrl)
       OUTPUT INSERTED.EventId
-      VALUES (@title, @detail, @date, @time, @location)
+      VALUES (@title, @detail, @date, @time, @location, @photoUrl)
     `);
 
     const eventId = result.recordset[0]?.EventId;
-    res.status(201).json({ id: String(eventId), title, detail, date, time: time || '', location });
+    res.status(201).json({ id: String(eventId), title, detail, date, time: time || '', location, photoUrl: photoUrl || '' });
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ message: 'Unable to create event.' });
@@ -663,7 +711,7 @@ app.post('/api/events', requireAdmin, async (req, res) => {
 
 app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
   const { eventId } = req.params;
-  const { title, detail, date, time, location } = req.body;
+  const { title, detail, date, time, location, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -677,15 +725,16 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
       .input('location', sql.NVarChar(255), location || '')
+      .input('photoUrl', sql.NVarChar(1000), photoUrl || '')
       .input('eventId', sql.Int, eventId);
 
     await request.query(`
       UPDATE dbo.Events
-      SET Title = @title, Body = @detail, EventDate = @date, EventTime = @time, Location = @location
+      SET Title = @title, Body = @detail, EventDate = @date, EventTime = @time, Location = @location, PhotoUrl = @photoUrl
       WHERE EventId = @eventId
     `);
 
-    res.json({ id: String(eventId), title, detail, date, time: time || '', location });
+    res.json({ id: String(eventId), title, detail, date, time: time || '', location, photoUrl: photoUrl || '' });
   } catch (error) {
     console.error('Update event error:', error);
     res.status(500).json({ message: 'Unable to update event.' });
@@ -779,11 +828,11 @@ app.get('/api/admin/service-requests', requireAdmin, async (_req, res) => {
         sr.Status,
         sr.Notes,
         sr.CreatedAt,
-        p.FirstName as FirstName,
-        p.LastName as LastName,
-        p.EmailAddress as EmailAddress,
-        p.MobileNumber as MobileNumber,
-        p.Address as Address,
+        ISNULL(sr.ContactFirstName, p.FirstName) as FirstName,
+        ISNULL(sr.ContactLastName, p.LastName) as LastName,
+        ISNULL(sr.ContactEmail, p.EmailAddress) as EmailAddress,
+        ISNULL(sr.ContactMobile, p.MobileNumber) as MobileNumber,
+        ISNULL(sr.ContactAddress, p.Address) as Address,
         s.Name as ServiceName
       FROM dbo.ServiceRequest sr
       JOIN dbo.Parishioners p ON sr.ParishionerId = p.ParishionerId

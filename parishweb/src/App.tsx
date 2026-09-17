@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage'
 import { NewsPage } from './pages/NewsPage'
 import ServicePage from './pages/ServicePage'
 import { PrayerRequest } from './pages/PrayerRequest'
+import logo from './images/SDP logo.png'
 
 const navItems = [
   { label: 'Home', to: '/' },
@@ -29,6 +30,9 @@ function App() {
       <div className="page-shell">
         <header className="topbar">
           <div className="header-arch">
+            <NavLink className="site-logo" to="/" aria-label="Go to home">
+              <img src={logo} alt="SDP" />
+            </NavLink>
             <button
               className={`hamburger ${mobileMenuOpen ? 'open' : ''}`}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
