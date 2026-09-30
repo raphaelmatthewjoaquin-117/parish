@@ -13,7 +13,7 @@ const CATEGORIES = [
   { value: 'healing', label: '🙏 Healing' },
   { value: 'thanksgiving', label: '🙌 Thanksgiving' },
   { value: 'guidance', label: '🕊️ Guidance' },
-  { value: 'family', label: '👨‍👩‍👧‍👦 Family' },
+  { value: 'family', label: '👨👩👧👦 Family' },
   { value: 'deceased', label: '✝️ Deceased' },
   { value: 'other', label: '📝 Other' },
 ]
@@ -49,11 +49,10 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 export function PrayerWall() {
   const [prayers, setPrayers] = useState<Prayer[]>([])
-  const [filteredPrayers, setFilteredPrayers] = useState<Prayer[]>([])
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [selectedPrayer, setSelectedPrayer] = useState<Prayer | null>(null)
 
   useEffect(() => {
     const fetchPrayers = async () => {
@@ -75,90 +74,118 @@ export function PrayerWall() {
     fetchPrayers()
   }, [])
 
-  useEffect(() => {
-    if (selectedCategory === 'all') {
-      setFilteredPrayers(prayers)
-    } else {
-      setFilteredPrayers(prayers.filter(p => p.category === selectedCategory))
-    }
-  }, [prayers, selectedCategory])
+  const filteredPrayers = selectedCategory === 'all'
+    ? prayers
+    : prayers.filter(prayer => prayer.category === selectedCategory)
 
   return (
-    <div className="prayer-wall">
-      <div className="prayer-wall-header">
-        <h2>Community Prayer Wall</h2>
-        <p className="prayer-wall-subtitle">
-          {filteredPrayers.length} {filteredPrayers.length === 1 ? 'prayer' : 'prayers'}
-        </p>
+    <>
+      <div className="prayer-wall card border-0 shadow-sm p-4">
+        <div className="prayer-wall-header">
+          <h2>Community Prayer Wall</h2>
+          <p className="prayer-wall-subtitle">
+            {filteredPrayers.length} {filteredPrayers.length === 1 ? 'prayer' : 'prayers'}
+          </p>
+        </div>
+
+        <div className="prayer-wall-filters d-flex flex-wrap gap-2 mb-4">
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat.value}
+              className={`filter-btn btn btn-sm ${selectedCategory === cat.value ? 'active btn-dark' : 'btn-outline-dark'}`}
+              onClick={() => setSelectedCategory(cat.value)}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="prayer-wall-content prayer-wall-scrollable">
+          {loading && (
+            <div className="prayer-wall-state">
+              <div className="spinner"></div>
+              <p>Loading prayers...</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="prayer-wall-state error">
+              <p>⚠️ {error}</p>
+            </div>
+          )}
+
+          {!loading && !error && filteredPrayers.length === 0 && (
+            <div className="prayer-wall-state">
+              <p>No prayers yet. Be the first to share your intention.</p>
+            </div>
+          )}
+
+          {!loading && !error && filteredPrayers.length > 0 && (
+            <div className="prayer-cards">
+              {filteredPrayers.map(prayer => (
+                <div
+                  key={prayer.id}
+                  className="prayer-card"
+                  onClick={() => setSelectedPrayer(prayer)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="prayer-card-header">
+                    <span
+                      className="prayer-card-category"
+                      style={{ backgroundColor: getCategoryColor(prayer.category) }}
+                    >
+                      {prayer.category}
+                    </span>
+                    <span className="prayer-card-date">{formatDate(prayer.createdAt)}</span>
+                  </div>
+
+                  <div className="prayer-card-body">
+                    <p className="prayer-card-text">
+                      {truncateText(prayer.request)}
+                    </p>
+                  </div>
+
+                  <div className="prayer-card-footer">
+                    <span className="prayer-card-name">{prayer.name}</span>
+                    <span className="prayer-card-expand">View →</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="prayer-wall-filters">
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat.value}
-            className={`filter-btn ${selectedCategory === cat.value ? 'active' : ''}`}
-            onClick={() => setSelectedCategory(cat.value)}
-          >
-            {cat.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="prayer-wall-content">
-        {loading && (
-          <div className="prayer-wall-state">
-            <div className="spinner"></div>
-            <p>Loading prayers...</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="prayer-wall-state error">
-            <p>⚠️ {error}</p>
-          </div>
-        )}
-
-        {!loading && !error && filteredPrayers.length === 0 && (
-          <div className="prayer-wall-state">
-            <p>No prayers yet. Be the first to share your intention.</p>
-          </div>
-        )}
-
-        {!loading && !error && filteredPrayers.length > 0 && (
-          <div className="prayer-cards">
-            {filteredPrayers.map(prayer => (
-              <div
-                key={prayer.id}
-                className={`prayer-card ${expandedId === prayer.id ? 'expanded' : ''}`}
-                onClick={() => setExpandedId(expandedId === prayer.id ? null : prayer.id)}
-              >
-                <div className="prayer-card-header">
-                  <span
-                    className="prayer-card-category"
-                    style={{ backgroundColor: getCategoryColor(prayer.category) }}
-                  >
-                    {prayer.category}
-                  </span>
-                  <span className="prayer-card-date">{formatDate(prayer.createdAt)}</span>
-                </div>
-
-                <div className="prayer-card-body">
-                  <p className="prayer-card-text">
-                    {expandedId === prayer.id ? prayer.request : truncateText(prayer.request)}
-                  </p>
-                </div>
-
-                <div className="prayer-card-footer">
-                  <span className="prayer-card-name">{prayer.name}</span>
-                  {expandedId !== prayer.id && (
-                    <span className="prayer-card-expand">Read more →</span>
-                  )}
-                </div>
+      {selectedPrayer && (
+        <div className="prayer-modal-overlay" onClick={() => setSelectedPrayer(null)}>
+          <div className="prayer-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="prayer-modal-header">
+              <div>
+                <span
+                  className="prayer-modal-category"
+                  style={{ backgroundColor: getCategoryColor(selectedPrayer.category) }}
+                >
+                  {selectedPrayer.category}
+                </span>
+                <span className="prayer-modal-date">{formatDate(selectedPrayer.createdAt)}</span>
               </div>
-            ))}
+              <button
+                className="prayer-modal-close"
+                onClick={() => setSelectedPrayer(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="prayer-modal-body">
+              <p className="prayer-modal-text">{selectedPrayer.request}</p>
+            </div>
+            <div className="prayer-modal-footer">
+              <span className="prayer-modal-name">— {selectedPrayer.name}</span>
+            </div>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   )
 }

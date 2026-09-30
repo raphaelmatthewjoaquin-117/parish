@@ -1,0 +1,29 @@
+.page-layout {
+	color: #000000;
+}
+
+.text-block {
+	max-width: 720px;
+	font-size: 1.05rem;
+	line-height: 1.8;
+}
+
+.mini-panel > div {
+	display: flex;
+	align-items: baseline;
+	gap: .65rem;
+	border-color: var(--parish-line) !important;
+	border-radius: 6px !important;
+	box-shadow: 0 6px 18px #000000 !important;
+}
+
+.mini-panel strong {
+	color: var(--parish-green);
+	font-family: Georgia, 'Times New Roman', serif;
+	font-size: 1.8rem;
+}
+
+.mini-panel span {
+	color: #6F4E37;
+	font-size: .9rem;
+}

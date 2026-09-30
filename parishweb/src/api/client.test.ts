@@ -3,6 +3,11 @@ import { apiClient, ApiError, isNetworkError, isNotFound, isAuthError } from '..
 
 // Mock fetch
 global.fetch = vi.fn();
+type FetchMock = {
+  mockResolvedValueOnce(value: Partial<Response>): FetchMock;
+  mockRejectedValueOnce(reason: unknown): FetchMock;
+};
+const mockedFetch = vi.mocked(global.fetch) as unknown as FetchMock;
 
 describe('ApiClient', () => {
   beforeEach(() => {
@@ -20,9 +25,9 @@ describe('ApiClient', () => {
         { id: 2, name: 'Marriage', description: 'Marriage service' },
       ];
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockServices,
       });
 
@@ -42,9 +47,9 @@ describe('ApiClient', () => {
         ],
       };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockSlots,
       });
 
@@ -65,9 +70,9 @@ describe('ApiClient', () => {
         verificationLink: 'http://localhost:5000/api/service-requests/verify?token=abc123',
       };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockResponse,
       });
 
@@ -92,9 +97,9 @@ describe('ApiClient', () => {
         { id: 1, status: 'Confirmed', firstName: 'John' },
       ];
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockRequests,
       });
 
@@ -117,9 +122,9 @@ describe('ApiClient', () => {
         { id: '1', title: 'Sunday Mass', date: '2026-09-07' },
       ];
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockEvents,
       });
 
@@ -130,9 +135,9 @@ describe('ApiClient', () => {
     it('should create an event with admin token', async () => {
       const mockEvent = { id: 'new-event', title: 'New Event' };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockEvent,
       });
 
@@ -149,9 +154,9 @@ describe('ApiClient', () => {
     });
 
     it('should delete an event', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ message: 'Deleted' }),
       });
 
@@ -170,9 +175,9 @@ describe('ApiClient', () => {
         { id: 1, name: 'John', request: 'Prayer for healing' },
       ];
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockPrayers,
       });
 
@@ -183,9 +188,9 @@ describe('ApiClient', () => {
     it('should create a prayer', async () => {
       const mockResponse = { id: 1 };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockResponse,
       });
 
@@ -199,9 +204,9 @@ describe('ApiClient', () => {
     });
 
     it('should approve a prayer', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ message: 'Approved' }),
       });
 
@@ -216,10 +221,10 @@ describe('ApiClient', () => {
 
   describe('Error Handling', () => {
     it('should throw ApiError on failed request', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: false,
         status: 404,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ message: 'Not found' }),
       });
 
@@ -227,7 +232,7 @@ describe('ApiClient', () => {
     });
 
     it('should detect network errors', async () => {
-      (global.fetch as any).mockRejectedValueOnce(new TypeError('Network error'));
+      mockedFetch.mockRejectedValueOnce(new TypeError('Network error'));
 
       try {
         await apiClient.services.list();
@@ -238,10 +243,10 @@ describe('ApiClient', () => {
     });
 
     it('should detect 404 errors', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: false,
         status: 404,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ message: 'Not found' }),
       });
 
@@ -253,10 +258,10 @@ describe('ApiClient', () => {
     });
 
     it('should detect auth errors', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: false,
         status: 403,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ message: 'Forbidden' }),
       });
 
@@ -270,10 +275,10 @@ describe('ApiClient', () => {
     it('should include error data in ApiError', async () => {
       const errorData = { message: 'Validation failed', details: 'Invalid email' };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: false,
         status: 400,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => errorData,
       });
 
@@ -290,9 +295,9 @@ describe('ApiClient', () => {
 
   describe('Admin', () => {
     it('should verify admin token', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ status: 'verified' }),
       });
 
@@ -305,9 +310,9 @@ describe('ApiClient', () => {
     it('should check health status', async () => {
       const mockHealth = { status: 'healthy' };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockHealth,
       });
 
@@ -318,9 +323,9 @@ describe('ApiClient', () => {
     it('should get metrics', async () => {
       const mockMetrics = { totalRequests: 1000, uptime: '3600s' };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      mockedFetch.mockResolvedValueOnce({
         ok: true,
-        headers: new Map([['content-type', 'application/json']]),
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockMetrics,
       });
 

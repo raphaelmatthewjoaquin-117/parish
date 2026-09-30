@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage'
 import { NewsPage } from './pages/NewsPage'
 import ServicePage from './pages/ServicePage'
 import { PrayerRequest } from './pages/PrayerRequest'
+import { UnifiedAdminPage } from './pages/UnifiedAdminPage'
 import logo from './images/SDP logo.png'
 
 const navItems = [
@@ -69,6 +70,7 @@ function App() {
             <Route path="/gallery" element={<GalleryPage />} />
             <Route path="/services" element={<ServicePage />} />
             <Route path="/contact" element={<ContactPage />} />
+            <Route path="/admin" element={<UnifiedAdminPage />} />
             <Route path="/admin/events" element={<AdminEventsPage />} />
             <Route path="/prayerRequests" element={<PrayerRequest />} />
           </Routes>
@@ -87,6 +89,7 @@ function App() {
                 <li><a href="/about">About Us</a></li>
                 <li><a href="/contact">Contact</a></li>
                 <li><a href="/prayerRequests">Prayer Requests</a></li>
+                <li><a href="/services#certificate">Certificate Request</a></li>
               </ul>
             </div>
             <div className="footer-section">

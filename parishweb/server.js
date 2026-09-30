@@ -3,10 +3,20 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 import { Resend } from 'resend';
-import { randomUUID } from 'node:crypto';
+import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
+import {
+  servicePolicy,
+  findScheduleConflict,
+  findIntentionConflict,
+  financeTransition,
+  isNoShowEligible,
+  isUnverifiedExpired,
+  ALLOWED_REQUEST_STATUSES,
+  toCsv,
+} from './server-rules.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -65,6 +75,95 @@ const metricsCollector = {
 };
 
 const metricsMiddleware = (_req, _res, next) => next();
+
+function dateOnly(value) {
+  return value.toISOString().slice(0, 10);
+}
+
+function previousCompletedPeriods(now = new Date()) {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const day = today.getUTCDay() || 7;
+  const currentMonday = new Date(today);
+  currentMonday.setUTCDate(today.getUTCDate() - day + 1);
+  const weekStart = new Date(currentMonday);
+  weekStart.setUTCDate(weekStart.getUTCDate() - 7);
+  const weekEnd = new Date(currentMonday);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() - 1);
+  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+  return [
+    { type: 'Weekly', start: dateOnly(weekStart), end: dateOnly(weekEnd) },
+    { type: 'Monthly', start: dateOnly(monthStart), end: dateOnly(monthEnd) },
+  ];
+}
+
+async function generateFinanceSnapshots() {
+  const db = getPool();
+  for (const period of previousCompletedPeriods()) {
+    const totals = await db.request()
+      .input('start', sql.Date, period.start)
+      .input('end', sql.Date, period.end)
+      .query(`SELECT COALESCE(SUM(CASE WHEN EntryType <> 'Expense' THEN Amount ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN EntryType = 'Expense' THEN Amount ELSE 0 END), 0) AS expenses FROM dbo.FinancialEntries WHERE EntryDate BETWEEN @start AND @end AND Status IN ('Approved','Reconciled')`);
+    const row = totals.recordset[0] || { income: 0, expenses: 0 };
+    await db.request()
+      .input('type', sql.VarChar(20), period.type)
+      .input('start', sql.Date, period.start)
+      .input('end', sql.Date, period.end)
+      .input('income', sql.Decimal(14, 2), Number(row.income || 0))
+      .input('expenses', sql.Decimal(14, 2), Number(row.expenses || 0))
+      .input('net', sql.Decimal(14, 2), Number(row.income || 0) - Number(row.expenses || 0))
+      .input('details', sql.NVarChar(sql.MAX), JSON.stringify({ generatedAutomatically: true }))
+      .input('by', sql.NVarChar(256), 'System')
+      .query(`MERGE dbo.FinanceReportSnapshots AS target USING (SELECT @type AS ReportType, @start AS PeriodStart, @end AS PeriodEnd) AS source ON target.ReportType=source.ReportType AND target.PeriodStart=source.PeriodStart AND target.PeriodEnd=source.PeriodEnd WHEN MATCHED THEN UPDATE SET TotalIncome=@income, TotalExpenses=@expenses, NetTotal=@net, Details=@details, GeneratedAt=SYSUTCDATETIME(), GeneratedBy=@by WHEN NOT MATCHED THEN INSERT (ReportType, PeriodStart, PeriodEnd, TotalIncome, TotalExpenses, NetTotal, Details, GeneratedBy) VALUES (@type,@start,@end,@income,@expenses,@net,@details,@by);`);
+  }
+}
+
+function startFinanceReportSchedule(intervalHours = 6) {
+  const run = () => generateFinanceSnapshots().catch(error => logError(error, { context: 'financeReportSchedule' }));
+  run();
+  setInterval(run, intervalHours * 60 * 60 * 1000);
+}
+
+/**
+ * Automatic appointment voiding. Confirmed appointments whose scheduled time
+ * has passed without attendance being marked become no-shows, and stale
+ * unverified bookings expire so their slots are released (the ActiveSlotKey
+ * trigger clears the slot lock for non-active statuses).
+ */
+async function voidNoShowAppointments() {
+  const db = getPool();
+  const now = new Date();
+  const candidates = await db.request().query(`
+    SELECT ServiceRequestId, Status, ScheduledDate, ScheduledTime, AttendanceStatus, CreatedAt
+    FROM dbo.ServiceRequest
+    WHERE Status IN ('Confirmed', 'PendingVerification')
+  `);
+  const normalized = candidates.recordset.map(row => ({
+    id: row.ServiceRequestId,
+    status: row.Status,
+    scheduledDate: row.ScheduledDate,
+    scheduledTime: row.ScheduledTime instanceof Date ? formatTime(row.ScheduledTime) : String(row.ScheduledTime || '00:00').slice(0, 5),
+    attendanceStatus: row.AttendanceStatus,
+    createdAt: row.CreatedAt,
+  }));
+  const noShows = normalized.filter(row => isNoShowEligible(row, now));
+  const expired = normalized.filter(row => isUnverifiedExpired(row, now));
+  for (const row of noShows) {
+    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', AttendanceStatus='NoShow', AttendanceMarkedAt=SYSUTCDATETIME(), VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='Confirmed'`);
+  }
+  for (const row of expired) {
+    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='PendingVerification'`);
+  }
+  if (noShows.length || expired.length) {
+    logger.info('Automatic appointment voiding completed', { noShows: noShows.length, expiredUnverified: expired.length });
+  }
+}
+
+function startNoShowVoidSchedule(intervalMinutes = 60) {
+  const run = () => voidNoShowAppointments().catch(error => logError(error, { context: 'noShowVoidSchedule' }));
+  run();
+  setInterval(run, intervalMinutes * 60 * 1000);
+}
 
 const handleHealthCheck = (_req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
@@ -173,7 +272,7 @@ const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'x-admin-token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token'],
   maxAge: 3600
 };
 app.use(cors(corsOptions));
@@ -271,9 +370,21 @@ function formatTime(date) {
   return date.toISOString().slice(11, 16);
 }
 
+function parseStaffToken(token) {
+  if (!token) return null;
+  if (token === adminSecret) return { userId: null, role: 'Admin', email: null };
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== adminSecret) return null;
+  const userId = Number(parts[1]);
+  const role = String(parts[2] || '');
+  if (!Number.isInteger(userId) || !role) return null;
+  return { userId, role, email: null };
+}
+
 function requireAdmin(req, res, next) {
   const token = String(req.headers['x-admin-token'] ?? '')
-  if (!token || token !== adminSecret) {
+  const staff = parseStaffToken(token);
+  if (!staff) {
     logAuth('failed', {
       endpoint: req.path,
       ip: req.ip,
@@ -281,12 +392,259 @@ function requireAdmin(req, res, next) {
     });
     return res.status(403).json({ message: 'Admin token is required.' })
   }
+  req.staff = staff;
   logAuth('success', {
     endpoint: req.path,
     ip: req.ip
   });
   next()
 }
+
+function requireRole(roles) {
+  return (req, res, next) => {
+    if (!req.staff || (!roles.includes(req.staff.role) && req.staff.role !== 'Admin')) {
+      return res.status(403).json({ message: 'Your staff role does not have permission for this operation.' });
+    }
+    next();
+  };
+}
+
+function verifyAspNetPassword(password, storedHash) {
+  try {
+    const buffer = Buffer.from(String(storedHash || ''), 'base64');
+    if (buffer.length !== 49 || buffer[0] !== 0x01) return false;
+    const salt = buffer.subarray(1, 17);
+    const storedSubkey = buffer.subarray(17, 49);
+    const computedSubkey = pbkdf2Sync(password, salt, 10000, 32, 'sha256');
+    return timingSafeEqual(storedSubkey, computedSubkey);
+  } catch {
+    return false;
+  }
+}
+
+function hashAspNetPassword(password) {
+  const salt = randomBytes(16);
+  const subkey = pbkdf2Sync(password, salt, 10000, 32, 'sha256');
+  return Buffer.concat([Buffer.from([0x01]), salt, subkey]).toString('base64');
+}
+
+// Parishioner portal authentication is not yet implemented; reject until a real session/token check exists.
+async function requirePortal(req, res, next) {
+  const token = String(req.headers['x-portal-token'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return res.status(401).json({ message: 'Portal sign-in is required.' });
+  try {
+    const result = await getPool().request().input('token', sql.VarChar(64), token).query(`SELECT s.AccountId, a.EmailAddress FROM dbo.ParishionerPortalSessions s JOIN dbo.ParishionerAccounts a ON a.AccountId=s.AccountId WHERE s.SessionToken=@token AND s.ExpiresAt>SYSUTCDATETIME() AND a.IsActive=1`);
+    if (!result.recordset[0]) return res.status(401).json({ message: 'Portal session is invalid or expired.' });
+    req.portal = result.recordset[0];
+    next();
+  } catch (error) { logError(error, { context: 'requirePortal' }); res.status(500).json({ message: 'Unable to verify portal session.' }); }
+}
+
+app.post('/api/portal/register', async (req, res) => {
+  const { firstName, lastName, email, mobileNumber, address, password } = req.body || {};
+  if (!firstName || !lastName || !isValidEmail(String(email || '')) || !password || String(password).length < 8) return res.status(400).json({ message: 'Name, valid email, and an eight-character password are required.' });
+  try {
+    const db = getPool(); const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await db.request().input('email', sql.VarChar(255), normalizedEmail).query('SELECT AccountId FROM dbo.ParishionerAccounts WHERE EmailAddress=@email');
+    if (existing.recordset.length) return res.status(409).json({ message: 'An account already exists for this email.' });
+    const parishioner = await db.request().input('first', sql.NVarChar(510), firstName).input('last', sql.NVarChar(510), lastName).input('email', sql.VarChar(255), normalizedEmail).input('mobile', sql.NVarChar(100), mobileNumber || null).input('address', sql.NVarChar(510), address || null).query('INSERT INTO dbo.Parishioners (FirstName, LastName, EmailAddress, MobileNumber, Address) OUTPUT INSERTED.ParishionerId VALUES (@first,@last,@email,@mobile,@address)');
+    await db.request().input('parishionerId', sql.Int, parishioner.recordset[0].ParishionerId).input('email', sql.VarChar(255), normalizedEmail).input('hash', sql.NVarChar(1000), hashAspNetPassword(password)).query('INSERT INTO dbo.ParishionerAccounts (ParishionerId, EmailAddress, PasswordHash) VALUES (@parishionerId,@email,@hash)');
+    res.status(201).json({ message: 'Portal account created.' });
+  } catch (error) { logError(error, { context: 'portalRegister' }); res.status(500).json({ message: 'Unable to create portal account.' }); }
+});
+
+app.post('/api/portal/login', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase(); const password = String(req.body?.password || '');
+  try {
+    const result = await getPool().request().input('email', sql.VarChar(255), email).query('SELECT TOP 1 a.AccountId, a.PasswordHash, a.EmailAddress FROM dbo.ParishionerAccounts a WHERE a.EmailAddress=@email AND a.IsActive=1'); const account = result.recordset[0];
+    if (!account || !verifyAspNetPassword(password, account.PasswordHash)) return res.status(401).json({ message: 'Invalid portal credentials.' });
+    const token = randomBytes(32).toString('hex'); await getPool().request().input('token', sql.VarChar(64), token).input('accountId', sql.Int, account.AccountId).input('expires', sql.DateTime2, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)).query('INSERT INTO dbo.ParishionerPortalSessions (SessionToken, AccountId, ExpiresAt) VALUES (@token,@accountId,@expires)');
+    res.json({ token, email: account.EmailAddress });
+  } catch (error) { logError(error, { context: 'portalLogin' }); res.status(500).json({ message: 'Unable to sign in to the portal.' }); }
+});
+
+app.get('/api/portal/me', requirePortal, async (req, res) => {
+  try { const result = await getPool().request().input('accountId', sql.Int, req.portal.AccountId).query(`SELECT a.AccountId, a.EmailAddress, p.FirstName, p.LastName, p.MobileNumber, p.Address FROM dbo.ParishionerAccounts a JOIN dbo.Parishioners p ON p.ParishionerId=a.ParishionerId WHERE a.AccountId=@accountId`); res.json(result.recordset[0] || {}); } catch (error) { logError(error, { context: 'portalMe' }); res.status(500).json({ message: 'Unable to load portal profile.' }); }
+});
+
+app.get('/api/portal/certificate-requests', requirePortal, async (req, res) => {
+  try { const result = await getPool().request().input('accountId', sql.Int, req.portal.AccountId).query('SELECT CertificateRequestId, CertificateType, PreferredDate, PreferredTime, Status, Notes, CreatedAt, UpdatedAt FROM dbo.CertificateRequests WHERE AccountId=@accountId ORDER BY CreatedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'portalCertificateRequests' }); res.status(500).json({ message: 'Unable to load certificate requests.' }); }
+});
+
+// ── Guest certificate endpoints (no auth required) ──────────────────────────
+
+const VALID_CERT_TYPES = ['Baptism', 'Confirmation', 'Marriage', 'Death'];
+
+// Configure a separate multer instance for certificate documents (PDF + images)
+const certUpload = multer({
+  storage: multer.diskStorage({
+    destination: uploadDirectory,
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf';
+    cb(null, allowed);
+  },
+});
+
+app.post('/api/certificate-requests', async (req, res) => {
+  const { firstName, lastName, email, phone, certificateType, preferredDate, preferredTime, notes } = req.body;
+
+  if (!firstName || !lastName || !isValidEmail(String(email || '')) || !phone) {
+    return res.status(400).json({ message: 'Please provide your name, email, and phone number.' });
+  }
+  if (!VALID_CERT_TYPES.includes(certificateType)) {
+    return res.status(400).json({ message: 'Please select a valid certificate type.' });
+  }
+  if (!isValidDate(preferredDate) || !isFutureDate(preferredDate) || !preferredTime) {
+    return res.status(400).json({ message: 'Please provide a valid future date and time.' });
+  }
+
+  // Generate a 6-char uppercase hex reference code
+  const referenceCode = randomBytes(3).toString('hex').toUpperCase();
+
+  try {
+    const result = await getPool().request()
+      .input('certificateType', sql.VarChar(30), certificateType)
+      .input('preferredDate', sql.Date, preferredDate)
+      .input('preferredTime', sql.VarChar(10), preferredTime)
+      .input('notes', sql.NVarChar(1000), notes ? sanitizeText(notes) : null)
+      .input('firstName', sql.NVarChar(100), sanitizeText(firstName))
+      .input('lastName', sql.NVarChar(100), sanitizeText(lastName))
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .input('phone', sql.VarChar(50), sanitizeText(phone))
+      .input('referenceCode', sql.VarChar(10), referenceCode)
+      .query(`
+        INSERT INTO dbo.CertificateRequests
+          (CertificateType, PreferredDate, PreferredTime, Notes,
+           FirstName, LastName, ContactEmail, ContactPhone, ReferenceCode)
+        OUTPUT INSERTED.CertificateRequestId
+        VALUES
+          (@certificateType, @preferredDate, @preferredTime, @notes,
+           @firstName, @lastName, @email, @phone, @referenceCode)
+      `);
+
+    const requestId = result.recordset[0].CertificateRequestId;
+
+    // Send confirmation email if configured
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Certificate Request Received</h2>
+        <p>Dear ${escapeHtml(firstName)},</p>
+        <p>We have received your request for a <strong>${escapeHtml(certificateType)}</strong> certificate.
+           The parish office will review it and confirm your appointment.</p>
+        <div style="background:#f5f5f5;padding:20px;border-radius:8px;margin:20px 0;">
+          <p><strong>Reference code:</strong> <span style="font-family:monospace;font-size:1.2em;letter-spacing:.1em">${escapeHtml(referenceCode)}</span></p>
+          <p><strong>Preferred date:</strong> ${escapeHtml(preferredDate)} at ${escapeHtml(preferredTime)}</p>
+        </div>
+        <p>Keep your reference code — you can use it to check your request status on the Services page.</p>
+        <p>Best regards,<br>Saint John Parish</p>
+      </div>
+    `;
+    await sendEmail(String(email).trim().toLowerCase(), 'Certificate Request Received', emailHtml);
+
+    res.status(201).json({ requestId, referenceCode });
+  } catch (error) {
+    logError(error, { context: 'createCertificateRequest' });
+    res.status(500).json({ message: 'Unable to submit your certificate request.' });
+  }
+});
+
+app.post('/api/certificate-requests/:id/documents', (req, res, next) => {
+  certUpload.array('documents', 5)(req, res, error => {
+    if (error instanceof multer.MulterError) {
+      const message = error.code === 'LIMIT_FILE_SIZE'
+        ? 'Each file must be smaller than 10 MB.'
+        : 'Unable to upload one or more files.';
+      return res.status(400).json({ message });
+    }
+    if (error) return res.status(400).json({ message: 'Only PDF and image files are accepted.' });
+    next();
+  });
+}, async (req, res) => {
+  const requestId = Number(req.params.id);
+  const referenceCode = String(req.body.referenceCode || '').toUpperCase();
+
+  if (!Number.isInteger(requestId) || requestId <= 0 || !referenceCode) {
+    return res.status(400).json({ message: 'Invalid request.' });
+  }
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ message: 'Please select at least one file.' });
+  }
+
+  try {
+    // Verify ownership by matching requestId + referenceCode
+    const check = await getPool().request()
+      .input('id', sql.Int, requestId)
+      .input('ref', sql.VarChar(10), referenceCode)
+      .query(`SELECT CertificateRequestId FROM dbo.CertificateRequests WHERE CertificateRequestId = @id AND ReferenceCode = @ref`);
+
+    if (check.recordset.length === 0) {
+      return res.status(403).json({ message: 'Reference code does not match this request.' });
+    }
+
+    const db = getPool();
+    for (const file of req.files) {
+      await db.request()
+        .input('requestId', sql.Int, requestId)
+        .input('originalName', sql.NVarChar(255), file.originalname)
+        .input('storedName', sql.NVarChar(255), file.filename)
+        .input('fileUrl', sql.NVarChar(500), `/uploads/${file.filename}`)
+        .input('mimeType', sql.VarChar(100), file.mimetype)
+        .input('fileSize', sql.Int, file.size)
+        .query(`
+          INSERT INTO dbo.CertificateRequestDocuments
+            (CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes)
+          VALUES (@requestId, @originalName, @storedName, @fileUrl, @mimeType, @fileSize)
+        `);
+    }
+
+    res.json({ message: `${req.files.length} document(s) uploaded successfully.` });
+  } catch (error) {
+    logError(error, { context: 'uploadCertificateDocuments' });
+    res.status(500).json({ message: 'Unable to save uploaded documents.' });
+  }
+});
+
+app.get('/api/certificate-requests/lookup', async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  const ref = String(req.query.ref || '').toUpperCase();
+
+  if (!isValidEmail(email) || !ref) {
+    return res.status(400).json({ message: 'Please provide your email and reference code.' });
+  }
+
+  try {
+    const result = await getPool().request()
+      .input('email', sql.VarChar(255), email)
+      .input('ref', sql.VarChar(10), ref)
+      .query(`
+        SELECT CertificateType, PreferredDate, PreferredTime, Status, Notes
+        FROM dbo.CertificateRequests
+        WHERE ContactEmail = @email AND ReferenceCode = @ref
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ message: 'No request found. Check your email and reference code.' });
+    }
+
+    const row = result.recordset[0];
+    res.json({
+      certificateType: row.CertificateType,
+      preferredDate: row.PreferredDate,
+      preferredTime: row.PreferredTime,
+      status: row.Status,
+      notes: row.Notes,
+    });
+  } catch (error) {
+    logError(error, { context: 'lookupCertificateRequest' });
+    res.status(500).json({ message: 'Unable to look up your request.' });
+  }
+});
 
 app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
   upload.single('photo')(req, res, (error) => {
@@ -344,6 +702,17 @@ function isFutureDate(dateStr) {
   return date >= today;
 }
 
+async function getServicePolicy(pool, serviceId, scheduledDate) {
+  const result = await pool.request().input('serviceId', sql.Int, serviceId).query('SELECT Name FROM dbo.Service WHERE ServiceId=@serviceId');
+  const service = result.recordset[0];
+  return { name: service?.Name || '', ...servicePolicy(service?.Name, scheduledDate) };
+}
+
+async function quotaCount(pool, serviceId, scheduledDate) {
+  const result = await pool.request().input('serviceId', sql.Int, serviceId).input('scheduledDate', sql.Date, scheduledDate).query(`SELECT COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND Status IN ('PendingVerification','Confirmed')`);
+  return Number(result.recordset[0]?.total || 0);
+}
+
 function sanitizeText(text) {
   return String(text).trim().slice(0, 500);
 }
@@ -367,6 +736,7 @@ app.get('/api/services', async (_req, res) => {
     const result = await request.query(`
       SELECT ServiceId, Name, Description
       FROM dbo.Service
+      WHERE IsActive = 1
       ORDER BY Name
     `);
 
@@ -395,12 +765,15 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
   const requestedDate = new Date(startDate);
 
   let bookedSet = new Set();
+  let quotaFullDates = new Set();
+  let policy = { name: '' };
   const numericServiceId = Number(serviceId);
   const useServiceId = Number.isInteger(numericServiceId) && String(numericServiceId) === serviceId;
 
   try {
     if (useServiceId) {
       const pool = getPool();
+      policy = await getServicePolicy(pool, numericServiceId, requestedDate.toISOString().slice(0, 10));
       const request = pool.request();
 
       const bookedResult = await request
@@ -411,6 +784,11 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
         WHERE ServiceId = @serviceId
           AND Status IN ('PendingVerification', 'Confirmed')
       `);
+
+      if (policy.quota) {
+        const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','Confirmed') GROUP BY ScheduledDate`);
+        quotaFullDates = new Set(quotaResult.recordset.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
+      }
 
       bookedSet = new Set(bookedResult.recordset.map((row) => {
         const timeText = row.ScheduledTime instanceof Date
@@ -438,24 +816,99 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
           String(slotDate.getMonth() + 1).padStart(2, '0'),
           String(slotDate.getDate()).padStart(2, '0'),
         ].join('-');
+        const policyForDate = servicePolicy(policy.name, isoDate);
         slotTimes.forEach(time => {
           const key = `${isoDate}|${time}`;
-          slots.push({ date: isoDate, time, available: !bookedSet.has(key) });
+          const quotaFull = quotaFullDates.has(isoDate);
+          slots.push({ date: isoDate, time, available: policyForDate.allowed && !quotaFull && !bookedSet.has(key), restricted: !policyForDate.allowed || quotaFull, message: policyForDate.message || (quotaFull ? `Daily booking limit reached for ${policy.quotaLabel}.` : undefined) });
         });
         weekdayCount += 1;
       }
       slotDate.setDate(slotDate.getDate() + 1);
     }
 
-    res.json({ serviceId, slots });
+    const restrictionMessage = slots.find(slot => slot.restricted)?.message;
+    res.json({ serviceId, slots, restrictionMessage });
   } catch (error) {
     console.error('Slot lookup error:', error);
     res.status(500).json({ message: 'Unable to load available slots.' });
   }
 });
 
+// Maps a service name to its typed detail table so sacrament-specific answers can be persisted.
+const SACRAMENT_DETAIL_TABLES = {
+  'Baptism': { table: 'BaptismRequestDetail', columns: ['ChildFirstName', 'ChildMiddleName', 'ChildLastName', 'ChildDateOfBirth', 'PlaceOfBirth', 'FatherFullName', 'MotherFullName', 'GodfatherName', 'GodmotherName'] },
+  'Marriage': { table: 'MarriageRequestDetail', columns: ['GroomFirstName', 'GroomMiddleName', 'GroomLastName', 'GroomAge', 'BrideFirstName', 'BrideMiddleName', 'BrideLastName', 'BrideAge', 'CenomarNumber', 'Witnesses'] },
+  'Confirmation': { table: 'ConfirmationRequestDetail', columns: ['CandidateFirstName', 'CandidateMiddleName', 'CandidateLastName', 'CandidateDateOfBirth', 'SponsorName', 'ParishOfBaptism'] },
+  'Funeral Mass': { table: 'FuneralRequestDetail', columns: ['DeceasedFirstName', 'DeceasedMiddleName', 'DeceasedLastName', 'DateOfDeath', 'RelationshipToDeceased', 'PlaceOfWake'] },
+  'House Blessing': { table: 'HouseBlessingRequestDetail', columns: ['FullAddress', 'Landmark', 'PreferredContactPerson'] },
+};
+
+// Persists the sacrament-specific answers a parishioner submitted, using the matching column when one
+// exists and stashing anything else (including admin-added custom fields) in ExtraFieldsJson.
+async function saveSacramentDetails(pool, serviceName, serviceRequestId, details) {
+  const mapping = SACRAMENT_DETAIL_TABLES[serviceName];
+  if (!mapping || !details || typeof details !== 'object') return;
+
+  const columnByKey = new Map(mapping.columns.map(col => [col.charAt(0).toLowerCase() + col.slice(1), col]));
+  const request = pool.request().input('serviceRequestId', sql.Int, serviceRequestId);
+  const extras = {};
+  const providedColumns = new Set();
+
+  for (const [key, value] of Object.entries(details)) {
+    const column = columnByKey.get(key);
+    if (column) {
+      request.input(`col_${column}`, sql.NVarChar(sql.MAX), value == null ? null : String(value).slice(0, 4000));
+      providedColumns.add(column);
+    } else {
+      extras[key] = value;
+    }
+  }
+
+  // Every mapped column needs an input (even null) so the INSERT's column/value lists line up.
+  for (const col of mapping.columns) {
+    if (!providedColumns.has(col)) request.input(`col_${col}`, sql.NVarChar(sql.MAX), null);
+  }
+
+  request.input('extraFieldsJson', sql.NVarChar(sql.MAX), Object.keys(extras).length ? JSON.stringify(extras) : null);
+  const columnList = mapping.columns.join(', ');
+  const paramList = mapping.columns.map(col => `@col_${col}`).join(', ');
+
+  await request.query(`
+    INSERT INTO dbo.${mapping.table} (ServiceRequestId, ${columnList}, ExtraFieldsJson)
+    VALUES (@serviceRequestId, ${paramList}, @extraFieldsJson)
+  `);
+}
+
+app.get('/api/services/:serviceId/fields', async (req, res) => {
+  const numericServiceId = Number(req.params.serviceId);
+  if (!Number.isInteger(numericServiceId) || numericServiceId <= 0) {
+    return res.status(400).json({ message: 'Invalid service ID.' });
+  }
+  try {
+    const pool = getPool();
+    const result = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`
+      SELECT FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder
+      FROM dbo.ServiceFieldDefinition
+      WHERE ServiceId = @serviceId AND IsActive = 1
+      ORDER BY SortOrder, FieldDefinitionId
+    `);
+    const fields = result.recordset.map(row => ({
+      key: row.FieldKey,
+      label: row.Label,
+      type: row.FieldType,
+      options: row.OptionsJson ? JSON.parse(row.OptionsJson) : undefined,
+      required: !!row.IsRequired,
+    }));
+    res.json({ fields });
+  } catch (error) {
+    console.error('Field definitions lookup error:', error);
+    res.status(500).json({ message: 'Unable to load form fields.' });
+  }
+});
+
 app.post('/api/service-requests', async (req, res) => {
-  const { serviceId, firstName, lastName, email, mobileNumber, address, scheduledDate, scheduledTime, notes } = req.body;
+  const { serviceId, firstName, lastName, email, mobileNumber, address, scheduledDate, scheduledTime, notes, details } = req.body;
 
   if (!serviceId || !firstName || !lastName || !email || !scheduledDate || !scheduledTime) {
     return res.status(400).json({ message: 'Missing required booking fields.' });
@@ -489,6 +942,13 @@ app.post('/api/service-requests', async (req, res) => {
 
   try {
     const pool = getPool();
+    const policy = await getServicePolicy(pool, numericServiceId, scheduledDate);
+    if (!policy.allowed) return res.status(400).json({ message: policy.message });
+    if (policy.quota && await quotaCount(pool, numericServiceId, scheduledDate) >= policy.quota) {
+      return res.status(409).json({ message: `${policy.quotaLabel} bookings are limited to ${policy.quota} per day.` });
+    }
+    const booked = await pool.request().input('serviceId', sql.Int, numericServiceId).input('scheduledDate', sql.Date, scheduledDate).input('scheduledTime', sql.VarChar(10), scheduledTime).query(`SELECT TOP 1 ServiceRequestId FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND ScheduledTime=@scheduledTime AND Status IN ('PendingVerification','Confirmed')`);
+    if (booked.recordset.length) return res.status(409).json({ message: 'That appointment slot is already booked.' });
 
     // Step 1: Check if parishioner exists
     const parishionerLookup = pool.request()
@@ -542,6 +1002,8 @@ app.post('/api/service-requests', async (req, res) => {
     }
 
     // Step 2: Save the submitted contact details with this booking.
+    // OUTPUT ... INTO is required because dbo.ServiceRequest has triggers; SQL Server
+    // forbids OUTPUT without INTO on tables with enabled triggers.
     const insertRequest = await pool.request()
       .input('parishionerId', sql.Int, parishionerId)
       .input('serviceId', sql.Int, numericServiceId)
@@ -554,16 +1016,24 @@ app.post('/api/service-requests', async (req, res) => {
       .input('mobileNumber', sql.VarChar(50), mobileNumber || null)
       .input('address', sql.VarChar(500), address || null)
       .query(`
+      DECLARE @inserted TABLE (ServiceRequestId INT);
       INSERT INTO dbo.ServiceRequest
         (ParishionerId, ServiceId, RequestDate, ScheduledDate, ScheduledTime, Venue, Status, Notes, CreatedAt,
          ContactFirstName, ContactLastName, ContactEmail, ContactMobile, ContactAddress)
-      OUTPUT INSERTED.ServiceRequestId
+      OUTPUT INSERTED.ServiceRequestId INTO @inserted
       VALUES
         (@parishionerId, @serviceId, GETDATE(), @scheduledDate, @scheduledTime, N'', N'PendingVerification', @notes, GETDATE(),
-         @firstName, @lastName, @email, @mobileNumber, @address)
+         @firstName, @lastName, @email, @mobileNumber, @address);
+      SELECT ServiceRequestId FROM @inserted;
     `);
 
     const requestId = insertRequest.recordset[0].ServiceRequestId;
+    try {
+      await saveSacramentDetails(pool, policy.name, requestId, details);
+    } catch (error) {
+      // Keep the appointment usable when an optional detail-table migration is stale.
+      logError(error, { context: 'saveSacramentDetails', requestId, serviceId: numericServiceId });
+    }
     const token = await createVerificationToken(requestId);
 
     const verificationLink = `${req.protocol}://${req.get('host')}/api/service-requests/verify?token=${token}`;
@@ -629,6 +1099,79 @@ app.get('/api/service-requests/verify', async (req, res) => {
   }
 });
 
+const VATICAN_NEWS_RSS_URL = 'https://www.vaticannews.va/en.rss.xml';
+const VATICAN_NEWS_CACHE_TTL_MS = 15 * 60 * 1000;
+let vaticanNewsCache = { data: null, fetchedAt: 0 };
+
+function decodeXmlEntities(text) {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+function extractRssTag(itemXml, tag) {
+  const match = itemXml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
+  if (!match) return '';
+  const raw = match[1].trim();
+  const cdataMatch = raw.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
+  return decodeXmlEntities((cdataMatch ? cdataMatch[1] : raw).trim());
+}
+
+function summarizeRssDescription(description) {
+  return description
+    .replace(/<a[^>]*>\s*Read all\s*<\/a>/i, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function fetchVaticanNews() {
+  const now = Date.now();
+  if (vaticanNewsCache.data && now - vaticanNewsCache.fetchedAt < VATICAN_NEWS_CACHE_TTL_MS) {
+    return vaticanNewsCache.data;
+  }
+
+  const response = await fetch(VATICAN_NEWS_RSS_URL, { signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`Vatican News feed returned status ${response.status}`);
+  const xml = await response.text();
+
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  const news = items.slice(0, 6).map((item, index) => {
+    const title = extractRssTag(item, 'title');
+    const description = extractRssTag(item, 'description');
+    const link = extractRssTag(item, 'link');
+    const pubDate = extractRssTag(item, 'pubDate');
+    const imageMatch = item.match(/<media:content[^>]*url="([^"]+)"/);
+    const parsedDate = pubDate ? new Date(pubDate) : new Date();
+
+    return {
+      id: `vatican-news-${index}`,
+      title,
+      summary: summarizeRssDescription(description),
+      date: Number.isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString(),
+      link,
+      imageUrl: imageMatch ? imageMatch[1] : '',
+    };
+  });
+
+  vaticanNewsCache = { data: news, fetchedAt: now };
+  return news;
+}
+
+app.get('/api/vatican-news', async (_req, res) => {
+  try {
+    const news = await fetchVaticanNews();
+    res.json(news);
+  } catch (error) {
+    logError(error, { context: 'vaticanNewsFeed' });
+    res.status(502).json({ message: 'Unable to load Vatican News right now.' });
+  }
+});
+
 app.get('/api/events', async (_req, res) => {
   try {
     const pool = getPool();
@@ -640,6 +1183,7 @@ app.get('/api/events', async (_req, res) => {
       .map((row, index) => {
         const id = row.EventId ?? row.Id ?? row.ID ?? row.id ?? 'event-' + index;
         const title = row.Title ?? row.Name ?? row.title ?? 'Untitled event';
+        const description = row.Description ?? row.description ?? row.Body ?? row.body ?? '';
         const detail = row.Body ?? row.body ?? row.Detail ?? row.detail ?? '';
         const dateValue = row.EventDate ?? row.Date ?? row.eventDate ?? row.date;
         const date = formatEventDate(dateValue);
@@ -652,6 +1196,7 @@ app.get('/api/events', async (_req, res) => {
         return {
           id: String(id),
           title: String(title),
+          description: String(description),
           detail: String(detail),
           date,
           time,
@@ -669,7 +1214,7 @@ app.get('/api/events', async (_req, res) => {
 });
 
 app.post('/api/events', requireAdmin, async (req, res) => {
-  const { title, detail, date, time, location, photoUrl } = req.body;
+  const { title, description, detail, date, time, location, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -689,6 +1234,7 @@ app.post('/api/events', requireAdmin, async (req, res) => {
     const pool = getPool();
     const request = pool.request()
       .input('title', sql.NVarChar(255), title)
+      .input('description', sql.NVarChar(sql.MAX), description || '')
       .input('detail', sql.NVarChar(sql.MAX), detail || '')
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
@@ -696,13 +1242,13 @@ app.post('/api/events', requireAdmin, async (req, res) => {
       .input('photoUrl', sql.NVarChar(1000), photoUrl || '');
 
     const result = await request.query(`
-      INSERT INTO dbo.Events (Title, Body, EventDate, EventTime, Location, PhotoUrl)
+      INSERT INTO dbo.Events (Title, Description, Body, EventDate, EventTime, Location, PhotoUrl)
       OUTPUT INSERTED.EventId
-      VALUES (@title, @detail, @date, @time, @location, @photoUrl)
+      VALUES (@title, @description, @detail, @date, @time, @location, @photoUrl)
     `);
 
     const eventId = result.recordset[0]?.EventId;
-    res.status(201).json({ id: String(eventId), title, detail, date, time: time || '', location, photoUrl: photoUrl || '' });
+    res.status(201).json({ id: String(eventId), title, description: description || '', detail, date, time: time || '', location, photoUrl: photoUrl || '' });
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ message: 'Unable to create event.' });
@@ -711,7 +1257,7 @@ app.post('/api/events', requireAdmin, async (req, res) => {
 
 app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
   const { eventId } = req.params;
-  const { title, detail, date, time, location, photoUrl } = req.body;
+  const { title, description, detail, date, time, location, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -721,6 +1267,7 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
     const pool = getPool();
     const request = pool.request()
       .input('title', sql.NVarChar(255), title)
+      .input('description', sql.NVarChar(sql.MAX), description || '')
       .input('detail', sql.NVarChar(sql.MAX), detail || '')
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
@@ -730,11 +1277,11 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
 
     await request.query(`
       UPDATE dbo.Events
-      SET Title = @title, Body = @detail, EventDate = @date, EventTime = @time, Location = @location, PhotoUrl = @photoUrl
+      SET Title = @title, Description = @description, Body = @detail, EventDate = @date, EventTime = @time, Location = @location, PhotoUrl = @photoUrl
       WHERE EventId = @eventId
     `);
 
-    res.json({ id: String(eventId), title, detail, date, time: time || '', location, photoUrl: photoUrl || '' });
+    res.json({ id: String(eventId), title, description: description || '', detail, date, time: time || '', location, photoUrl: photoUrl || '' });
   } catch (error) {
     console.error('Update event error:', error);
     res.status(500).json({ message: 'Unable to update event.' });
@@ -760,9 +1307,67 @@ app.delete('/api/events/:eventId', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/login', async (req, res) => {
+  const email = String(req.body?.email || '').trim();
+  const password = String(req.body?.password || '');
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required.' });
+  }
+
+  try {
+    const result = await getPool().request()
+      .input('email', sql.NVarChar(510), email)
+      .query(`
+        SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, r.Name AS RoleName
+        FROM dbo.AspNetUsers u
+        INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
+        INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+        WHERE u.EmailAddress = @email
+      `);
+    const user = result.recordset[0];
+
+    const supportedRoles = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
+    if (!user || !supportedRoles.includes(user.RoleName) || !verifyAspNetPassword(password, user.PasswordHash)) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    return res.json({
+      token: `${adminSecret}.${user.UserId}.${user.RoleName}`,
+      user: { id: user.UserId, email: user.EmailAddress, role: user.RoleName },
+    });
+  } catch (error) {
+    console.error('Admin login error:', error);
+    return res.status(500).json({ message: 'Unable to sign in.' });
+  }
+});
+
 app.get('/api/admin/verify', requireAdmin, (_req, res) => {
-  res.json({ ok: true })
+  res.json({ ok: true, user: { role: _req.staff?.role || 'Admin' } })
 })
+
+app.get('/api/admin/users', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  try { const result = await getPool().request().query(`SELECT u.UserId AS userId, u.EmailAddress AS email, u.EmailAddress AS userName, u.EmailConfirmed AS emailConfirmed, CAST(0 AS bit) AS lockoutEnabled, 0 AS accessFailedCount, COALESCE(r.Name, 'Staff') AS roleName FROM dbo.AspNetUsers u LEFT JOIN dbo.AspNetUserRoles ur ON ur.UserId=u.UserId LEFT JOIN dbo.AspNetRoles r ON r.RoleId=ur.RoleId ORDER BY u.EmailAddress`); const users = result.recordset.reduce((items, row) => { const item = items.find(value => value.userId === row.userId); if (item) item.roles.push(row.roleName); else items.push({ userId: row.userId, userName: row.userName, email: row.email, emailConfirmed: Boolean(row.emailConfirmed), lockoutEnabled: Boolean(row.lockoutEnabled), accessFailedCount: row.accessFailedCount, roles: row.roleName ? [row.roleName] : [] }); return items; }, []); res.json(users); } catch (error) { logError(error, { context: 'adminUsers' }); res.status(500).json({ message: 'Unable to load staff accounts.' }); }
+});
+
+app.get('/api/admin/audit/user-management', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  try { const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100)); const result = await getPool().request().input('limit', sql.Int, limit).query('SELECT TOP (@limit) * FROM dbo.UserManagementAudit ORDER BY ChangedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'userAudit' }); res.status(500).json({ message: 'Unable to load user audit history.' }); }
+});
+
+app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  const { userName, email, password, role } = req.body || {}; const selectedRole = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'].includes(role) ? role : 'Staff';
+  if (!userName || !isValidEmail(String(email || '')) || !password || String(password).length < 8) return res.status(400).json({ message: 'Username, valid email, and an eight-character password are required.' });
+  try { const db = getPool(); const user = await db.request().input('email', sql.NVarChar(510), String(email).trim().toLowerCase()).input('hash', sql.NVarChar(1024), hashAspNetPassword(password)).query('INSERT INTO dbo.AspNetUsers (EmailAddress, EmailConfirmed, PasswordHash) OUTPUT INSERTED.UserId VALUES (@email, 1, @hash)'); const roleRow = await db.request().input('name', sql.NVarChar(510), selectedRole).query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name=@name'); if (!roleRow.recordset[0]) return res.status(500).json({ message: 'Role is not configured in the database.' }); await db.request().input('userId', sql.Int, user.recordset[0].UserId).input('roleId', sql.Int, roleRow.recordset[0].RoleId).query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@userId,@roleId)'); await db.request().input('action', sql.VarChar(40), 'CreateUser').input('target', sql.Int, user.recordset[0].UserId).input('targetName', sql.NVarChar(512), userName).input('by', sql.NVarChar(512), staffName(req)).input('details', sql.NVarChar(sql.MAX), selectedRole).query('INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details) VALUES (@action,@target,@targetName,@by,@details)'); res.status(201).json({ userId: user.recordset[0].UserId }); } catch (error) { logError(error, { context: 'createAdminUser' }); res.status(500).json({ message: 'Unable to create staff account.' }); }
+});
+
+app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  const id = Number(req.params.id); const role = req.body?.role; const password = req.body?.password;
+  try { const db = getPool(); if (password) await db.request().input('id', sql.Int, id).input('hash', sql.NVarChar(1024), hashAspNetPassword(password)).query('UPDATE dbo.AspNetUsers SET PasswordHash=@hash WHERE UserId=@id'); if (role) { const roleRow = await db.request().input('name', sql.NVarChar(510), role).query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name=@name'); await db.request().input('id', sql.Int, id).query('DELETE FROM dbo.AspNetUserRoles WHERE UserId=@id'); await db.request().input('id', sql.Int, id).input('role', sql.Int, roleRow.recordset[0].RoleId).query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@id,@role)'); } await db.request().input('action', sql.VarChar(40), 'UpdateUser').input('target', sql.Int, id).input('by', sql.NVarChar(512), staffName(req)).input('details', sql.NVarChar(sql.MAX), JSON.stringify(req.body || {})).query('INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, ChangedBy, Details) VALUES (@action,@target,@by,@details)'); res.json({ message: 'Staff account updated.' }); } catch (error) { logError(error, { context: 'updateAdminUser' }); res.status(500).json({ message: 'Unable to update staff account.' }); }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (req, res) => { try { const id = Number(req.params.id); await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.AspNetUserRoles WHERE UserId=@id; DELETE FROM dbo.AspNetUsers WHERE UserId=@id'); res.json({ message: 'Staff account deleted.' }); } catch (error) { logError(error, { context: 'deleteAdminUser' }); res.status(500).json({ message: 'Unable to delete staff account.' }); } });
+
+app.post('/api/admin/emergency-override', requireAdmin, requireRole(['Admin']), async (req, res) => { const minutes = Math.min(120, Math.max(1, Number(req.body?.durationMinutes) || 15)); const token = `${adminSecret}.${req.staff?.userId || 0}.Admin`; const expiresAt = new Date(Date.now() + minutes * 60 * 1000); try { await getPool().request().input('event', sql.VarChar(40), 'EmergencyOverride').input('actor', sql.NVarChar(256), staffName(req)).input('target', sql.NVarChar(256), req.body?.targetUserName || null).input('reason', sql.NVarChar(1000), req.body?.reason || null).input('expires', sql.DateTime2, expiresAt).query('INSERT INTO dbo.SecurityAuditLog (EventType, ActorUserName, TargetUserName, Reason, ExpiresAt) VALUES (@event,@actor,@target,@reason,@expires)'); res.json({ token, expiresAt }); } catch (error) { logError(error, { context: 'emergencyOverride' }); res.status(500).json({ message: 'Unable to create emergency override.' }); } });
 
 app.get('/api/admin/prayers', requireAdmin, async (_req, res) => {
   try {
@@ -780,9 +1385,9 @@ app.get('/api/admin/prayers', requireAdmin, async (_req, res) => {
       name: row.Name,
       category: row.Category,
       request: row.Request,
-      anonymous: row.Anonymous === 1,
-      shareWithCommunity: row.ShareWithCommunity === 1,
-      isApproved: row.IsApproved === 1,
+      anonymous: sqlBitToBoolean(row.Anonymous),
+      shareWithCommunity: sqlBitToBoolean(row.ShareWithCommunity),
+      isApproved: sqlBitToBoolean(row.IsApproved),
       createdAt: row.CreatedAt
     }));
 
@@ -828,6 +1433,11 @@ app.get('/api/admin/service-requests', requireAdmin, async (_req, res) => {
         sr.Status,
         sr.Notes,
         sr.CreatedAt,
+        bd.ChildFirstName, bd.ChildMiddleName, bd.ChildLastName, bd.ChildDateOfBirth, bd.PlaceOfBirth, bd.FatherFullName, bd.MotherFullName, bd.GodfatherName, bd.GodmotherName, bd.ExtraFieldsJson AS BaptismExtraFields,
+        md.GroomFirstName, md.GroomMiddleName, md.GroomLastName, md.GroomAge, md.BrideFirstName, md.BrideMiddleName, md.BrideLastName, md.BrideAge, md.CenomarNumber, md.Witnesses, md.ExtraFieldsJson AS MarriageExtraFields,
+        cd.CandidateFirstName, cd.CandidateMiddleName, cd.CandidateLastName, cd.CandidateDateOfBirth, cd.SponsorName, cd.ParishOfBaptism, cd.ExtraFieldsJson AS ConfirmationExtraFields,
+        fd.DeceasedFirstName, fd.DeceasedMiddleName, fd.DeceasedLastName, fd.DateOfDeath, fd.RelationshipToDeceased, fd.PlaceOfWake, fd.ExtraFieldsJson AS FuneralExtraFields,
+        hd.FullAddress AS HouseBlessingFullAddress, hd.Landmark AS HouseBlessingLandmark, hd.PreferredContactPerson AS HouseBlessingPreferredContactPerson, hd.ExtraFieldsJson AS HouseBlessingExtraFields,
         ISNULL(sr.ContactFirstName, p.FirstName) as FirstName,
         ISNULL(sr.ContactLastName, p.LastName) as LastName,
         ISNULL(sr.ContactEmail, p.EmailAddress) as EmailAddress,
@@ -837,25 +1447,80 @@ app.get('/api/admin/service-requests', requireAdmin, async (_req, res) => {
       FROM dbo.ServiceRequest sr
       JOIN dbo.Parishioners p ON sr.ParishionerId = p.ParishionerId
       JOIN dbo.Service s ON sr.ServiceId = s.ServiceId
+      LEFT JOIN dbo.BaptismRequestDetail bd ON sr.ServiceRequestId = bd.ServiceRequestId
+      LEFT JOIN dbo.MarriageRequestDetail md ON sr.ServiceRequestId = md.ServiceRequestId
+      LEFT JOIN dbo.ConfirmationRequestDetail cd ON sr.ServiceRequestId = cd.ServiceRequestId
+      LEFT JOIN dbo.FuneralRequestDetail fd ON sr.ServiceRequestId = fd.ServiceRequestId
+      LEFT JOIN dbo.HouseBlessingRequestDetail hd ON sr.ServiceRequestId = hd.ServiceRequestId
       ORDER BY sr.CreatedAt DESC
     `);
 
-    const requests = result.recordset.map(row => ({
-      id: row.ServiceRequestId,
-      parishionerId: row.ParishionerId,
-      serviceId: row.ServiceId,
-      firstName: row.FirstName,
-      lastName: row.LastName,
-      email: row.EmailAddress,
-      mobileNumber: row.MobileNumber,
-      address: row.Address,
-      serviceName: row.ServiceName,
-      scheduledDate: row.ScheduledDate,
-      scheduledTime: row.ScheduledTime,
-      status: row.Status,
-      notes: row.Notes,
-      createdAt: row.CreatedAt
-    }));
+    const requests = result.recordset.map(row => {
+      const details = Object.fromEntries(Object.entries({
+        childFirstName: row.ChildFirstName,
+        childMiddleName: row.ChildMiddleName,
+        childLastName: row.ChildLastName,
+        childDateOfBirth: row.ChildDateOfBirth,
+        placeOfBirth: row.PlaceOfBirth,
+        fatherFullName: row.FatherFullName,
+        motherFullName: row.MotherFullName,
+        godfatherName: row.GodfatherName,
+        godmotherName: row.GodmotherName,
+        groomFirstName: row.GroomFirstName,
+        groomMiddleName: row.GroomMiddleName,
+        groomLastName: row.GroomLastName,
+        groomAge: row.GroomAge,
+        brideFirstName: row.BrideFirstName,
+        brideMiddleName: row.BrideMiddleName,
+        brideLastName: row.BrideLastName,
+        brideAge: row.BrideAge,
+        cenomarNumber: row.CenomarNumber,
+        witnesses: row.Witnesses,
+        candidateFirstName: row.CandidateFirstName,
+        candidateMiddleName: row.CandidateMiddleName,
+        candidateLastName: row.CandidateLastName,
+        candidateDateOfBirth: row.CandidateDateOfBirth,
+        sponsorName: row.SponsorName,
+        parishOfBaptism: row.ParishOfBaptism,
+        deceasedFirstName: row.DeceasedFirstName,
+        deceasedMiddleName: row.DeceasedMiddleName,
+        deceasedLastName: row.DeceasedLastName,
+        dateOfDeath: row.DateOfDeath,
+        relationshipToDeceased: row.RelationshipToDeceased,
+        placeOfWake: row.PlaceOfWake,
+        fullAddress: row.HouseBlessingFullAddress,
+        landmark: row.HouseBlessingLandmark,
+        preferredContactPerson: row.HouseBlessingPreferredContactPerson,
+      }).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+
+      for (const extraJson of [row.BaptismExtraFields, row.MarriageExtraFields, row.ConfirmationExtraFields, row.FuneralExtraFields, row.HouseBlessingExtraFields]) {
+        if (extraJson) {
+          try {
+            Object.assign(details, JSON.parse(extraJson));
+          } catch {
+            // Keep the request visible if legacy detail JSON is malformed.
+          }
+        }
+      }
+
+      return {
+        id: row.ServiceRequestId,
+        parishionerId: row.ParishionerId,
+        serviceId: row.ServiceId,
+        firstName: row.FirstName,
+        lastName: row.LastName,
+        email: row.EmailAddress,
+        mobileNumber: row.MobileNumber,
+        address: row.Address,
+        serviceName: row.ServiceName,
+        scheduledDate: row.ScheduledDate,
+        scheduledTime: row.ScheduledTime,
+        status: row.Status,
+        notes: row.Notes,
+        createdAt: row.CreatedAt,
+        details,
+      };
+    });
 
     res.json(requests);
   } catch (error) {
@@ -864,31 +1529,133 @@ app.get('/api/admin/service-requests', requireAdmin, async (_req, res) => {
   }
 });
 
+app.get('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT f.FieldDefinitionId, f.ServiceId, s.Name AS ServiceName, f.FieldKey, f.Label, f.FieldType, f.OptionsJson, f.IsRequired, f.SortOrder, f.IsActive
+      FROM dbo.ServiceFieldDefinition f
+      JOIN dbo.Service s ON s.ServiceId = f.ServiceId
+      ORDER BY s.Name, f.SortOrder, f.FieldDefinitionId
+    `);
+    res.json(result.recordset.map(row => ({
+      id: row.FieldDefinitionId,
+      serviceId: row.ServiceId,
+      serviceName: row.ServiceName,
+      key: row.FieldKey,
+      label: row.Label,
+      type: row.FieldType,
+      options: row.OptionsJson ? JSON.parse(row.OptionsJson) : undefined,
+      required: !!row.IsRequired,
+      sortOrder: row.SortOrder,
+      active: !!row.IsActive,
+    })));
+  } catch (error) {
+    console.error('Service field definitions lookup error:', error);
+    res.status(500).json({ message: 'Unable to load field definitions.' });
+  }
+});
+
+app.post('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const { serviceId, key, label, type, options, required, sortOrder } = req.body;
+  const numericServiceId = Number(serviceId);
+  if (!Number.isInteger(numericServiceId) || numericServiceId <= 0 || !key || !label) {
+    return res.status(400).json({ message: 'Service, field key, and label are required.' });
+  }
+  try {
+    const result = await getPool().request()
+      .input('serviceId', sql.Int, numericServiceId)
+      .input('key', sql.VarChar(100), String(key))
+      .input('label', sql.NVarChar(200), String(label))
+      .input('type', sql.VarChar(20), String(type || 'text'))
+      .input('options', sql.NVarChar(sql.MAX), Array.isArray(options) ? JSON.stringify(options) : null)
+      .input('required', sql.Bit, !!required)
+      .input('sortOrder', sql.Int, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0)
+      .query(`
+        INSERT INTO dbo.ServiceFieldDefinition (ServiceId, FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder)
+        OUTPUT INSERTED.FieldDefinitionId
+        VALUES (@serviceId, @key, @label, @type, @options, @required, @sortOrder)
+      `);
+    res.status(201).json({ id: result.recordset[0].FieldDefinitionId });
+  } catch (error) {
+    console.error('Field definition create error:', error);
+    res.status(500).json({ message: 'Unable to create field definition. The field key may already exist for this service.' });
+  }
+});
+
+app.put('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { label, type, options, required, sortOrder, active } = req.body;
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid field definition ID.' });
+  }
+  try {
+    await getPool().request()
+      .input('id', sql.Int, id)
+      .input('label', sql.NVarChar(200), String(label))
+      .input('type', sql.VarChar(20), String(type || 'text'))
+      .input('options', sql.NVarChar(sql.MAX), Array.isArray(options) ? JSON.stringify(options) : null)
+      .input('required', sql.Bit, !!required)
+      .input('sortOrder', sql.Int, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0)
+      .input('active', sql.Bit, active === undefined ? true : !!active)
+      .query(`
+        UPDATE dbo.ServiceFieldDefinition
+        SET Label = @label, FieldType = @type, OptionsJson = @options, IsRequired = @required, SortOrder = @sortOrder, IsActive = @active
+        WHERE FieldDefinitionId = @id
+      `);
+    res.json({ message: 'Field definition updated.' });
+  } catch (error) {
+    console.error('Field definition update error:', error);
+    res.status(500).json({ message: 'Unable to update field definition.' });
+  }
+});
+
+app.delete('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid field definition ID.' });
+  }
+  try {
+    await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.ServiceFieldDefinition WHERE FieldDefinitionId=@id');
+    res.json({ message: 'Field definition deleted.' });
+  } catch (error) {
+    console.error('Field definition delete error:', error);
+    res.status(500).json({ message: 'Unable to delete field definition.' });
+  }
+});
+
 app.put('/api/admin/service-requests/:requestId', requireAdmin, async (req, res) => {
-  const { requestId } = req.params;
+  const requestId = Number(req.params.requestId);
   const { status, adminNotes } = req.body;
 
-  if (!status) {
-    return res.status(400).json({ message: 'Status is required.' });
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ message: 'Invalid service request ID.' });
+  }
+  if (!status || !ALLOWED_REQUEST_STATUSES.includes(String(status))) {
+    return res.status(400).json({ message: `Status must be one of: ${ALLOWED_REQUEST_STATUSES.join(', ')}.` });
   }
 
   try {
     const pool = getPool();
-    const request = pool.request();
+    const request = pool.request()
+      .input('requestId', sql.Int, requestId)
+      .input('status', sql.NVarChar(200), String(status));
 
     if (adminNotes) {
       const timestamp = new Date().toISOString();
-      const adminNoteText = '\n\n[ADMIN NOTE] ' + timestamp + ': ' + adminNotes;
+      request.input('adminNote', sql.NVarChar(sql.MAX), '\n\n[ADMIN NOTE] ' + timestamp + ': ' + String(adminNotes));
       await request.query(`
         UPDATE dbo.ServiceRequest
-        SET Status = N'${status}', Notes = CONCAT(Notes, N'${adminNoteText.replace(/'/g, "''")}')
-        WHERE ServiceRequestId = ${requestId}
+        SET Status = @status,
+            Notes = CONCAT(ISNULL(Notes, N''), @adminNote),
+            VoidedAt = CASE WHEN @status IN ('Voided','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+        WHERE ServiceRequestId = @requestId
       `);
     } else {
       await request.query(`
         UPDATE dbo.ServiceRequest
-        SET Status = N'${status}'
-        WHERE ServiceRequestId = ${requestId}
+        SET Status = @status,
+            VoidedAt = CASE WHEN @status IN ('Voided','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+        WHERE ServiceRequestId = @requestId
       `);
     }
 
@@ -920,6 +1687,360 @@ app.delete('/api/admin/service-requests/:requestId', requireAdmin, async (req, r
     console.error('Delete service request error:', error);
     res.status(500).json({ message: 'Unable to delete service request.' });
   }
+});
+
+const sacramentalDefinitions = {
+  baptism: { table: 'BaptismRecords', id: 'BaptismId', date: 'DateOfBaptism', name: "CONCAT(ChildFirstName, ' ', ChildLastName)", priest: 'MinisterName', columns: ['RegistryNumber', 'ChildFirstName', 'ChildMiddleName', 'ChildLastName', 'DateOfBirth', 'PlaceOfBirth', 'DateOfBaptism', 'FatherFullName', 'MotherFullName', 'MinisterName', 'Sponsors', 'Remarks'] },
+  confirmation: { table: 'ConfirmationRecords', id: 'ConfirmationId', date: 'DateOfConfirmation', name: "CONCAT(CandidateFirstName, ' ', CandidateLastName)", priest: 'BishopOrMinister', columns: ['RegistryNumber', 'CandidateFirstName', 'CandidateMiddleName', 'CandidateLastName', 'DateOfBirth', 'DateOfConfirmation', 'FatherFullName', 'MotherFullName', 'SponsorName', 'BishopOrMinister', 'ParishOfBaptism'] },
+  marriage: { table: 'MarriageRecords', id: 'MarriageId', date: 'DateOfMarriage', name: "CONCAT(GroomFirstName, ' ', GroomLastName, ' / ', BrideFirstName, ' ', BrideLastName)", priest: 'SolemnizingPriest', columns: ['RegistryNumber', 'GroomFirstName', 'GroomMiddleName', 'GroomLastName', 'GroomAge', 'GroomParents', 'BrideFirstName', 'BrideMiddleName', 'BrideLastName', 'BrideAge', 'BrideParents', 'DateOfMarriage', 'Witnesses', 'SolemnizingPriest'] },
+  death: { table: 'DeathRecords', id: 'DeathId', date: 'DateOfDeath', name: "CONCAT(DeceasedFirstName, ' ', DeceasedLastName)", priest: 'OfficiatingPriest', columns: ['RegistryNumber', 'DeceasedFirstName', 'DeceasedMiddleName', 'DeceasedLastName', 'Age', 'DateOfDeath', 'DateOfBurial', 'CauseOfDeath', 'PlaceOfBurial', 'SacramentsReceived', 'OfficiatingPriest'] },
+};
+
+const staffName = req => req.staff?.email || req.staff?.role || 'staff';
+const requestValue = (body, key) => body[key] ?? body[key.charAt(0).toLowerCase() + key.slice(1)] ?? null;
+const sqlBitToBoolean = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', ''].includes(normalized)) return false;
+  }
+  return Boolean(value);
+};
+
+app.get('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`SELECT MassScheduleId AS id, Title AS title, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Notes AS notes, Status AS status FROM dbo.MassSchedule ORDER BY MassDate, MassTime`);
+    res.json(result.recordset);
+  } catch (error) { logError(error, { context: 'operationSchedule' }); res.status(500).json({ message: 'Unable to load schedules.' }); }
+});
+
+app.post('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const { title, date, time, location, priestUsername, notes, status } = req.body || {};
+  if (!title || !date || !time || !location || !priestUsername) return res.status(400).json({ message: 'Schedule title, date, time, location, and minister are required.' });
+  try {
+    const pool = getPool();
+    const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query(`SELECT MassScheduleId AS id, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Status AS status FROM dbo.MassSchedule WHERE MassDate=@date AND MassTime=@time`);
+    const conflict = findScheduleConflict({ date, time, location, priestUsername }, clash.recordset);
+    if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+    const result = await pool.request().input('title', sql.NVarChar(400), title).input('date', sql.Date, date).input('time', sql.VarChar(10), time).input('location', sql.NVarChar(510), location).input('priest', sql.VarChar(256), priestUsername).input('notes', sql.NVarChar(2000), notes || null).input('status', sql.VarChar(30), status || 'Scheduled').query(`INSERT INTO dbo.MassSchedule (Title, MassDate, MassTime, Location, PriestUsername, Notes, Status) OUTPUT INSERTED.MassScheduleId AS id VALUES (@title, @date, @time, @location, @priest, @notes, @status)`);
+    res.status(201).json(result.recordset[0]);
+  } catch (error) { logError(error, { context: 'createSchedule' }); res.status(500).json({ message: 'Unable to save schedule.' }); }
+});
+
+app.put('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const { title, date, time, location, priestUsername, notes, status } = req.body || {};
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid schedule ID.' });
+  try {
+    const pool = getPool();
+    const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query(`SELECT MassScheduleId AS id, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Status AS status FROM dbo.MassSchedule WHERE MassDate=@date AND MassTime=@time`);
+    const conflict = findScheduleConflict({ date, time, location, priestUsername, excludeId: id }, clash.recordset);
+    if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+    await pool.request().input('id', sql.Int, id).input('title', sql.NVarChar(400), title).input('date', sql.Date, date).input('time', sql.VarChar(10), time).input('location', sql.NVarChar(510), location).input('priest', sql.VarChar(256), priestUsername).input('notes', sql.NVarChar(2000), notes || null).input('status', sql.VarChar(30), status || 'Scheduled').query(`UPDATE dbo.MassSchedule SET Title=@title, MassDate=@date, MassTime=@time, Location=@location, PriestUsername=@priest, Notes=@notes, Status=@status, UpdatedAt=SYSUTCDATETIME() WHERE MassScheduleId=@id`);
+    res.json({ message: 'Schedule updated.' });
+  } catch (error) { logError(error, { context: 'updateSchedule' }); res.status(500).json({ message: 'Unable to update schedule.' }); }
+});
+
+app.delete('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid schedule ID.' });
+  try {
+    const result = await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.MassSchedule WHERE MassScheduleId=@id');
+    if (!result.rowsAffected[0]) return res.status(404).json({ message: 'Schedule not found.' });
+    res.json({ message: 'Schedule deleted.' });
+  } catch (error) { logError(error, { context: 'deleteSchedule' }); res.status(500).json({ message: 'Unable to delete schedule.' }); }
+});
+
+app.get('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
+  try { const result = await getPool().request().query('SELECT * FROM dbo.MassIntentions ORDER BY IntentionDate, IntentionTime'); res.json(result.recordset); } catch (error) { logError(error, { context: 'massIntentions' }); res.status(500).json({ message: 'Unable to load Mass intentions.' }); }
+});
+
+app.post('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const { date, time, offering, requestedBy, intentionText } = req.body || {};
+  if (!date || !time || !requestedBy || !intentionText) return res.status(400).json({ message: 'Mass intention date, time, requester, and intention are required.' });
+  try {
+    const pool = getPool();
+    const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query('SELECT MassIntentionId AS id, IntentionDate AS date, IntentionTime AS time, Status AS status FROM dbo.MassIntentions WHERE IntentionDate=@date AND IntentionTime=@time');
+    const conflict = findIntentionConflict({ date, time }, clash.recordset);
+    if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+    const result = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).input('offering', sql.Decimal(12, 2), Number(offering || 0)).input('requestedBy', sql.NVarChar(200), requestedBy).input('text', sql.NVarChar(1000), intentionText).input('createdBy', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.MassIntentions (IntentionDate, IntentionTime, Offering, RequestedBy, IntentionText, CreatedBy) OUTPUT INSERTED.MassIntentionId VALUES (@date,@time,@offering,@requestedBy,@text,@createdBy)`); res.status(201).json(result.recordset[0]);
+  } catch (error) { logError(error, { context: 'createMassIntention' }); res.status(500).json({ message: 'Unable to save Mass intention.' }); }
+});
+
+app.put('/api/admin/operations/mass-intentions/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const id = Number(req.params.id);
+  const status = String(req.body?.status || '');
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid Mass intention ID.' });
+  if (!['Scheduled', 'Completed', 'Cancelled'].includes(status)) return res.status(400).json({ message: 'Invalid intention status.' });
+  try { await getPool().request().input('id', sql.Int, id).input('status', sql.VarChar(30), status).query('UPDATE dbo.MassIntentions SET Status=@status, UpdatedAt=SYSUTCDATETIME() WHERE MassIntentionId=@id'); res.json({ message: 'Mass intention updated.' }); } catch (error) { logError(error, { context: 'updateMassIntention' }); res.status(500).json({ message: 'Unable to update Mass intention.' }); }
+});
+
+app.get('/api/admin/operations/finance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (_req, res) => {
+  try { const result = await getPool().request().query('SELECT TOP 200 * FROM dbo.FinancialEntries ORDER BY EntryDate DESC, FinancialEntryId DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeEntries' }); res.status(500).json({ message: 'Unable to load financial entries.' }); }
+});
+
+app.post('/api/admin/operations/finance', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+  const { date, entryType, description, amount } = req.body || {};
+  if (!date || !entryType || !description || Number(amount) <= 0) return res.status(400).json({ message: 'A valid finance date, type, description, and amount are required.' });
+  try { const result = await getPool().request().input('date', sql.Date, date).input('type', sql.VarChar(30), entryType).input('description', sql.NVarChar(500), description).input('amount', sql.Decimal(12, 2), Number(amount)).input('enteredBy', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.FinancialEntries (EntryDate, EntryType, Description, Amount, EnteredBy) OUTPUT INSERTED.FinancialEntryId VALUES (@date,@type,@description,@amount,@enteredBy)`); res.status(201).json(result.recordset[0]); } catch (error) { logError(error, { context: 'createFinanceEntry' }); res.status(500).json({ message: 'Unable to save financial entry.' }); }
+});
+
+app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+  const id = Number(req.params.id); const { date, entryType, description, amount } = req.body || {};
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid financial entry.' });
+  try {
+    const pool = getPool();
+    const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    if (!current.recordset[0]) return res.status(404).json({ message: 'Financial entry not found.' });
+    const status = current.recordset[0].Status || 'Draft';
+    const next = financeTransition(status, 'edit');
+    if (!next) return res.status(409).json({ message: `Entries with status '${status}' cannot be edited.` });
+    if (!date || !entryType || !description || Number(amount) <= 0) return res.status(400).json({ message: 'A valid finance date, type, description, and amount are required.' });
+    await pool.request().input('id', sql.Int, id).input('date', sql.Date, date).input('type', sql.VarChar(30), entryType).input('description', sql.NVarChar(500), description).input('amount', sql.Decimal(12, 2), Number(amount)).input('status', sql.VarChar(30), next).query('UPDATE dbo.FinancialEntries SET EntryDate=@date, EntryType=@type, Description=@description, Amount=@amount, Status=@status, UpdatedAt=SYSUTCDATETIME() WHERE FinancialEntryId=@id');
+    await pool.request().input('id', sql.Int, id).input('by', sql.NVarChar(256), staffName(req)).input('details', sql.NVarChar(sql.MAX), JSON.stringify({ date, entryType, description, amount })).query(`INSERT INTO dbo.FinancialEntryAudit (FinancialEntryId, ActionName, ChangedBy, Details) VALUES (@id,'Edit',@by,@details)`);
+    res.json({ message: `Entry updated (status: ${next}).` });
+  } catch (error) { logError(error, { context: 'editFinanceEntry' }); res.status(500).json({ message: 'Unable to update financial entry.' }); }
+});
+
+app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid financial entry.' });
+  try {
+    const pool = getPool();
+    const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    if (!current.recordset[0]) return res.status(404).json({ message: 'Financial entry not found.' });
+    if (financeTransition(current.recordset[0].Status || 'Draft', 'delete') !== 'Deleted') return res.status(409).json({ message: `Entries with status '${current.recordset[0].Status}' cannot be deleted.` });
+    await pool.request().input('id', sql.Int, id).query('DELETE FROM dbo.FinancialEntryAudit WHERE FinancialEntryId=@id; DELETE FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    res.json({ message: 'Draft entry deleted.' });
+  } catch (error) { logError(error, { context: 'deleteFinanceEntry' }); res.status(500).json({ message: 'Unable to delete financial entry.' }); }
+});
+
+async function changeFinanceStatus(req, res, status) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ message: 'Invalid financial entry.' });
+  const action = status === 'Approved' ? 'approve' : status === 'Reconciled' ? 'reconcile' : String(status).toLowerCase();
+  try {
+    const pool = getPool();
+    const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    if (!current.recordset[0]) return res.status(404).json({ message: 'Financial entry not found.' });
+    const existing = current.recordset[0].Status || 'Draft';
+    const next = financeTransition(existing, action);
+    if (next !== status) return res.status(409).json({ message: `Cannot move a '${existing}' entry to '${status}'. Follow the Draft, Submitted, Approved, Reconciled workflow.` });
+    const fields = status === 'Approved' ? 'Status=@status, ApprovedBy=@by, ApprovedAt=SYSUTCDATETIME()' : status === 'Reconciled' ? 'Status=@status, ReconciledBy=@by, ReconciledAt=SYSUTCDATETIME()' : 'Status=@status';
+    await pool.request().input('id', sql.Int, id).input('status', sql.VarChar(30), status).input('by', sql.NVarChar(256), staffName(req)).query(`UPDATE dbo.FinancialEntries SET ${fields}, UpdatedAt=SYSUTCDATETIME() WHERE FinancialEntryId=@id`);
+    await pool.request().input('id', sql.Int, id).input('action', sql.VarChar(30), status).input('by', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.FinancialEntryAudit (FinancialEntryId, ActionName, ChangedBy, Details) VALUES (@id,@action,@by,@action)`);
+    res.json({ message: `Entry ${status.toLowerCase()}.` });
+  } catch (error) { logError(error, { context: `finance${status}` }); res.status(500).json({ message: 'Unable to update financial entry.' }); }
+}
+app.post('/api/admin/operations/finance/:id/submit', requireAdmin, requireRole(['Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Submitted'));
+app.post('/api/admin/operations/finance/:id/reject', requireAdmin, requireRole(['ParishPriest', 'Secretary']), (req, res) => changeFinanceStatus(req, res, 'Rejected'));
+app.post('/api/admin/operations/finance/:id/approve', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Approved'));
+app.post('/api/admin/operations/finance/:id/reconcile', requireAdmin, requireRole(['Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Reconciled'));
+
+app.get('/api/admin/operations/finance/report', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
+  const { start, end, type, format } = req.query || {};
+  try {
+    const request = getPool().request();
+    let where = `Status IN ('Approved','Reconciled')`;
+    if (start && isValidDate(String(start))) { request.input('start', sql.Date, String(start)); where += ' AND EntryDate >= @start'; }
+    if (end && isValidDate(String(end))) { request.input('end', sql.Date, String(end)); where += ' AND EntryDate <= @end'; }
+    if (type) { request.input('type', sql.VarChar(30), String(type)); where += ' AND EntryType = @type'; }
+    const result = await request.query(`SELECT EntryType, COUNT(*) AS EntryCount, SUM(Amount) AS Total FROM dbo.FinancialEntries WHERE ${where} GROUP BY EntryType ORDER BY EntryType`);
+    if (String(format || '').toLowerCase() === 'csv') {
+      const csv = toCsv(result.recordset, [{ key: 'EntryType', label: 'Category' }, { key: 'EntryCount', label: 'Entries' }, { key: 'Total', label: 'Total' }]);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="finance-report.csv"');
+      return res.send(csv);
+    }
+    res.json({ totals: result.recordset, filters: { start: start || null, end: end || null, type: type || null } });
+  } catch (error) { logError(error, { context: 'financeReport' }); res.status(500).json({ message: 'Unable to generate finance report.' }); }
+});
+
+app.get('/api/admin/operations/finance/audit', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (_req, res) => {
+  try { const result = await getPool().request().query(`SELECT TOP 200 a.*, f.EntryType, f.Description FROM dbo.FinancialEntryAudit a JOIN dbo.FinancialEntries f ON f.FinancialEntryId=a.FinancialEntryId ORDER BY a.ChangedAt DESC`); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeAudit' }); res.status(500).json({ message: 'Unable to load finance audit history.' }); }
+});
+
+app.get('/api/admin/operations/finance/reports', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (_req, res) => {
+  try { const result = await getPool().request().query('SELECT TOP 100 * FROM dbo.FinanceReportSnapshots ORDER BY GeneratedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeReportHistory' }); res.status(500).json({ message: 'Unable to load finance report history.' }); }
+});
+
+app.get('/api/admin/operations/applications/:id/history', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  try { const result = await getPool().request().input('id', sql.Int, Number(req.params.id)).query('SELECT * FROM dbo.ApplicationEditLog WHERE ServiceRequestId=@id ORDER BY ChangedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'applicationHistory' }); res.status(500).json({ message: 'Unable to load application history.' }); }
+});
+
+app.put('/api/admin/operations/applications/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const id = Number(req.params.id); const body = req.body || {};
+  try {
+    const db = getPool();
+    await db.request().input('id', sql.Int, id).input('first', sql.NVarChar(200), body.firstName).input('last', sql.NVarChar(200), body.lastName).input('email', sql.VarChar(510), body.email).input('phone', sql.VarChar(40), body.mobileNumber || null).input('address', sql.NVarChar(1000), body.address || null).input('date', sql.Date, body.scheduledDate).input('time', sql.VarChar(10), body.scheduledTime).input('notes', sql.NVarChar(sql.MAX), body.notes || null).query(`UPDATE dbo.ServiceRequest SET ContactFirstName=@first, ContactLastName=@last, ContactEmail=@email, ContactMobile=@phone, ContactAddress=@address, ScheduledDate=@date, ScheduledTime=@time, Notes=@notes WHERE ServiceRequestId=@id`);
+    await db.request().input('id', sql.Int, id).input('by', sql.NVarChar(256), staffName(req)).input('changes', sql.NVarChar(sql.MAX), JSON.stringify(body)).query('INSERT INTO dbo.ApplicationEditLog (ServiceRequestId, ChangedBy, Changes) VALUES (@id,@by,@changes)');
+    res.json({ message: 'Application updated.' });
+  } catch (error) { logError(error, { context: 'updateApplication' }); res.status(500).json({ message: 'Unable to update application.' }); }
+});
+
+app.post('/api/admin/operations/applications/:id/attendance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const attendanceStatus = String(req.body?.attendanceStatus || '');
+  if (!['Present', 'NoShow'].includes(attendanceStatus)) return res.status(400).json({ message: 'Attendance must be Present or NoShow.' });
+  try { await getPool().request().input('id', sql.Int, Number(req.params.id)).input('attendance', sql.VarChar(30), attendanceStatus).query(`UPDATE dbo.ServiceRequest SET AttendanceStatus=@attendance, AttendanceMarkedAt=SYSUTCDATETIME(), Status=CASE WHEN @attendance='NoShow' THEN 'Voided' ELSE Status END, VoidedAt=CASE WHEN @attendance='NoShow' THEN SYSUTCDATETIME() ELSE VoidedAt END WHERE ServiceRequestId=@id`); res.json({ message: 'Attendance recorded.' }); } catch (error) { logError(error, { context: 'markAttendance' }); res.status(500).json({ message: 'Unable to record attendance.' }); }
+});
+
+app.get('/api/admin/operations/statistics', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Admin']), async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+  try {
+    const db = getPool();
+    const [summary, monthly, demographics] = await Promise.all([
+      db.request().input('year', sql.Int, year).query(`SELECT (SELECT COUNT(*) FROM dbo.BaptismRecords WHERE YEAR(DateOfBaptism)=@year) AS totalBaptisms, (SELECT COUNT(*) FROM dbo.ConfirmationRecords WHERE YEAR(DateOfConfirmation)=@year) AS totalConfirmations, (SELECT COUNT(*) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year) AS totalMarriages, (SELECT COUNT(*) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year) AS totalDeaths`),
+      db.request().input('year', sql.Int, year).query(`SELECT m.month, DATENAME(month, DATEFROMPARTS(@year,m.month,1)) AS monthName, (SELECT COUNT(*) FROM dbo.BaptismRecords WHERE YEAR(DateOfBaptism)=@year AND MONTH(DateOfBaptism)=m.month) AS baptisms, (SELECT COUNT(*) FROM dbo.ConfirmationRecords WHERE YEAR(DateOfConfirmation)=@year AND MONTH(DateOfConfirmation)=m.month) AS confirmations, (SELECT COUNT(*) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year AND MONTH(DateOfMarriage)=m.month) AS marriages, (SELECT COUNT(*) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year AND MONTH(DateOfDeath)=m.month) AS deaths FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12)) m(month) ORDER BY m.month`),
+      db.request().input('year', sql.Int, year).query(`SELECT (SELECT COUNT(*) FROM dbo.BaptismRecords WHERE YEAR(DateOfBaptism)=@year AND DATEDIFF(year, DateOfBirth, DateOfBaptism)=0) AS InfantsUnder1Yr, (SELECT COUNT(*) FROM dbo.BaptismRecords WHERE YEAR(DateOfBaptism)=@year AND DATEDIFF(year, DateOfBirth, DateOfBaptism)>0) AS ChildrenOver1Yr, (SELECT AVG(CAST(GroomAge AS decimal(10,2))) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year) AS AvgGroomAge, (SELECT AVG(CAST(BrideAge AS decimal(10,2))) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year) AS AvgBrideAge, (SELECT COUNT(*) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year AND GroomAge < 25 AND BrideAge < 25) AS Under25, (SELECT COUNT(*) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year AND ((GroomAge BETWEEN 25 AND 35) OR (BrideAge BETWEEN 25 AND 35))) AS Age25To35, (SELECT COUNT(*) FROM dbo.MarriageRecords WHERE YEAR(DateOfMarriage)=@year AND (GroomAge > 35 OR BrideAge > 35)) AS Over35, (SELECT AVG(CAST(Age AS decimal(10,2))) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year) AS AvgDeceasedAge, (SELECT COUNT(*) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year AND Age < 18) AS Under18, (SELECT COUNT(*) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year AND Age BETWEEN 18 AND 59) AS Age18To59, (SELECT COUNT(*) FROM dbo.DeathRecords WHERE YEAR(DateOfDeath)=@year AND Age >= 60) AS Senior60Plus`),
+    ]);
+    const row = summary.recordset[0] || {};
+    const demographicRow = demographics.recordset[0] || {};
+    res.json({ targetYear: year, summary: row, monthlyBreakdown: monthly.recordset, demographics: { baptisms: { InfantsUnder1Yr: demographicRow.InfantsUnder1Yr || 0, ChildrenOver1Yr: demographicRow.ChildrenOver1Yr || 0 }, marriages: { AvgGroomAge: demographicRow.AvgGroomAge || 0, AvgBrideAge: demographicRow.AvgBrideAge || 0, Under25: demographicRow.Under25 || 0, Age25To35: demographicRow.Age25To35 || 0, Over35: demographicRow.Over35 || 0 }, deaths: { AvgDeceasedAge: demographicRow.AvgDeceasedAge || 0, Under18: demographicRow.Under18 || 0, Age18To59: demographicRow.Age18To59 || 0, Senior60Plus: demographicRow.Senior60Plus || 0 } } });
+  } catch (error) { logError(error, { context: 'statisticalReport' }); res.status(500).json({ message: 'Unable to generate statistical report.' }); }
+});
+
+// Service utilization and no-show reporting for planning and monitoring.
+app.get('/api/admin/operations/reports/utilization', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+  try {
+    const db = getPool();
+    const [utilization, noShows] = await Promise.all([
+      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS TotalRequests, SUM(CASE WHEN sr.Status='Completed' THEN 1 ELSE 0 END) AS Completed, SUM(CASE WHEN sr.Status='Confirmed' THEN 1 ELSE 0 END) AS Confirmed, SUM(CASE WHEN sr.Status IN ('Cancelled','Voided','ConflictVoided') THEN 1 ELSE 0 END) AS CancelledOrVoided FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year GROUP BY s.Name ORDER BY TotalRequests DESC`),
+      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS NoShows FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year AND sr.AttendanceStatus='NoShow' GROUP BY s.Name ORDER BY NoShows DESC`),
+    ]);
+    if (String(req.query.format || '').toLowerCase() === 'csv') {
+      const csv = toCsv(utilization.recordset, [{ key: 'ServiceName', label: 'Service' }, { key: 'TotalRequests', label: 'Requests' }, { key: 'Completed', label: 'Completed' }, { key: 'Confirmed', label: 'Confirmed' }, { key: 'CancelledOrVoided', label: 'CancelledOrVoided' }]);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="service-utilization-${year}.csv"`);
+      return res.send(csv);
+    }
+    res.json({ targetYear: year, utilization: utilization.recordset, noShows: noShows.recordset });
+  } catch (error) { logError(error, { context: 'utilizationReport' }); res.status(500).json({ message: 'Unable to generate utilization report.' }); }
+});
+
+app.get('/api/admin/sacramental/search', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const requestedType = String(req.query.type || '').toLowerCase();
+  const definitions = requestedType && sacramentalDefinitions[requestedType] ? [[requestedType, sacramentalDefinitions[requestedType]]] : Object.entries(sacramentalDefinitions);
+  const q = String(req.query.q || ''); const startDate = String(req.query.startDate || ''); const endDate = String(req.query.endDate || ''); const priest = String(req.query.priest || '');
+  try {
+    const db = getPool(); const queries = []; const params = [];
+    for (const [type, definition] of definitions) { const request = db.request(); let where = '1=1'; if (q) { request.input(`q_${type}`, sql.NVarChar(200), `%${q}%`); where += ` AND (${definition.name} LIKE @q_${type} OR RegistryNumber LIKE @q_${type})`; } if (startDate) { request.input(`start_${type}`, sql.Date, startDate); where += ` AND ${definition.date} >= @start_${type}`; } if (endDate) { request.input(`end_${type}`, sql.Date, endDate); where += ` AND ${definition.date} <= @end_${type}`; } if (priest) { request.input(`priest_${type}`, sql.NVarChar(200), `%${priest}%`); where += ` AND ${definition.priest} LIKE @priest_${type}`; } queries.push(request.query(`SELECT '${type}' AS RecordType, ${definition.id} AS Id, RegistryNumber, ${definition.name} AS Name, ${definition.date} AS RecordDate, ${definition.priest} AS Priest, ScannedDocumentUrl FROM dbo.${definition.table} WHERE ${where}`)); }
+    const results = await Promise.all(queries); const records = results.flatMap(result => result.recordset); res.json({ records, pagination: { total: records.length } });
+  } catch (error) { logError(error, { context: 'sacramentalSearch' }); res.status(500).json({ message: 'Unable to search sacramental records.' }); }
+});
+
+for (const [type, definition] of Object.entries(sacramentalDefinitions)) {
+  app.get(`/api/admin/sacramental/${type}/:id`, requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => { try { const result = await getPool().request().input('id', sql.Int, Number(req.params.id)).query(`SELECT * FROM dbo.${definition.table} WHERE ${definition.id}=@id`); if (!result.recordset[0]) return res.status(404).json({ message: 'Record not found.' }); res.json(result.recordset[0]); } catch (error) { logError(error, { context: 'sacramentalDetail' }); res.status(500).json({ message: 'Unable to load record.' }); } });
+  app.get(`/api/admin/sacramental/${type}/:id/audit`, requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => { try { const result = await getPool().request().input('type', sql.VarChar(30), type).input('id', sql.Int, Number(req.params.id)).query('SELECT * FROM dbo.SacramentalRecordAudit WHERE RecordType=@type AND RecordId=@id ORDER BY ChangedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'sacramentalAudit' }); res.status(500).json({ message: 'Unable to load record history.' }); } });
+  app.post(`/api/admin/sacramental/${type}`, requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => saveSacramentalRecord(req, res, type, definition, null));
+  app.put(`/api/admin/sacramental/${type}/:id`, requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => saveSacramentalRecord(req, res, type, definition, Number(req.params.id)));
+  app.delete(`/api/admin/sacramental/${type}/:id`, requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+    try {
+      const db = getPool(); const recordId = Number(req.params.id);
+      if (!Number.isInteger(recordId) || recordId <= 0) return res.status(400).json({ message: 'Invalid record ID.' });
+      const existing = await db.request().input('id', sql.Int, recordId).query(`SELECT * FROM dbo.${definition.table} WHERE ${definition.id}=@id`);
+      if (!existing.recordset[0]) return res.status(404).json({ message: 'Record not found.' });
+      await db.request().input('id', sql.Int, recordId).query(`DELETE FROM dbo.${definition.table} WHERE ${definition.id}=@id`);
+      await db.request().input('type', sql.VarChar(30), type).input('id', sql.Int, recordId).input('action', sql.VarChar(20), 'Delete').input('by', sql.NVarChar(256), staffName(req)).input('changes', sql.NVarChar(sql.MAX), JSON.stringify(existing.recordset[0])).query('INSERT INTO dbo.SacramentalRecordAudit (RecordType, RecordId, ActionName, ChangedBy, Changes) VALUES (@type,@id,@action,@by,@changes)');
+      res.json({ message: 'Record removed and archived in the audit log.' });
+    } catch (error) { logError(error, { context: 'deleteSacramentalRecord' }); res.status(500).json({ message: 'Unable to delete sacramental record.' }); }
+  });
+}
+
+async function saveSacramentalRecord(req, res, type, definition, id) {
+  try {
+    const db = getPool(); const fields = definition.columns; const values = fields.map(field => requestValue(req.body || {}, field));
+    const action = id ? 'Edit' : 'Create';
+    let previous = null;
+    if (id) {
+      const prior = await db.request().input('id', sql.Int, id).query(`SELECT * FROM dbo.${definition.table} WHERE ${definition.id}=@id`);
+      previous = prior.recordset[0] || null;
+      if (!previous) return res.status(404).json({ message: 'Record not found.' });
+      const updateRequest = db.request().input('id', sql.Int, id); fields.forEach((field, index) => updateRequest.input(`u${index}`, sql.NVarChar(sql.MAX), values[index]));
+      await updateRequest.query(`UPDATE dbo.${definition.table} SET ${fields.map((field, index) => `${field}=@u${index}`).join(', ')}, UpdatedAt=SYSUTCDATETIME() WHERE ${definition.id}=@id`);
+    }
+    else {
+      const request = db.request().input('by', sql.NVarChar(256), staffName(req)); fields.forEach((field, index) => request.input(`v${index}`, sql.NVarChar(sql.MAX), values[index]));
+      const result = await request.query(`INSERT INTO dbo.${definition.table} (${fields.join(', ')}, CreatedBy) OUTPUT INSERTED.${definition.id} AS id VALUES (${fields.map((_field, index) => `@v${index}`).join(', ')}, @by)`); id = result.recordset[0].id;
+    }
+    // Field-level audit: record who changed the record, when, and the previous/new values.
+    const changes = {};
+    fields.forEach((field, index) => {
+      const before = previous ? previous[field] : null;
+      const after = values[index];
+      if (!previous || String(before ?? '') !== String(after ?? '')) changes[field] = { before: before ?? null, after: after ?? null };
+    });
+    await db.request().input('type', sql.VarChar(30), type).input('id', sql.Int, id).input('action', sql.VarChar(20), action).input('by', sql.NVarChar(256), staffName(req)).input('changes', sql.NVarChar(sql.MAX), JSON.stringify(changes)).query('INSERT INTO dbo.SacramentalRecordAudit (RecordType, RecordId, ActionName, ChangedBy, Changes) VALUES (@type,@id,@action,@by,@changes)');
+    res.json({ id });
+  } catch (error) { logError(error, { context: 'saveSacramentalRecord' }); res.status(500).json({ message: 'Unable to save sacramental record.' }); }
+}
+
+app.get('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const { sacramentType, bookNumber, pageNumber, registryNumber } = req.query || {};
+  try {
+    const db = getPool();
+    const request = db.request();
+    let where = '1=1';
+    if (sacramentType) { request.input('type', sql.VarChar(30), String(sacramentType)); where += ' AND a.SacramentType=@type'; }
+    if (Number.isInteger(Number(bookNumber)) && bookNumber) { request.input('book', sql.Int, Number(bookNumber)); where += ' AND a.BookNumber=@book'; }
+    if (Number.isInteger(Number(pageNumber)) && pageNumber) { request.input('page', sql.Int, Number(pageNumber)); where += ' AND a.PageNumber=@page'; }
+    const result = await request.query(`SELECT TOP 200 a.* FROM dbo.SacramentalArchives a WHERE ${where} ORDER BY a.UploadedAt DESC`);
+    let archives = result.recordset;
+    if (registryNumber) {
+      // Registry-number search: keep archives whose file is attached to the matching ledger record.
+      const definition = sacramentalDefinitions[String(sacramentType || '').toLowerCase()];
+      if (definition) {
+        const match = await db.request().input('reg', sql.NVarChar(100), String(registryNumber).trim()).query(`SELECT ScannedDocumentUrl FROM dbo.${definition.table} WHERE RegistryNumber=@reg`);
+        const urls = new Set(match.recordset.map(row => row.ScannedDocumentUrl).filter(Boolean));
+        archives = archives.filter(archive => urls.has(archive.FileUrl));
+      } else {
+        archives = [];
+      }
+    }
+    res.json({ archives });
+  } catch (error) { logError(error, { context: 'sacramentalArchives' }); res.status(500).json({ message: 'Unable to load archives.' }); }
+});
+app.post('/api/admin/sacramental/upload-archive', requireAdmin, requireRole(['ParishPriest', 'Secretary']), upload.single('document'), (req, res) => { if (!req.file) return res.status(400).json({ message: 'A scanned document is required.' }); res.status(201).json({ fileUrl: `/uploads/${req.file.filename}` }); });
+app.post('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => { const { sacramentType, bookNumber, pageNumber, fileUrl, notes } = req.body || {}; try { const result = await getPool().request().input('type', sql.VarChar(30), sacramentType).input('book', sql.Int, Number(bookNumber)).input('page', sql.Int, Number(pageNumber)).input('url', sql.NVarChar(1000), fileUrl).input('notes', sql.NVarChar(sql.MAX), notes || null).input('by', sql.NVarChar(256), staffName(req)).query('INSERT INTO dbo.SacramentalArchives (SacramentType, BookNumber, PageNumber, FileUrl, Notes, UploadedBy) OUTPUT INSERTED.ArchiveId VALUES (@type,@book,@page,@url,@notes,@by)'); res.status(201).json(result.recordset[0]); } catch (error) { logError(error, { context: 'createSacramentalArchive' }); res.status(500).json({ message: 'Unable to save archive entry.' }); } });
+app.put('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id); const { bookNumber, pageNumber, notes } = req.body || {};
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
+  if (!Number.isInteger(Number(bookNumber)) || !Number.isInteger(Number(pageNumber))) return res.status(400).json({ message: 'Book and page numbers are required.' });
+  try {
+    const result = await getPool().request().input('id', sql.Int, id).input('book', sql.Int, Number(bookNumber)).input('page', sql.Int, Number(pageNumber)).input('notes', sql.NVarChar(sql.MAX), notes || null).query('UPDATE dbo.SacramentalArchives SET BookNumber=@book, PageNumber=@page, Notes=@notes WHERE ArchiveId=@id');
+    if (!result.rowsAffected[0]) return res.status(404).json({ message: 'Archive entry not found.' });
+    res.json({ message: 'Archive entry updated.' });
+  } catch (error) { logError(error, { context: 'updateSacramentalArchive' }); res.status(500).json({ message: 'Unable to update archive entry.' }); }
+});
+app.delete('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
+  try {
+    const result = await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.SacramentalArchives OUTPUT DELETED.FileUrl WHERE ArchiveId=@id');
+    const fileUrl = result.recordset[0]?.FileUrl;
+    if (!fileUrl) return res.status(404).json({ message: 'Archive entry not found.' });
+    if (String(fileUrl).startsWith('/uploads/')) {
+      fs.promises.unlink(path.join(uploadDirectory, path.basename(String(fileUrl)))).catch(() => {});
+    }
+    res.json({ message: 'Archive entry and file removed.' });
+  } catch (error) { logError(error, { context: 'deleteSacramentalArchive' }); res.status(500).json({ message: 'Unable to delete archive entry.' }); }
+});
+// Protected archive download: requires a valid staff token (header or query) instead of the public /uploads URL.
+app.get('/api/admin/sacramental/archives/:id/file', async (req, res) => {
+  const staff = parseStaffToken(String(req.headers['x-admin-token'] || req.query.token || ''));
+  if (!staff) return res.status(403).json({ message: 'Admin token is required.' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
+  try {
+    const result = await getPool().request().input('id', sql.Int, id).query('SELECT FileUrl FROM dbo.SacramentalArchives WHERE ArchiveId=@id');
+    const fileUrl = result.recordset[0]?.FileUrl;
+    if (!fileUrl || !String(fileUrl).startsWith('/uploads/')) return res.status(404).json({ message: 'Archive file not found.' });
+    const filePath = path.join(uploadDirectory, path.basename(String(fileUrl)));
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Archive file not found.' });
+    return res.sendFile(filePath);
+  } catch (error) { logError(error, { context: 'downloadSacramentalArchive' }); res.status(500).json({ message: 'Unable to download archive file.' }); }
 });
 
 // Prayer Request endpoints
@@ -992,16 +2113,20 @@ app.get('/api/prayers', async (_req, res) => {
 });
 
 app.get('/api/prayers/:prayerId', async (req, res) => {
-  const { prayerId } = req.params;
+  const prayerId = Number(req.params.prayerId);
+
+  if (!Number.isInteger(prayerId) || prayerId <= 0) {
+    return res.status(400).json({ message: 'Invalid prayer ID.' });
+  }
 
   try {
     const pool = getPool();
-    const request = pool.request();
+    const request = pool.request().input('prayerId', sql.Int, prayerId);
 
     const result = await request.query(`
       SELECT PrayerId, Name, Category, Request, CreatedAt
       FROM dbo.PrayerRequests
-      WHERE PrayerId = ${prayerId} AND IsApproved = 1 AND ShareWithCommunity = 1
+      WHERE PrayerId = @prayerId AND IsApproved = 1 AND ShareWithCommunity = 1
     `);
 
     if (result.recordset.length === 0) {
@@ -1016,16 +2141,20 @@ app.get('/api/prayers/:prayerId', async (req, res) => {
 });
 
 app.post('/api/prayers/:prayerId/approve', requireAdmin, async (req, res) => {
-  const { prayerId } = req.params;
+  const prayerId = Number(req.params.prayerId);
+
+  if (!Number.isInteger(prayerId) || prayerId <= 0) {
+    return res.status(400).json({ message: 'Invalid prayer ID.' });
+  }
 
   try {
     const pool = getPool();
-    const request = pool.request();
+    const request = pool.request().input('prayerId', sql.Int, prayerId);
 
     await request.query(`
       UPDATE dbo.PrayerRequests
       SET IsApproved = 1
-      WHERE PrayerId = ${prayerId}
+      WHERE PrayerId = @prayerId
     `);
 
     res.json({ message: 'Prayer approved.' });
@@ -1089,6 +2218,12 @@ app.listen(5000, () => {
     // Start periodic metrics reporting (every 5 minutes)
     metricsCollector.startPeriodicReporting(300);
     logger.info('Metrics collection started');
+
+    startFinanceReportSchedule();
+    logger.info('Weekly and monthly finance report generation started');
+
+    startNoShowVoidSchedule();
+    logger.info('Automatic no-show and unverified-booking voiding started');
   } catch (error) {
     logError(error, { context: 'Server initialization' });
     process.exit(1);
@@ -1108,4 +2243,99 @@ process.on('SIGINT', async () => {
   await closePool();
   logger.info('Database pool closed');
   process.exit(0);
+});
+
+const portalUpload = multer({
+  storage: upload.storage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+  fileFilter: (_req, file, callback) => {
+    callback(null, file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/'));
+  },
+});
+
+app.post('/api/portal/certificate-requests/:requestId/documents', requirePortal, (req, res, next) => {
+  portalUpload.array('documents', 5)(req, res, async error => {
+    if (error) return res.status(400).json({ message: 'Documents must be PDF or image files smaller than 10 MB each.' });
+    try {
+      const requestId = Number(req.params.requestId);
+      const files = req.files || [];
+      const ownsRequest = await getPool().request().input('requestId', sql.Int, requestId).input('accountId', sql.Int, req.portalAccount.AccountId).query(`
+        SELECT CertificateRequestId FROM dbo.CertificateRequests WHERE CertificateRequestId = @requestId AND AccountId = @accountId
+      `);
+      if (!ownsRequest.recordset.length) return res.status(404).json({ message: 'Certificate request not found.' });
+      for (const file of files) {
+        await getPool().request()
+          .input('requestId', sql.Int, requestId)
+          .input('originalName', sql.NVarChar(255), file.originalname)
+          .input('storedName', sql.NVarChar(255), file.filename)
+          .input('fileUrl', sql.NVarChar(500), `/uploads/${file.filename}`)
+          .input('mimeType', sql.VarChar(100), file.mimetype)
+          .input('fileSize', sql.Int, file.size)
+          .query(`INSERT INTO dbo.CertificateRequestDocuments (CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes) VALUES (@requestId, @originalName, @storedName, @fileUrl, @mimeType, @fileSize)`);
+      }
+      res.status(201).json({ message: 'Documents uploaded.' });
+    } catch (error) {
+      logError(error, { context: 'uploadCertificateDocuments' });
+      next(error);
+    }
+  });
+});
+
+app.get('/api/admin/certificate-requests', requireAdmin, async (_req, res) => {
+  try {
+    // Include guest requests (AccountId is NULL) by preferring the stored contact fields,
+    // falling back to the linked parishioner profile for account-based requests.
+    const result = await getPool().request().query(`
+      SELECT cr.CertificateRequestId, cr.CertificateType, cr.PreferredDate, cr.PreferredTime, cr.Status, cr.Notes,
+        COALESCE(cr.FirstName, p.FirstName, '') AS FirstName,
+        COALESCE(cr.LastName, p.LastName, '') AS LastName,
+        COALESCE(cr.ContactEmail, p.EmailAddress, '') AS EmailAddress,
+        cr.ReferenceCode,
+        COUNT(crd.CertificateRequestDocumentId) AS DocumentCount
+      FROM dbo.CertificateRequests cr
+      LEFT JOIN dbo.ParishionerAccounts a ON a.AccountId = cr.AccountId
+      LEFT JOIN dbo.Parishioners p ON p.ParishionerId = a.ParishionerId
+      LEFT JOIN dbo.CertificateRequestDocuments crd ON crd.CertificateRequestId = cr.CertificateRequestId
+      GROUP BY cr.CertificateRequestId, cr.CertificateType, cr.PreferredDate, cr.PreferredTime, cr.Status, cr.Notes,
+        cr.FirstName, cr.LastName, cr.ContactEmail, cr.ReferenceCode, p.FirstName, p.LastName, p.EmailAddress, cr.CreatedAt
+      ORDER BY cr.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (error) {
+    logError(error, { context: 'adminCertificateRequests' });
+    res.status(500).json({ message: 'Unable to load certificate appointments.' });
+  }
+});
+
+app.get('/api/admin/certificate-requests/:requestId/documents', requireAdmin, async (req, res) => {
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ message: 'Invalid certificate request ID.' });
+  }
+  try {
+    const result = await getPool().request().input('requestId', sql.Int, requestId).query(`
+      SELECT CertificateRequestDocumentId, CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes, UploadedAt
+      FROM dbo.CertificateRequestDocuments
+      WHERE CertificateRequestId = @requestId
+      ORDER BY UploadedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (error) {
+    logError(error, { context: 'adminCertificateDocuments' });
+    res.status(500).json({ message: 'Unable to load request documents.' });
+  }
+});
+
+app.put('/api/admin/certificate-requests/:requestId', requireAdmin, async (req, res) => {
+  const allowed = ['Requested', 'Confirmed', 'ReadyForClaim', 'Claimed', 'Rejected'];
+  if (!allowed.includes(req.body.status)) return res.status(400).json({ message: 'Invalid certificate request status.' });
+  try {
+    await getPool().request().input('requestId', sql.Int, Number(req.params.requestId)).input('status', sql.VarChar(30), req.body.status).query(`
+      UPDATE dbo.CertificateRequests SET Status = @status, UpdatedAt = SYSUTCDATETIME() WHERE CertificateRequestId = @requestId
+    `);
+    res.json({ message: 'Certificate request updated.' });
+  } catch (error) {
+    logError(error, { context: 'updateAdminCertificateRequest' });
+    res.status(500).json({ message: 'Unable to update certificate request.' });
+  }
 });

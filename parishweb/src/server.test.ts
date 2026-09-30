@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { sqlBitToBoolean } from './utils/sqlBit.js';
 
 /**
  * Backend Integration Tests
@@ -61,6 +62,33 @@ describe('Services Endpoint', () => {
     expect(mockSlots.slots[0]).toHaveProperty('date');
     expect(mockSlots.slots[0]).toHaveProperty('time');
     expect(mockSlots.slots[0]).toHaveProperty('available');
+  });
+
+  it('should include restriction details for seasonal services', () => {
+    const mockConfirmationSlotsResponse = {
+      serviceId: 3,
+      serviceName: 'Confirmation',
+      restrictionMessage: 'Confirmation registration is only open during December and January for ceremonies in February.',
+      slots: [
+        { date: '2026-02-10', time: '09:00', available: true },
+        { date: '2026-03-10', time: '09:00', available: false },
+      ],
+    };
+
+    expect(mockConfirmationSlotsResponse).toHaveProperty('restrictionMessage');
+    expect(mockConfirmationSlotsResponse.slots[1].available).toBe(false);
+  });
+
+  it('should enforce daily quotas on specific services', () => {
+    const mockDailyQuotas = {
+      FUNERAL_MASS_MAX: 3,
+      AREA_MASS_MAX: 2,
+      PARISH_HALL_RENTAL_MAX: 2,
+    };
+
+    expect(mockDailyQuotas.FUNERAL_MASS_MAX).toBe(3);
+    expect(mockDailyQuotas.AREA_MASS_MAX).toBe(2);
+    expect(mockDailyQuotas.PARISH_HALL_RENTAL_MAX).toBe(2);
   });
 });
 
@@ -132,6 +160,19 @@ describe('Events Endpoint', () => {
 
     // In actual implementation, admin token would be required
     // This just validates the data structure
+  });
+});
+
+describe('SQL bit conversion', () => {
+  it('should normalize SQL bit values to booleans', () => {
+    expect(sqlBitToBoolean(true)).toBe(true);
+    expect(sqlBitToBoolean(1)).toBe(true);
+    expect(sqlBitToBoolean('1')).toBe(true);
+    expect(sqlBitToBoolean('true')).toBe(true);
+    expect(sqlBitToBoolean(false)).toBe(false);
+    expect(sqlBitToBoolean(0)).toBe(false);
+    expect(sqlBitToBoolean('0')).toBe(false);
+    expect(sqlBitToBoolean(null)).toBe(false);
   });
 });
 

@@ -25,9 +25,11 @@ export function useApiData<T>(
     }
   }, [fetchFn]);
 
+  const dependencyKey = JSON.stringify(dependencies);
   useEffect(() => {
-    refetch();
-  }, dependencies);
+    const timer = window.setTimeout(() => void refetch(), 0);
+    return () => window.clearTimeout(timer);
+  }, [refetch, dependencyKey]);
 
   return { data, loading, error, refetch };
 }
@@ -136,12 +138,6 @@ export function useAdminVerify(adminToken: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!adminToken) {
-      setIsVerified(false);
-      setChecking(false);
-      return;
-    }
-
     const verify = async () => {
       setChecking(true);
       setError(null);
@@ -156,7 +152,15 @@ export function useAdminVerify(adminToken: string) {
       }
     };
 
-    verify();
+    const timer = window.setTimeout(() => {
+      if (!adminToken) {
+        setIsVerified(false);
+        setChecking(false);
+        return;
+      }
+      void verify();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [adminToken]);
 
   return { isVerified, checking, error };
@@ -166,14 +170,14 @@ export function useAdminVerify(adminToken: string) {
  * Hook for creating service bookings
  */
 export function useCreateServiceRequest() {
-  return useApiMutation((data: any) => apiClient.serviceRequests.create(data));
+  return useApiMutation((data: Parameters<typeof apiClient.serviceRequests.create>[0]) => apiClient.serviceRequests.create(data));
 }
 
 /**
  * Hook for creating events
  */
 export function useCreateEvent() {
-  return useApiMutation((input: { data: any; adminToken: string }) =>
+  return useApiMutation((input: { data: Parameters<typeof apiClient.events.create>[0]; adminToken: string }) =>
     apiClient.events.create(input.data, input.adminToken)
   );
 }
@@ -183,7 +187,7 @@ export function useCreateEvent() {
  */
 export function useUpdateEvent() {
   return useApiMutation(
-    (input: { eventId: string; data: any; adminToken: string }) =>
+    (input: { eventId: string; data: Parameters<typeof apiClient.events.update>[1]; adminToken: string }) =>
       apiClient.events.update(input.eventId, input.data, input.adminToken)
   );
 }
@@ -201,7 +205,7 @@ export function useDeleteEvent() {
  * Hook for creating prayers
  */
 export function useCreatePrayer() {
-  return useApiMutation((data: any) => apiClient.prayers.create(data));
+  return useApiMutation((data: Parameters<typeof apiClient.prayers.create>[0]) => apiClient.prayers.create(data));
 }
 
 /**
@@ -227,7 +231,7 @@ export function useApprovePrayer() {
  */
 export function useUpdateServiceRequest() {
   return useApiMutation(
-    (input: { requestId: number; data: any; adminToken: string }) =>
+    (input: { requestId: number; data: Parameters<typeof apiClient.serviceRequests.update>[1]; adminToken: string }) =>
       apiClient.serviceRequests.update(input.requestId, input.data, input.adminToken)
   );
 }

@@ -1,0 +1,128 @@
+/**
+ * Pure business rules shared by the API server and the automated test suite.
+ * These functions contain no database or HTTP dependencies so they can be
+ * unit-tested directly (real behavior, no mocks).
+ */
+
+/** Daily booking quotas and seasonal windows for parish services. */
+export function servicePolicy(serviceName, scheduledDate, now = new Date()) {
+  const name = String(serviceName || '').toLowerCase();
+  const month = new Date(`${scheduledDate}T00:00:00`).getMonth() + 1;
+  const currentMonth = now.getMonth() + 1;
+  if (name.includes('confirmation')) {
+    if (month !== 2) return { allowed: false, message: 'Confirmation ceremonies are available only in February.' };
+    if (![1, 12].includes(currentMonth)) return { allowed: false, message: 'Confirmation registration is open only during December and January.' };
+  }
+  if (name.includes('first communion') && ![2, 12].includes(month)) {
+    return { allowed: false, message: 'First Communion is available only in February or December.' };
+  }
+  if (name.includes('funeral')) return { allowed: true, quota: 3, quotaLabel: 'Funeral Mass' };
+  if (name.includes('area') || name.includes('barangay')) return { allowed: true, quota: 2, quotaLabel: 'Area Mass' };
+  if (name.includes('hall')) return { allowed: true, quota: 2, quotaLabel: 'Parish hall rental' };
+  return { allowed: true };
+}
+
+/**
+ * Detect priest/location double-booking for a Mass schedule entry.
+ * `candidate`: { date, time, location, priestUsername, excludeId? }
+ * `existing`:  [{ id, date, time, location, priestUsername, status }]
+ * Returns { conflict, reason } — reason is 'priest' | 'location' | null.
+ */
+export function findScheduleConflict(candidate, existing) {
+  const normDate = value => {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value || '').slice(0, 10);
+  };
+  const normTime = value => String(value || '').slice(0, 5);
+  const cDate = normDate(candidate.date);
+  const cTime = normTime(candidate.time);
+  const cLocation = String(candidate.location || '').trim().toLowerCase();
+  const cPriest = String(candidate.priestUsername || '').trim().toLowerCase();
+
+  for (const item of existing || []) {
+    if (candidate.excludeId != null && Number(item.id) === Number(candidate.excludeId)) continue;
+    if (String(item.status || '').toLowerCase() === 'cancelled') continue;
+    if (normDate(item.date) !== cDate || normTime(item.time) !== cTime) continue;
+    if (cPriest && String(item.priestUsername || '').trim().toLowerCase() === cPriest) {
+      return { conflict: true, reason: 'priest', message: 'This minister already has a Mass scheduled at that date and time.' };
+    }
+    if (cLocation && String(item.location || '').trim().toLowerCase() === cLocation) {
+      return { conflict: true, reason: 'location', message: 'That location is already booked at that date and time.' };
+    }
+  }
+  return { conflict: false, reason: null, message: null };
+}
+
+/** Mass intention conflict: only one intention per date+time slot. */
+export function findIntentionConflict(candidate, existing) {
+  const normDate = value => (value instanceof Date ? value.toISOString().slice(0, 10) : String(value || '').slice(0, 10));
+  const normTime = value => String(value || '').slice(0, 5);
+  const clash = (existing || []).some(item =>
+    String(item.status || 'Scheduled').toLowerCase() !== 'cancelled' &&
+    normDate(item.date) === normDate(candidate.date) &&
+    normTime(item.time) === normTime(candidate.time));
+  return clash
+    ? { conflict: true, message: 'A Mass intention already exists for that date and time.' }
+    : { conflict: false, message: null };
+}
+
+/**
+ * Finance entry state machine.
+ * States: Draft -> Submitted -> Approved -> Reconciled (terminal).
+ * Submitted entries can be Rejected; Rejected entries go back to Draft on edit.
+ * Returns the next status for an action, or null when the action is illegal.
+ */
+export function financeTransition(currentStatus, action) {
+  const transitions = {
+    Draft: { submit: 'Submitted', edit: 'Draft', delete: 'Deleted' },
+    Submitted: { approve: 'Approved', reject: 'Rejected', edit: null, delete: null },
+    Approved: { reconcile: 'Reconciled', edit: null, delete: null },
+    Rejected: { edit: 'Draft', delete: 'Deleted', submit: 'Submitted' },
+    Reconciled: { edit: null, delete: null, approve: null, reject: null },
+  };
+  const row = transitions[String(currentStatus || 'Draft')] || {};
+  return Object.prototype.hasOwnProperty.call(row, action) ? row[action] : null;
+}
+
+/**
+ * No-show rule: a Confirmed appointment whose scheduled date+time has passed
+ * by `graceHours` without attendance being marked is automatically voided.
+ */
+export function isNoShowEligible(request, now = new Date(), graceHours = 24) {
+  if (!request) return false;
+  if (String(request.status) !== 'Confirmed') return false;
+  if (request.attendanceStatus) return false;
+  const dateText = request.scheduledDate instanceof Date
+    ? request.scheduledDate.toISOString().slice(0, 10)
+    : String(request.scheduledDate || '').slice(0, 10);
+  const timeText = String(request.scheduledTime || '00:00').slice(0, 5);
+  const scheduledAt = new Date(`${dateText}T${timeText}:00`);
+  if (Number.isNaN(scheduledAt.getTime())) return false;
+  return now.getTime() - scheduledAt.getTime() >= graceHours * 60 * 60 * 1000;
+}
+
+/**
+ * Expiration rule: unverified bookings (PendingVerification) are automatically
+ * voided `expireHours` after creation so stale slots are released.
+ */
+export function isUnverifiedExpired(request, now = new Date(), expireHours = 48) {
+  if (!request) return false;
+  if (String(request.status) !== 'PendingVerification') return false;
+  const createdAt = new Date(request.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return false;
+  return now.getTime() - createdAt.getTime() >= expireHours * 60 * 60 * 1000;
+}
+
+/** Whitelisted service-request statuses staff may set. */
+export const ALLOWED_REQUEST_STATUSES = ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided'];
+
+/** Build a CSV document from an array of flat objects. */
+export function toCsv(rows, columns) {
+  const escape = value => {
+    const text = value == null ? '' : String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const header = columns.map(column => escape(column.label)).join(',');
+  const body = (rows || []).map(row => columns.map(column => escape(row[column.key])).join(',')).join('\n');
+  return body ? `${header}\n${body}` : header;
+}

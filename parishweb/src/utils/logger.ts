@@ -1,5 +1,9 @@
 import pino from 'pino';
+import type { Logger } from 'pino';
 import type { Request, Response, NextFunction } from 'express';
+
+type LogContext = Record<string, unknown>;
+type LoggedRequest = Request & { log: Logger; requestId: string };
 
 /**
  * Configure and create logger instance
@@ -47,11 +51,12 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
   const requestId = generateRequestId();
 
   // Attach logger and requestId to request object
-  (req as any).log = logger.child({ requestId });
-  (req as any).requestId = requestId;
+  const loggedRequest = req as LoggedRequest;
+  loggedRequest.log = logger.child({ requestId });
+  loggedRequest.requestId = requestId;
 
   // Log incoming request
-  (req as any).log.info({
+  loggedRequest.log.info({
     type: 'request',
     method: req.method,
     path: req.path,
@@ -64,11 +69,11 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
   const originalJson = res.json.bind(res);
 
   // Override res.json to log response
-  res.json = function(data: any) {
+  res.json = function(data: unknown) {
     const duration = Date.now() - startTime;
 
     // Log response
-    (req as any).log.info({
+    loggedRequest.log.info({
       type: 'response',
       method: req.method,
       path: req.path,
@@ -82,11 +87,11 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
 
   // Handle errors in next middleware
   const originalSend = res.send.bind(res);
-  res.send = function(data: any) {
+  res.send = function(data: unknown) {
     const duration = Date.now() - startTime;
 
     if (res.statusCode >= 400) {
-      (req as any).log.warn({
+      loggedRequest.log.warn({
         type: 'response',
         method: req.method,
         path: req.path,
@@ -129,7 +134,7 @@ export function logError(
     endpoint?: string;
     userId?: string;
     action?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   } = {}
 ) {
   logger.error({
@@ -147,7 +152,7 @@ export function logEvent(
   eventType: string,
   data: {
     userId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   }
 ) {
   logger.info({
@@ -176,7 +181,7 @@ export function logMetric(
 /**
  * Log authentication events
  */
-export function logAuth(action: string, details: { [key: string]: any }) {
+export function logAuth(action: string, details: LogContext) {
   logger.info({
     type: 'auth',
     action,
@@ -187,7 +192,7 @@ export function logAuth(action: string, details: { [key: string]: any }) {
 /**
  * Log email operations
  */
-export function logEmail(action: string, details: { to?: string; subject?: string; [key: string]: any }) {
+export function logEmail(action: string, details: { to?: string; subject?: string; [key: string]: unknown }) {
   logger.info({
     type: 'email',
     action,
@@ -198,6 +203,6 @@ export function logEmail(action: string, details: { to?: string; subject?: strin
 /**
  * Create a child logger with context
  */
-export function createContextLogger(context: { [key: string]: any }) {
+export function createContextLogger(context: LogContext) {
   return logger.child(context);
 }

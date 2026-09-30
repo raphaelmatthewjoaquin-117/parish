@@ -146,7 +146,7 @@ class MetricsCollector {
     }
 
     // Check response times
-    const avgLatency = (metrics.requestLatencies as any).avg;
+    const avgLatency = (metrics.requestLatencies as { avg?: number }).avg ?? 0;
     if (avgLatency > 1000) {
       status = status === 'unhealthy' ? 'unhealthy' : 'degraded';
       issues.push(`Slow response times: ${avgLatency}ms avg`);
@@ -203,7 +203,7 @@ export function metricsMiddleware(_req: Request, res: Response, next: NextFuncti
 
   // Hook into res.json to capture completion and record latency
   const originalJson = res.json.bind(res);
-  res.json = function(data: any) {
+  res.json = function(data: unknown) {
     const duration = Date.now() - startTime;
     metricsCollector.recordRequestLatency(duration);
 

@@ -90,7 +90,7 @@ export function PrayerRequest() {
       } else {
         setErrors({ request: data.message || 'Failed to submit prayer' })
       }
-    } catch (error) {
+    } catch {
       setErrors({ request: 'Unable to submit prayer. Please try again.' })
     } finally {
       setSubmitting(false)
@@ -105,8 +105,8 @@ export function PrayerRequest() {
 
   if (submitted) {
     return (
-      <section className="prayer-request success-state" id="prayer-request">
-        <div className="success-container">
+      <section className="prayer-request success-state container py-5" id="prayer-request">
+        <div className="success-container alert alert-success text-center p-5">
           <div className="success-icon" aria-hidden="true">
             <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="12" cy="12" r="10" />
@@ -120,7 +120,7 @@ export function PrayerRequest() {
           <p className="success-note">
             {form.anonymous ? 'Your request will remain completely anonymous.' : 'Thank you for sharing with us.'}
           </p>
-          <button type="button" className="primary-btn" onClick={handleReset}>
+          <button type="button" className="primary-btn btn btn-dark" onClick={handleReset}>
             Submit Another Prayer
           </button>
         </div>
@@ -129,14 +129,16 @@ export function PrayerRequest() {
   }
 
   return (
-    <section className="prayer-request" id="prayer-request">
-      <div className="prayer-layout">
-        <div className="prayer-wall-container">
+    <section className="prayer-request container py-5" id="prayer-request">
+      <div className="prayer-layout row g-4">
+        <div className="prayer-wall-container col-lg-7">
+          <p className="prayer-page-kicker">A place to pray together</p>
           <h1 className="prayer-wall-title">Share Your Prayer Request</h1>
+          <p className="prayer-page-intro">Bring your intentions to our parish community. You can also pray for the requests shared below.</p>
           <PrayerWall />
         </div>
 
-        <div className="prayer-form-container">
+        <div className="prayer-form-container col-lg-5">
           <form className="prayer-form" onSubmit={handleSubmit} noValidate>
             <div className="form-header">
               <p className="eyebrow">Submit Request</p>
@@ -147,6 +149,7 @@ export function PrayerRequest() {
             <div className="form-group">
               <label htmlFor="category">Prayer Category <span className="required" aria-hidden="true">*</span></label>
               <select
+                className="form-select"
                 id="category"
                 name="category"
                 value={form.category}
@@ -161,7 +164,8 @@ export function PrayerRequest() {
 
             <div className="form-group">
               <label htmlFor="request">Your Prayer Request <span className="required" aria-hidden="true">*</span></label>
-              <textarea
+                <textarea
+                  className="form-control"
                 id="request"
                 name="request"
                 value={form.request}
@@ -183,6 +187,7 @@ export function PrayerRequest() {
               <div className="form-group">
                 <label htmlFor="name">Your Name <span className="required" aria-hidden="true">*</span></label>
                 <input
+                  className="form-control"
                   type="text"
                   id="name"
                   name="name"
@@ -231,7 +236,7 @@ export function PrayerRequest() {
             </fieldset>
 
             <div className="form-actions">
-              <button type="submit" className="primary-btn" disabled={submitting}>
+              <button type="submit" className="primary-btn btn btn-dark" disabled={submitting}>
                 {submitting ? (
                   <>
                     <span className="spinner" aria-hidden="true"></span>
@@ -241,7 +246,7 @@ export function PrayerRequest() {
                   'Submit Prayer Request'
                 )}
               </button>
-              <button type="button" className="secondary-btn" onClick={handleReset} disabled={submitting}>
+              <button type="button" className="secondary-btn btn btn-outline-dark" onClick={handleReset} disabled={submitting}>
                 Clear Form
               </button>
             </div>

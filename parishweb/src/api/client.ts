@@ -2,6 +2,8 @@
  * Centralized API client for the Parish website
  * Handles all HTTP requests with consistent error handling, headers, and base URL management
  */
+/* The API surface returns legacy SQL-shaped payloads; response types are refined at call sites. */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -47,8 +49,9 @@ async function apiRequest<T>(
 
   const url = `${API_BASE_URL}${endpoint}`;
 
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const finalHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...headers,
   };
 
@@ -62,7 +65,7 @@ async function apiRequest<T>(
   };
 
   if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-    fetchOptions.body = JSON.stringify(body);
+    fetchOptions.body = isFormData ? body : JSON.stringify(body);
   }
 
   try {
@@ -137,7 +140,7 @@ export const apiClient = {
       });
     },
 
-    async verify(_token: string) {
+    async verify() {
       return apiRequest<{ message: string }>(`/api/service-requests/verify`, {
         method: 'GET',
       });
@@ -256,11 +259,171 @@ export const apiClient = {
     },
   },
 
+  certificates: {
+    async create(data: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      certificateType: string;
+      preferredDate: string;
+      preferredTime: string;
+      notes?: string;
+    }) {
+      return apiRequest<{ requestId: number; referenceCode: string }>('/api/certificate-requests', {
+        method: 'POST',
+        body: data,
+      });
+    },
+
+    async uploadDocuments(requestId: number, referenceCode: string, files: File[]) {
+      const formData = new FormData();
+      files.forEach(file => formData.append('documents', file));
+      formData.append('referenceCode', referenceCode);
+      return apiRequest<{ message: string }>(`/api/certificate-requests/${requestId}/documents`, {
+        method: 'POST',
+        body: formData,
+      });
+    },
+
+    async lookup(email: string, ref: string) {
+      const params = new URLSearchParams({ email, ref });
+      return apiRequest<{
+        certificateType: string;
+        preferredDate: string;
+        preferredTime: string;
+        status: string;
+        notes?: string;
+      }>(`/api/certificate-requests/lookup?${params.toString()}`);
+    },
+  },
+
   admin: {
     async verify(adminToken: string) {
       return apiRequest<any>('/api/admin/verify', {
         adminToken,
       });
+    },
+
+    async certificateRequests(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/certificate-requests', { adminToken });
+    },
+
+    async serviceFields(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/service-fields', { adminToken });
+    },
+    async createServiceField(data: unknown, adminToken: string) {
+      return apiRequest<{ id: number }>('/api/admin/service-fields', { method: 'POST', body: data, adminToken });
+    },
+    async updateServiceField(id: number, data: unknown, adminToken: string) {
+      return apiRequest<{ message: string }>(`/api/admin/service-fields/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async deleteServiceField(id: number, adminToken: string) {
+      return apiRequest<{ message: string }>(`/api/admin/service-fields/${id}`, { method: 'DELETE', adminToken });
+    },
+
+    async certificateRequestDocuments(requestId: number, adminToken: string) {
+      return apiRequest<any[]>(`/api/admin/certificate-requests/${requestId}/documents`, { adminToken });
+    },
+
+    async updateCertificateRequest(requestId: number, status: string, adminToken: string) {
+      return apiRequest<{ message: string }>(`/api/admin/certificate-requests/${requestId}`, {
+        method: 'PUT',
+        body: { status },
+        adminToken,
+      });
+    },
+
+    async operationSchedule(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/operations/schedule', { adminToken });
+    },    async createSchedule(data: unknown, adminToken: string) {
+      return apiRequest<any>('/api/admin/operations/schedule', { method: 'POST', body: data, adminToken });
+    },
+    async updateSchedule(id: number, data: unknown, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/schedule/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async deleteSchedule(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/schedule/${id}`, { method: 'DELETE', adminToken });
+    },
+    async massIntentions(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/operations/mass-intentions', { adminToken });
+    },
+    async createMassIntention(data: unknown, adminToken: string) {
+      return apiRequest<any>('/api/admin/operations/mass-intentions', { method: 'POST', body: data, adminToken });
+    },
+    async updateMassIntention(id: number, status: string, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/mass-intentions/${id}`, { method: 'PUT', body: { status }, adminToken });
+    },
+    async financeEntries(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/operations/finance', { adminToken });
+    },
+    async createFinanceEntry(data: unknown, adminToken: string) {
+      return apiRequest<any>('/api/admin/operations/finance', { method: 'POST', body: data, adminToken });
+    },
+    async updateFinanceEntry(id: number, data: unknown, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async deleteFinanceEntry(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}`, { method: 'DELETE', adminToken });
+    },
+    async submitFinanceEntry(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}/submit`, { method: 'POST', adminToken });
+    },
+    async rejectFinanceEntry(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}/reject`, { method: 'POST', adminToken });
+    },
+    async approveFinanceEntry(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}/approve`, { method: 'POST', adminToken });
+    },
+    async reconcileFinanceEntry(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/finance/${id}/reconcile`, { method: 'POST', adminToken });
+    },
+    async financeReport(adminToken: string, filters?: { start?: string; end?: string; type?: string }) {
+      const params = new URLSearchParams();
+      if (filters?.start) params.set('start', filters.start);
+      if (filters?.end) params.set('end', filters.end);
+      if (filters?.type) params.set('type', filters.type);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      return apiRequest<any>(`/api/admin/operations/finance/report${suffix}`, { adminToken });
+    },
+    async utilizationReport(adminToken: string, year: number) {
+      return apiRequest<any>(`/api/admin/operations/reports/utilization?year=${year}`, { adminToken });
+    },
+    async financeAudit(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/operations/finance/audit', { adminToken });
+    },
+    async financeReportHistory(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/operations/finance/reports', { adminToken });
+    },
+    async applicationHistory(id: number, adminToken: string) {
+      return apiRequest<any[]>(`/api/admin/operations/applications/${id}/history`, { adminToken });
+    },
+    async updateApplication(id: number, data: unknown, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/applications/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async markAttendance(id: number, attendanceStatus: string, adminToken: string) {
+      return apiRequest<any>(`/api/admin/operations/applications/${id}/attendance`, { method: 'POST', body: { attendanceStatus }, adminToken });
+    },
+    async statisticalReport(adminToken: string, year: number) {
+      return apiRequest<any>(`/api/admin/operations/statistics?year=${year}`, { adminToken });
+    },
+  },
+
+  sacramental: {
+    async create(type: string, data: unknown, adminToken: string) {
+      return apiRequest<any>(`/api/admin/sacramental/${type}`, { method: 'POST', body: data, adminToken });
+    },
+    async update(type: string, id: number, data: unknown, adminToken: string) {
+      return apiRequest<any>(`/api/admin/sacramental/${type}/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async remove(type: string, id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/sacramental/${type}/${id}`, { method: 'DELETE', adminToken });
+    },
+    async updateArchive(id: number, data: { bookNumber: number; pageNumber: number; notes?: string | null }, adminToken: string) {
+      return apiRequest<any>(`/api/admin/sacramental/archives/${id}`, { method: 'PUT', body: data, adminToken });
+    },
+    async deleteArchive(id: number, adminToken: string) {
+      return apiRequest<any>(`/api/admin/sacramental/archives/${id}`, { method: 'DELETE', adminToken });
     },
   },
 

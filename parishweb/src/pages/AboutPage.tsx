@@ -1,13 +1,15 @@
+import '../PagesCSS/AboutPage.css'
+
 export function AboutPage() {
   return (
-    <section className="content-section simple-page">
-      <div className="section-heading">
+    <section className="content-section simple-page container py-5">
+      <div className="section-heading mb-5">
         <p className="eyebrow">About Us</p>
         <h2>Growing in faith together</h2>
       </div>
 
-      <div className="page-layout">
-        <div className="text-block">
+      <div className="page-layout row g-4 align-items-start">
+        <div className="text-block col-lg-8">
           <p>
             We are a vibrant parish community centered on worship, service, and
             friendship. Our mission is to help people encounter Christ, grow in faith,
@@ -25,16 +27,16 @@ export function AboutPage() {
           </p>
         </div>
 
-        <div className="mini-panel">
-          <div>
+        <div className="mini-panel col-lg-4 d-grid gap-3">
+          <div className="p-4 border rounded shadow-sm bg-white">
             <strong>2500+</strong>
             <span>active parish families</span>
           </div>
-          <div>
+          <div className="p-4 border rounded shadow-sm bg-white">
             <strong>30+</strong>
             <span>ministries and groups</span>
           </div>
-          <div>
+          <div className="p-4 border rounded shadow-sm bg-white">
             <strong>120+</strong>
             <span>community volunteers</span>
           </div>
