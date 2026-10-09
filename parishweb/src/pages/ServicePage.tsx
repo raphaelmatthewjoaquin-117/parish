@@ -1,7 +1,7 @@
 // ServicePage.tsx
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import '../PagesCSS/ServicePage.css';
-import { apiClient } from '../api/client';
+import { API_BASE_URL as API_URL, apiClient } from '../api/client';
 
 type Service = {
   id: string;
@@ -51,8 +51,6 @@ function formatSlotRange(startTime: string): string {
   };
   return `${format(hours)} - ${format(endHours)}`;
 }
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 function getInitialTab(): string {
   if (typeof window === 'undefined') return FALLBACK_SERVICES[0].id;
@@ -204,15 +202,18 @@ export default function ServicePage(): React.JSX.Element {
   }, [bookingServiceId, loadSlots]);
 
   useEffect(() => {
-    setFieldValues({});
-    if (!bookingService?.dbId) { setFieldDefs([]); return; }
-    fetch(`${API_URL}/api/services/${bookingService.dbId}/fields`)
-      .then(response => response.ok ? response.json() : Promise.reject())
-      .then((data: unknown) => {
-        const raw = data as { fields?: FieldDef[] } | null;
-        setFieldDefs(Array.isArray(raw?.fields) ? raw.fields : []);
-      })
-      .catch(() => setFieldDefs([]));
+    const timer = window.setTimeout(() => {
+      setFieldValues({});
+      if (!bookingService?.dbId) { setFieldDefs([]); return; }
+      fetch(`${API_URL}/api/services/${bookingService.dbId}/fields`)
+        .then(response => response.ok ? response.json() : Promise.reject())
+        .then((data: unknown) => {
+          const raw = data as { fields?: FieldDef[] } | null;
+          setFieldDefs(Array.isArray(raw?.fields) ? raw.fields : []);
+        })
+        .catch(() => setFieldDefs([]));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [bookingService?.dbId]);
 
   useEffect(() => {
@@ -373,7 +374,7 @@ export default function ServicePage(): React.JSX.Element {
 
       {/* ── Certificate Tab ── */}
       {isCertificateTab ? (
-        <div className="booking-grid row g-4">
+        <div className="booking-grid booking-grid--certificate row g-4">
           {/* Left: info panel */}
           <section className="col-lg-7">
             <div className="cert-info card border-0 shadow-sm p-4 mb-4">

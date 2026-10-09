@@ -4,26 +4,31 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { EventDetailsModal } from '../components/EventDetailsModal'
+import { API_BASE_URL as API_URL } from '../api/client'
+import { localize } from '../content/siteContent'
+import type { Language } from '../i18n'
 import '../PagesCSS/NewsPage.css'
 
 type EventItem = {
   id: string
   title: string
+  titleTl?: string
   description: string
+  descriptionTl?: string
   detail: string
+  detailTl?: string
   date: string
   location: string
+  locationTl?: string
   time?: string
   photoUrl: string
 }
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 const getPhotoUrl = (photoUrl: string) => (
   photoUrl.startsWith('/') ? `${API_URL}${photoUrl}` : photoUrl
 )
 
-export function NewsPage() {
+export function NewsPage({ language = 'en' }: { language?: Language }) {
   const [events, setEvents] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,14 +52,18 @@ export function NewsPage() {
           const row = item as Record<string, unknown>
           const id = String(row.id ?? row.EventId ?? row.ID ?? `event-${index}`)
           const title = String(row.title ?? row.Title ?? 'Untitled event')
+          const titleTl = String(row.titleTl ?? row.TitleTl ?? '') || undefined
           const description = String(row.description ?? row.Description ?? row.detail ?? row.Detail ?? '')
+          const descriptionTl = String(row.descriptionTl ?? row.DescriptionTl ?? '') || undefined
           const detail = String(row.detail ?? row.Detail ?? '')
+          const detailTl = String(row.detailTl ?? row.DetailTl ?? '') || undefined
           const date = String(row.date ?? row.EventDate ?? row.Date ?? '')
           const location = String(row.location ?? row.Location ?? '')
+          const locationTl = String(row.locationTl ?? row.LocationTl ?? '') || undefined
           const time = String(row.time ?? row.Time ?? '')
           const photoUrl = String(row.photoUrl ?? row.PhotoUrl ?? '')
           if (!date) return result
-          result.push({ id, title, description, detail, date, location, time, photoUrl })
+          result.push({ id, title, titleTl, description, descriptionTl, detail, detailTl, date, location, locationTl, time, photoUrl })
           return result
         }, [])
 
@@ -67,15 +76,15 @@ export function NewsPage() {
   }, [])
 
   const calendarEvents = events.map(event => ({
-    title: event.title,
+    title: localize(event.title, event.titleTl, language),
     start: event.date,
   }))
 
   return (
     <section className="content-section simple-page news-page container py-5">
       <div className="section-heading mb-5">
-        <p className="eyebrow">News & Events</p>
-        <h2>Upcoming moments to share</h2>
+        <p className="eyebrow">{localize('News & Events', undefined, language)}</p>
+        <h2>{localize('Upcoming moments to share', undefined, language)}</h2>
       </div>
 
       <div className="mb-5">
@@ -99,20 +108,21 @@ export function NewsPage() {
 
         {events.map((event) => (
           <article className="event-card col-md-6 col-lg-4" key={event.id}>
-            {event.photoUrl && (
-<img className="event-card-image" src={getPhotoUrl(event.photoUrl)} alt="" />)}
+            {event.photoUrl && <img className="event-card-image" src={getPhotoUrl(event.photoUrl)} alt="" />}
             <div className="date-tag">
-              {new Date(event.date).toLocaleDateString('en-US', {
+              {new Date(event.date).toLocaleDateString(language === 'tl' ? 'tl-PH' : 'en-US', {
                 month: 'long',
                 day: 'numeric',
                 year: 'numeric',
               })}
             </div>
-            <h3>{event.title}</h3>
-            <p>{event.description}</p>
-            {event.location && <p className="event-location">{event.location}</p>}
+            <h3 data-no-translate>{localize(event.title, event.titleTl, language)}</h3>
+            <p data-no-translate>{localize(event.description, event.descriptionTl, language)}</p>
+            {event.location && (
+              <p className="event-location" data-no-translate>{localize(event.location, event.locationTl, language)}</p>
+            )}
             <button type="button" className="event-learn-more btn btn-outline-dark" onClick={() => setSelectedEvent(event)}>
-              Learn more
+              {localize('Learn more', undefined, language)}
             </button>
           </article>
         ))}
@@ -122,6 +132,7 @@ export function NewsPage() {
         <EventDetailsModal
           event={selectedEvent}
           photoUrl={getPhotoUrl(selectedEvent.photoUrl)}
+          language={language}
           onClose={() => setSelectedEvent(null)}
         />
       )}

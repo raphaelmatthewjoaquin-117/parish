@@ -7,6 +7,8 @@ import {
   isNoShowEligible,
   isUnverifiedExpired,
   ALLOWED_REQUEST_STATUSES,
+  isAllowedArchiveUpload,
+  isValidGalleryContent,
   toCsv,
 } from '../server-rules.js';
 
@@ -162,9 +164,61 @@ describe('isUnverifiedExpired', () => {
 
 describe('ALLOWED_REQUEST_STATUSES', () => {
   it('contains the supported lifecycle statuses', () => {
-    for (const status of ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided']) {
+    for (const status of ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided', 'VoidedNoShow']) {
       expect(ALLOWED_REQUEST_STATUSES).toContain(status);
     }
+  });
+});
+
+describe('isAllowedArchiveUpload', () => {
+  it('accepts supported archive formats at or below 20 MB', () => {
+    expect(isAllowedArchiveUpload('scan.pdf', 'application/pdf', 20 * 1024 * 1024)).toBe(true);
+    expect(isAllowedArchiveUpload('scan.TIFF', 'image/tiff', 1024)).toBe(true);
+    expect(isAllowedArchiveUpload('scan.jpeg', 'image/jpeg', 1024)).toBe(true);
+  });
+
+  it('rejects unsupported, mismatched, or oversized files', () => {
+    expect(isAllowedArchiveUpload('scan.exe', 'application/pdf', 1024)).toBe(false);
+    expect(isAllowedArchiveUpload('scan.pdf', 'image/png', 1024)).toBe(false);
+    expect(isAllowedArchiveUpload('scan.pdf', 'application/pdf', 20 * 1024 * 1024 + 1)).toBe(false);
+  });
+});
+
+describe('isValidGalleryContent', () => {
+  const legacyGallery = {
+    heading: 'Parish gallery',
+    items: [{ id: 'faith', title: 'Faith', image: '/assets/faith.jpg' }],
+  };
+
+  it('accepts legacy one-photo albums and multi-photo albums with a selected cover', () => {
+    expect(isValidGalleryContent(legacyGallery)).toBe(true);
+    expect(isValidGalleryContent({
+      ...legacyGallery,
+      items: [{ ...legacyGallery.items[0], photos: ['/assets/faith.jpg', '/uploads/second.jpg'] }],
+    })).toBe(true);
+  });
+
+  it('rejects empty albums, invalid photo URLs, and covers not in the album', () => {
+    expect(isValidGalleryContent({
+      ...legacyGallery,
+      items: [{ ...legacyGallery.items[0], photos: [] }],
+    })).toBe(false);
+    expect(isValidGalleryContent({
+      ...legacyGallery,
+      items: [{ ...legacyGallery.items[0], photos: ['/assets/other.jpg'] }],
+    })).toBe(false);
+    expect(isValidGalleryContent({
+      ...legacyGallery,
+      items: [{ ...legacyGallery.items[0], photos: ['/private/photo.jpg'] }],
+    })).toBe(false);
+  });
+
+  it('rejects albums with more than 100 photos', () => {
+    expect(isValidGalleryContent({
+      ...legacyGallery,
+      items: [{ ...legacyGallery.items[0], photos: Array(101).fill('/assets/photo.jpg') }],
+    })).toBe(false);
+    expect(isValidGalleryContent(null)).toBe(false);
   });
 });
 

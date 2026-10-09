@@ -1,27 +1,36 @@
 import React, { useEffect, useState } from 'react'
 import { SacramentalRecordForm } from '../components/SacramentalRecordForm'
+import { API_BASE_URL as API_URL } from '../api/client'
+import { ForgotPasswordForm } from '../components/ForgotPasswordForm'
+import type { ModuleOverrides } from '../utils/rbac'
 import '../PagesCSS/AdminEventsPage.css'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 type EventItem = {
   id: string
   title: string
+  titleTl?: string
   description: string
+  descriptionTl?: string
   detail: string
+  detailTl?: string
   date: string
   time?: string
   location?: string
+  locationTl?: string
   photoUrl?: string
 }
 
 type EventForm = {
   title: string
+  titleTl: string
   description: string
+  descriptionTl: string
   detail: string
+  detailTl: string
   date: string
   time: string
   location: string
+  locationTl: string
   photoUrl: string
 }
 
@@ -112,19 +121,24 @@ type AdminEventsPageProps = {
   initialTab?: AdminEventsTab
   embedded?: boolean
   onAuthenticated?: (authenticated: boolean) => void
+  overrides?: ModuleOverrides
 }
 
 const initialForm: EventForm = {
   title: '',
+  titleTl: '',
   description: '',
+  descriptionTl: '',
   detail: '',
+  detailTl: '',
   date: '',
   time: '',
   location: '',
+  locationTl: '',
   photoUrl: '',
 }
 
-export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated }: AdminEventsPageProps) {
+export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated, overrides }: AdminEventsPageProps) {
   // Tab state
   const [activeTab, setActiveTab] = useState<AdminEventsTab>(initialTab)
 
@@ -183,8 +197,11 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const [authLoading, setAuthLoading] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState('')
+  const canManagePrayerRequests = overrides?.PrayerRequest && staffRole !== 'Admin' ? overrides.PrayerRequest.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
+  const canManageSacramentalRecords = overrides?.SacramentalRecords && staffRole !== 'Admin' ? overrides.SacramentalRecords.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
 
   const adminHeaders = {
     'Content-Type': 'application/json',
@@ -412,7 +429,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
 
   useEffect(() => {
     if (authenticated && activeTab === 'sacramental-ledger') {
-      loadSacramentalRecords()
+      const timer = window.setTimeout(() => void loadSacramentalRecords(), 0)
+      return () => window.clearTimeout(timer)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, activeTab, sacramentalSearch.page])
@@ -494,6 +512,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     }
     if (!selectedSacramentalRecord || !archiveFile || !archiveBookNumber || !archivePageNumber) {
       setError('Choose a scan and provide the book and page number.')
+      return
+    }
+    if (archiveFile.size > 20 * 1024 * 1024) {
+      setError('Archive files must be 20 MB or smaller.')
       return
     }
     setSaving(true)
@@ -675,11 +697,15 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     setEditingId(event.id)
     setForm({
       title: event.title,
+      titleTl: event.titleTl ?? '',
       description: event.description,
+      descriptionTl: event.descriptionTl ?? '',
       detail: event.detail,
+      detailTl: event.detailTl ?? '',
       date: event.date,
       time: event.time ?? '',
       location: event.location ?? '',
+      locationTl: event.locationTl ?? '',
       photoUrl: event.photoUrl ?? '',
     })
     setError(null)
@@ -707,6 +733,15 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
 
   const submitForm = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const title = form.title.trim()
+    if (!title || !form.date) {
+      setError(`Please fill in the required field${!title && !form.date ? 's: Title and Date' : !title ? ': Title' : ': Date'}.`)
+      return
+    }
+    if (title.length < 3) {
+      setError('Event title must be at least 3 characters.')
+      return
+    }
     setSaving(true)
     setError(null)
 
@@ -811,9 +846,11 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       <section className="content-section simple-page admin-login-page">
         <div className="section-heading">
           <p className="eyebrow">Admin login required</p>
-          <h2>Staff administration</h2>
+          <h2>{showForgotPassword ? 'Reset your password' : 'Staff administration'}</h2>
         </div>
-        <form onSubmit={handleLogin} className="admin-login-form">
+        {showForgotPassword
+          ? <ForgotPasswordForm onBack={() => setShowForgotPassword(false)} />
+          : <form onSubmit={handleLogin} className="admin-login-form">
           <label>
             Email or username
             <input
@@ -838,8 +875,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           <button type="submit" disabled={authLoading}>
             {authLoading ? 'Signing in...' : 'Sign in'}
           </button>
-        </form>
-        <p>Use your parish email or username and password. If the ASP.NET Identity tables are connected, the app will validate the role from <code>AspNetUserRoles</code> and <code>AspNetRoles</code>.</p>
+          <button type="button" className="btn btn-link p-0 text-start" onClick={() => setShowForgotPassword(true)}>Forgot password?</button>
+        </form>}
+        {!showForgotPassword && <p>Use your parish email or username and password. If the ASP.NET Identity tables are connected, the app will validate the role from <code>AspNetUserRoles</code> and <code>AspNetRoles</code>.</p>}
       </section>
     )
   }
@@ -999,6 +1037,14 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 />
               </label>
               <label>
+                Title (Tagalog)
+                <input
+                  type="text"
+                  value={form.titleTl}
+                  onChange={e => setForm({ ...form, titleTl: e.target.value })}
+                />
+              </label>
+              <label>
                 Description
                 <textarea
                   value={form.description}
@@ -1006,10 +1052,24 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 />
               </label>
               <label>
+                Description (Tagalog)
+                <textarea
+                  value={form.descriptionTl}
+                  onChange={e => setForm({ ...form, descriptionTl: e.target.value })}
+                />
+              </label>
+              <label>
                 Detail
                 <textarea
                   value={form.detail}
                   onChange={e => setForm({ ...form, detail: e.target.value })}
+                />
+              </label>
+              <label>
+                Detail (Tagalog)
+                <textarea
+                  value={form.detailTl}
+                  onChange={e => setForm({ ...form, detailTl: e.target.value })}
                 />
               </label>
               <label>
@@ -1035,6 +1095,14 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   type="text"
                   value={form.location}
                   onChange={e => setForm({ ...form, location: e.target.value })}
+                />
+              </label>
+              <label>
+                Location (Tagalog)
+                <input
+                  type="text"
+                  value={form.locationTl}
+                  onChange={e => setForm({ ...form, locationTl: e.target.value })}
                 />
               </label>
               <label>
@@ -1135,7 +1203,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                       >
                         View
                       </button>
-                      {!prayer.isApproved && (
+                      {canManagePrayerRequests && !prayer.isApproved && (
                         <button
                           type="button"
                           onClick={() => approvePrayer(prayer.id)}
@@ -1145,14 +1213,14 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                           Approve
                         </button>
                       )}
-                      <button
+                      {canManagePrayerRequests && <button
                         type="button"
                         onClick={() => rejectPrayer(prayer.id)}
                         disabled={saving}
                         className="danger-btn"
                       >
                         Delete
-                      </button>
+                      </button>}
                     </div>
                   </li>
                 ))}
@@ -1241,7 +1309,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   </div>
                 </div>
                 
-                <div className="prayer-modal-footer-enhanced">
+                {canManagePrayerRequests && <div className="prayer-modal-footer-enhanced">
                   <div className="prayer-modal-actions">
                     {!selectedPrayer.isApproved && (
                       <button
@@ -1275,7 +1343,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                       Delete Prayer
                     </button>
                   </div>
-                </div>
+                </div>}
               </div>
             </div>
           )}
@@ -1510,7 +1578,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 <p className="section-kicker">Digital Ledger</p>
                 <h3>Sacramental Records</h3>
               </div>
-              <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>New record</button>
+              {canManageSacramentalRecords && <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>New record</button>}
             </div>
 
             {/* Search & Filter Bar */}
@@ -1664,8 +1732,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         <div className="admin-prayer-detail sacramental-detail-modal service-request-modal-card">
           <div className="detail-header">
             <h3>{selectedSacramentalRecord.RecordType.charAt(0).toUpperCase() + selectedSacramentalRecord.RecordType.slice(1)} Record Detail</h3>
-            <button type="button" className="secondary-btn" onClick={() => { setRecordFormType(selectedSacramentalRecord.RecordType.toLowerCase() as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(selectedSacramentalRecord); setShowRecordForm(true) }}>Edit</button>
-            <button type="button" className="secondary-btn" onClick={() => void deleteSacramentalRecord()} disabled={saving}>Delete</button>
+            {canManageSacramentalRecords && <>
+              <button type="button" className="secondary-btn" onClick={() => { setRecordFormType(selectedSacramentalRecord.RecordType.toLowerCase() as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(selectedSacramentalRecord); setShowRecordForm(true) }}>Edit</button>
+              <button type="button" className="secondary-btn" onClick={() => void deleteSacramentalRecord()} disabled={saving}>Delete</button>
+            </>}
             <button
               type="button"
               onClick={() => setSelectedSacramentalRecord(null)}
@@ -1782,7 +1852,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             </button>
           </div>
           <div className="detail-content">
-            <div className="archive-upload-form">
+            {canManageSacramentalRecords && <div className="archive-upload-form">
               <label>
                 Sacrament Type
                 <select disabled value={selectedSacramentalRecord?.RecordType || ''} className="archive-select">
@@ -1821,7 +1891,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   Cancel
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* Archives List */}
             <div className="archives-list">
@@ -1847,12 +1917,14 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                         <a href={`${API_URL}/api/admin/sacramental/archives/${archive.ArchiveId}/file?token=${encodeURIComponent(adminToken)}`} target="_blank" rel="noopener noreferrer" className="archive-link">
                           View
                         </a>
-                        <button type="button" className="secondary-btn" onClick={() => { setEditingArchiveId(archive.ArchiveId); setArchiveBookNumber(String(archive.BookNumber)); setArchivePageNumber(String(archive.PageNumber)); setArchiveNotes(archive.Notes || '') }} disabled={saving}>
-                          Edit
-                        </button>
-                        <button type="button" className="secondary-btn" onClick={() => void deleteSacramentalArchive(archive.ArchiveId)} disabled={saving}>
-                          Delete
-                        </button>
+                        {canManageSacramentalRecords && <>
+                          <button type="button" className="secondary-btn" onClick={() => { setEditingArchiveId(archive.ArchiveId); setArchiveBookNumber(String(archive.BookNumber)); setArchivePageNumber(String(archive.PageNumber)); setArchiveNotes(archive.Notes || '') }} disabled={saving}>
+                            Edit
+                          </button>
+                          <button type="button" className="secondary-btn" onClick={() => void deleteSacramentalArchive(archive.ArchiveId)} disabled={saving}>
+                            Delete
+                          </button>
+                        </>}
                       </div>
                     </li>
                   ))}

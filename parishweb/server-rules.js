@@ -114,7 +114,50 @@ export function isUnverifiedExpired(request, now = new Date(), expireHours = 48)
 }
 
 /** Whitelisted service-request statuses staff may set. */
-export const ALLOWED_REQUEST_STATUSES = ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided'];
+export const ALLOWED_REQUEST_STATUSES = ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided', 'VoidedNoShow'];
+
+/** Validate sacramental archive uploads before they reach disk. */
+export function isAllowedArchiveUpload(originalName, mimeType, size) {
+  const extension = String(originalName || '').toLowerCase().split('.').pop();
+  const allowedTypes = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    pdf: 'application/pdf',
+  };
+  return Number.isFinite(Number(size))
+    && Number(size) <= 20 * 1024 * 1024
+    && allowedTypes[extension] === String(mimeType || '').toLowerCase();
+}
+
+/** Validate the saved gallery shape while accepting legacy single-photo items. */
+export function isValidGalleryContent(content) {
+  const isPhotoUrl = value => typeof value === 'string'
+    && value.length <= 2000
+    && (/^https?:\/\//i.test(value) || value.startsWith('/assets/') || value.startsWith('/uploads/'));
+
+  return Boolean(content) && typeof content === 'object' && !Array.isArray(content)
+    && typeof content.heading === 'string'
+    && content.heading.length <= 300
+    && (content.headingTl === undefined || (typeof content.headingTl === 'string' && content.headingTl.length <= 300))
+    && Array.isArray(content.items)
+    && content.items.length <= 100
+    && content.items.every(item => item
+      && typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 100
+      && typeof item.title === 'string' && item.title.length <= 200
+      && (item.titleTl === undefined || (typeof item.titleTl === 'string' && item.titleTl.length <= 200))
+      && isPhotoUrl(item.image)
+      && (item.photos === undefined || (
+        Array.isArray(item.photos)
+        && item.photos.length > 0
+        && item.photos.length <= 100
+        && item.photos.every(isPhotoUrl)
+        && item.photos.includes(item.image)
+        && new Set(item.photos).size === item.photos.length
+      )));
+}
 
 /** Build a CSV document from an array of flat objects. */
 export function toCsv(rows, columns) {
@@ -125,4 +168,49 @@ export function toCsv(rows, columns) {
   const header = columns.map(column => escape(column.label)).join(',');
   const body = (rows || []).map(row => columns.map(column => escape(row[column.key])).join(',')).join('\n');
   return body ? `${header}\n${body}` : header;
+}
+
+/** Modules whose access can be overridden per account. User management stays Admin-only. */
+export const OVERRIDABLE_MODULES = [
+  'MassSchedule', 'ServiceRequest', 'PrayerRequest', 'Finance', 'SacramentalRecords',
+  'WebsiteContent', 'Gallery', 'ContactMessages',
+];
+
+const MODULE_ROUTES = [
+  ['/api/admin/site-content/', null],
+  ['/api/admin/contact-messages', 'ContactMessages'],
+  ['/api/admin/prayers', 'PrayerRequest'],
+  ['/api/prayers', 'PrayerRequest'],
+  ['/api/admin/service-requests', 'ServiceRequest'],
+  ['/api/admin/service-fields', 'ServiceRequest'],
+  ['/api/admin/certificate-requests', 'ServiceRequest'],
+  ['/api/admin/blocked-slots', 'ServiceRequest'],
+  ['/api/admin/operations/schedule', 'MassSchedule'],
+  ['/api/admin/operations/mass-intentions', 'MassSchedule'],
+  ['/api/admin/operations/finance', 'Finance'],
+  ['/api/admin/operations/reports', 'Finance'],
+  ['/api/admin/operations/applications', 'ServiceRequest'],
+  ['/api/admin/operations/statistics', 'SacramentalRecords'],
+  ['/api/admin/sacramental', 'SacramentalRecords'],
+];
+
+/** Resolve which permission module a staff API path belongs to, or null when it is not overridable. */
+export function moduleForPath(path) {
+  const clean = String(path || '').split('?')[0].replace(/\/+$/, '');
+  if (clean.startsWith('/api/admin/site-content/')) {
+    return clean.split('/')[4] === 'gallery' ? 'Gallery' : 'WebsiteContent';
+  }
+  const match = MODULE_ROUTES.find(([prefix]) => prefix && (clean === prefix || clean.startsWith(`${prefix}/`)));
+  return match ? match[1] : null;
+}
+
+/**
+ * Decide whether an account override allows an action.
+ * Returns true/false when an override exists for the module, or null to fall back to the role default.
+ * Edit access always implies view access.
+ */
+export function overrideDecision(overrides, module, action) {
+  const entry = overrides && module ? overrides[module] : undefined;
+  if (!entry) return null;
+  return action === 'view' ? Boolean(entry.view || entry.edit) : Boolean(entry.edit);
 }

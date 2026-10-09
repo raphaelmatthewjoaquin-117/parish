@@ -1664,3 +1664,49 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Sacramental Ledger polish */
+.sacramental-ledger .ledger-heading {
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #d3bc8d;
+}
+
+.sacramental-search .search-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.sacramental-search .search-input,
+.sacramental-search .search-select,
+.sacramental-search .search-date {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sacramental-table-container {
+  max-height: 65vh;
+  overflow: auto;
+}
+
+.sacramental-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f1e9;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.sacramental-table tbody tr:nth-child(even) {
+  background: #fbf9f4;
+}
+
+.sacramental-table tbody tr:hover {
+  background: #f3ecda;
+}
+
+.sacramental-table td:nth-child(3) {
+  font-weight: 600;
+}

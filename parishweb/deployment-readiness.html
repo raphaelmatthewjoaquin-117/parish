@@ -1,0 +1,530 @@
+<title>Parish Deployment Audit</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+  /* Layout: single-column report with status sidebar on cards */
+  :root {
+    --bg: #fafaf8;
+    --surface: #ffffff;
+    --fg: #1a1a1a;
+    --fg-muted: #6b6b6b;
+    --border: #e4e2dd;
+    --accent: #2d5a27;
+    --accent-light: #e8f0e7;
+    --pass: #2d7a2d;
+    --pass-bg: #e6f4e6;
+    --warn: #b5850a;
+    --warn-bg: #fef8e7;
+    --fail: #c9362c;
+    --fail-bg: #fde8e6;
+    --info: #2563a0;
+    --info-bg: #e8f0fa;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'DM Mono', 'Consolas', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111110;
+      --surface: #1c1c1a;
+      --fg: #e8e8e4;
+      --fg-muted: #8a8a82;
+      --border: #2e2e2a;
+      --accent: #6dbf65;
+      --accent-light: #1a2a18;
+      --pass: #5cc95c;
+      --pass-bg: #1a2e1a;
+      --warn: #d4a520;
+      --warn-bg: #2a2410;
+      --fail: #e85a50;
+      --fail-bg: #2e1614;
+      --info: #5a9fd4;
+      --info-bg: #14202e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111110;
+    --surface: #1c1c1a;
+    --fg: #e8e8e4;
+    --fg-muted: #8a8a82;
+    --border: #2e2e2a;
+    --accent: #6dbf65;
+    --accent-light: #1a2a18;
+    --pass: #5cc95c;
+    --pass-bg: #1a2e1a;
+    --warn: #d4a520;
+    --warn-bg: #2a2410;
+    --fail: #e85a50;
+    --fail-bg: #2e1614;
+    --info: #5a9fd4;
+    --info-bg: #14202e;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    padding-inline: 20px;
+    padding-block: 0;
+    line-height: 1.6;
+  }
+
+  .report {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  header {
+    padding-block: 40px 24px;
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: 32px;
+  }
+
+  header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    text-wrap: balance;
+  }
+
+  header .subtitle {
+    font-size: 0.95rem;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+
+  .score-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 24px 0 32px;
+  }
+
+  .score-card {
+    flex: 1;
+    min-width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .score-card .label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+  }
+
+  .score-card .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .score-card .value.pass { color: var(--pass); }
+  .score-card .value.warn { color: var(--warn); }
+  .score-card .value.fail { color: var(--fail); }
+
+  .score-card .detail {
+    font-size: 0.8rem;
+    color: var(--fg-muted);
+  }
+
+  section {
+    margin-bottom: 36px;
+  }
+
+  section h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-wrap: balance;
+  }
+
+  .check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .check-item .badge {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
+
+  .badge.pass { background: var(--pass-bg); color: var(--pass); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.fail { background: var(--fail-bg); color: var(--fail); }
+  .badge.info { background: var(--info-bg); color: var(--info); }
+
+  .check-item .content {
+    min-width: 0;
+  }
+
+  .check-item .title {
+    font-weight: 600;
+    font-size: 0.92rem;
+    margin-bottom: 2px;
+  }
+
+  .check-item .desc {
+    font-size: 0.84rem;
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.82em;
+    background: var(--accent-light);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .action-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+
+  .action-section h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 12px;
+  }
+
+  .action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .action-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+
+  .action-list li::before {
+    content: '';
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 8px;
+  }
+
+  .verdict-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    margin: 32px 0 40px;
+    font-weight: 600;
+    font-size: 1rem;
+  }
+
+  .verdict-bar.mostly-ready {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+  }
+
+  .verdict-bar .icon { font-size: 1.3rem; }
+
+  footer {
+    padding: 20px 0 40px;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    text-align: center;
+  }
+</style>
+
+<div class="report">
+  <header>
+    <h1>Deployment Readiness Audit</h1>
+    <p class="subtitle">Parish Web — assessed October 6, 2026</p>
+  </header>
+
+  <div class="score-row">
+    <div class="score-card">
+      <span class="label">Build</span>
+      <span class="value pass">Pass</span>
+      <span class="detail">0 TypeScript errors, 1.41s</span>
+    </div>
+    <div class="score-card">
+      <span class="label">Tests</span>
+      <span class="value pass">114 / 114</span>
+      <span class="detail">7 suites, all passing</span>
+    </div>
+    <div class="score-card">
+      <span class="label">Coverage</span>
+      <span class="value warn">67.8%</span>
+      <span class="detail">Statements (client.ts at 38%)</span>
+    </div>
+    <div class="score-card">
+      <span class="label">Verdict</span>
+      <span class="value warn">Almost</span>
+      <span class="detail">5 issues to address</span>
+    </div>
+  </div>
+
+  <!-- BLOCKERS -->
+  <section>
+    <h2>🔴 Blockers — fix before deploy</h2>
+    <div class="check-list">
+
+      <div class="check-item">
+        <span class="badge fail">Critical</span>
+        <div class="content">
+          <div class="title"><code>.env</code> not in <code>.gitignore</code></div>
+          <div class="desc">Your <code>.gitignore</code> does not exclude <code>.env</code>. This file holds your DB password, admin token, and Resend API key. If committed, those secrets are in your Git history permanently. Add <code>.env</code> to <code>.gitignore</code> and run <code>git rm --cached .env</code> if it was ever tracked.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge fail">Critical</span>
+        <div class="content">
+          <div class="title">No <code>helmet</code> or rate limiting</div>
+          <div class="desc">The server has no <code>helmet</code> (security headers) and no rate limiting middleware. Without these, the API is exposed to brute-force login attempts, clickjacking, MIME-sniffing, and XSS via missing headers. Install <code>helmet</code> and <code>express-rate-limit</code>.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge fail">Critical</span>
+        <div class="content">
+          <div class="title">Port hardcoded to 5000</div>
+          <div class="desc"><code>app.listen(5000)</code> on line 2515 of <code>server.js</code> ignores the <code>PORT</code> environment variable. Most hosting platforms (Azure, Render, Railway) inject <code>PORT</code> at runtime. Change to <code>app.listen(process.env.PORT || 5000)</code>.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- WARNINGS -->
+  <section>
+    <h2>🟡 Warnings — should fix</h2>
+    <div class="check-list">
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title">6 MB hero image ships unoptimized</div>
+          <div class="desc"><code>heading page.JPG</code> is 5.9 MB in the production bundle — larger than the entire JS + CSS combined. Resize to ≤ 400 KB, convert to WebP, and use responsive <code>&lt;img srcset&gt;</code>. This alone will cut first-load time significantly.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title">No <code>.env.example</code> file</div>
+          <div class="desc">There's no <code>.env.example</code> documenting which environment variables the project needs. Without it, anyone deploying (including your future self) has to read the source to figure out the config. Create one with all 9 keys and placeholder values.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title">API URL scattered across 10 files</div>
+          <div class="desc">The <code>VITE_API_URL || 'http://localhost:5000'</code> fallback is duplicated in 10 separate page files instead of imported from the centralized API client. If the fallback ever needs to change, you'd miss some. Import from <code>src/api/client.ts</code> everywhere.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title"><code>trustServerCertificate: true</code> in DB config</div>
+          <div class="desc">Line 314 of <code>server.js</code> trusts any SQL Server certificate. This is fine for local dev but should be <code>false</code> in production when connecting to a properly certified database, or set via an environment variable.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title">No <code>NODE_ENV</code> in current <code>.env</code></div>
+          <div class="desc">Your <code>.env</code> defines 9 variables but not <code>NODE_ENV</code>. Several behaviors differ in production mode (the admin token fallback, Pino log format, CORS). Make sure the deploy platform sets <code>NODE_ENV=production</code>.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge warn">Warning</span>
+        <div class="content">
+          <div class="title">No <code>FRONTEND_URL</code> in <code>.env</code></div>
+          <div class="desc">CORS origin falls back to <code>http://localhost:5173</code>. In production, <code>FRONTEND_URL</code> must be set to your real domain or the frontend can't reach the API.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- PASSING -->
+  <section>
+    <h2>🟢 Passing</h2>
+    <div class="check-list">
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Build compiles cleanly</div>
+          <div class="desc">TypeScript and Vite build with 0 errors in 1.41 seconds. Bundle size is 646 KB JS (184 KB gzipped).</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">114 tests passing across 7 suites</div>
+          <div class="desc">All test files pass: server rules, RBAC, service rules, SQL utilities, API client, hooks, and password hashing.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Connection pooling implemented</div>
+          <div class="desc">Singleton pool with error recovery, used across all 82 endpoints. Graceful shutdown on SIGTERM / SIGINT.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Parameterized queries</div>
+          <div class="desc">All SQL queries use parameterized inputs via <code>request.input()</code> — no string concatenation found.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">CORS restricted to frontend origin</div>
+          <div class="desc">Configured with credentials, specific methods, allowed headers, and 1-hour preflight cache.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Graceful shutdown handlers</div>
+          <div class="desc">Both SIGTERM and SIGINT close the database pool before exiting.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Admin token enforced in production</div>
+          <div class="desc">Server throws at startup if <code>NODE_ENV=production</code> and <code>ADMIN_TOKEN</code> is not set. Dev fallback <code>letmein</code> is disabled in production.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Request logging and metrics middleware</div>
+          <div class="desc">Every request logs method, path, status, and duration. Metrics collection and health endpoint in place.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">Environment-based configuration</div>
+          <div class="desc">Database, email, CORS, and auth all read from <code>process.env</code> with dev-safe defaults.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">19 database migrations tracked</div>
+          <div class="desc">Migrations are numbered sequentially (001–019) plus a baseline. Schema changes are version-controlled.</div>
+        </div>
+      </div>
+
+      <div class="check-item">
+        <span class="badge pass">Pass</span>
+        <div class="content">
+          <div class="title">File upload validation</div>
+          <div class="desc">Multer configured with size limits (10 MB) and MIME type filtering for both archive and portal uploads.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- VERDICT -->
+  <div class="verdict-bar mostly-ready">
+    <span class="icon">⚠</span>
+    <span>Almost deployment-ready — 3 blockers must be fixed first, then 6 warnings addressed for a production-grade deploy.</span>
+  </div>
+
+  <!-- ACTION PLAN -->
+  <div class="action-section">
+    <h3>Pre-deployment checklist</h3>
+    <ul class="action-list">
+      <li>Add <code>.env</code> to <code>.gitignore</code> and remove it from tracking if committed</li>
+      <li>Install and configure <code>helmet</code> and <code>express-rate-limit</code></li>
+      <li>Change <code>app.listen(5000)</code> to <code>app.listen(process.env.PORT || 5000)</code></li>
+      <li>Compress <code>heading page.JPG</code> to ≤ 400 KB (WebP recommended)</li>
+      <li>Create <code>.env.example</code> with all required variables documented</li>
+      <li>Consolidate the 10 scattered <code>API_URL</code> declarations to use the API client</li>
+      <li>Make <code>trustServerCertificate</code> configurable via environment variable</li>
+      <li>Set <code>NODE_ENV=production</code> and <code>FRONTEND_URL</code> on deploy platform</li>
+      <li>Rotate DB password, admin token, and Resend API key before going live</li>
+    </ul>
+  </div>
+
+  <div class="action-section">
+    <h3>Nice to have</h3>
+    <ul class="action-list">
+      <li>Implement code splitting (dynamic <code>import()</code>) to reduce the 646 KB JS chunk</li>
+      <li>Add a <code>ContactPage.tsx</code> form submission backend (currently a TODO)</li>
+      <li>Increase test coverage on <code>client.ts</code> (currently 38% statements)</li>
+      <li>Set up a CI/CD pipeline (GitHub Actions) for automated build + test on push</li>
+    </ul>
+  </div>
+
+  <footer>
+    Generated by deployment audit &middot; parish-web &middot; October 6, 2026
+  </footer>
+</div>

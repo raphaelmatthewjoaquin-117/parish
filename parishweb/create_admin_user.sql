@@ -42,12 +42,14 @@ SELECT @AdminRoleId = RoleId FROM dbo.AspNetRoles WHERE Name = 'Admin';
 IF NOT EXISTS (SELECT 1 FROM dbo.AspNetUsers WHERE EmailAddress = 'admin@parish.local')
 BEGIN
     INSERT INTO dbo.AspNetUsers (
+        UserName,
         EmailAddress,
         EmailConfirmed,
         PasswordHash,
         CreatedAt
     )
     VALUES (
+        'admin',
         'admin@parish.local',
         1,
         'ATO6EGmFV+at531pdezGByFv1+9c+oyQXJQml0WXd+XANpoz/EgClGs8tr7oK2GWlA==',

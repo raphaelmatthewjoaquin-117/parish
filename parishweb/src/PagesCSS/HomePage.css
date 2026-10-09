@@ -3,7 +3,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: url('../images/heading%20page.JPG') center center / cover no-repeat fixed;
+	background: url('../images/heading%20page.webp') center center / cover no-repeat fixed;
 	position: relative;
 }
 
@@ -21,6 +21,9 @@
 .hero-copy {
 	position: relative;
 	z-index: 2;
+	width: min(100%, 850px);
+	margin-inline: auto;
+	text-align: center;
 }
 
 .hero h1 {
@@ -108,6 +111,264 @@
 
 .vatican-news-card a:hover {
 	text-decoration: underline;
+}
+
+.homepage-community {
+	border-radius: 10px;
+	background: #f7f4ee;
+}
+
+.homepage-community-intro {
+	max-width: 680px;
+	margin: 0 auto 2rem;
+	text-align: center;
+}
+
+.homepage-community-intro .eyebrow {
+	margin-bottom: .4rem;
+	color: #9a6b00;
+	font-size: .75rem;
+	font-weight: 700;
+	letter-spacing: .16em;
+	text-transform: uppercase;
+}
+
+.homepage-community-intro h2 {
+	margin: 0 0 .65rem;
+	color: #493526;
+	font-family: Georgia, 'Times New Roman', serif;
+	font-size: clamp(1.7rem, 3vw, 2.35rem);
+}
+
+.homepage-community-intro > p:last-child {
+	margin: 0;
+	color: #6f6257;
+}
+
+.homepage-community-grid {
+	display: grid;
+	grid-template-columns: 1fr 1.1fr 1.2fr;
+	gap: clamp(1rem, 2.2vw, 1.75rem);
+	align-items: start;
+}
+
+.homepage-community-column {
+	min-width: 0;
+	padding: clamp(1rem, 1.7vw, 1.5rem);
+	border: 1px solid rgba(111, 78, 55, .13);
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 8px 24px rgba(50, 35, 20, .07);
+}
+
+.homepage-community-title {
+	margin: 0 0 1rem;
+	padding-bottom: .8rem;
+	border-bottom: 2px solid #DA9100;
+	color: #493526;
+	font-family: Georgia, 'Times New Roman', serif;
+	font-size: clamp(1rem, 1.4vw, 1.2rem);
+	font-weight: 600;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+}
+
+.sacrament-links {
+	display: flex;
+	flex-direction: column;
+	gap: .55rem;
+}
+
+.sacrament-links a {
+	display: flex;
+	min-height: 52px;
+	align-items: center;
+	justify-content: space-between;
+	gap: .75rem;
+	padding: .8rem 1rem;
+	border: 1px solid rgba(111, 78, 55, .1);
+	border-radius: 5px;
+	background: #fbfaf8;
+	color: #352a21;
+	font-weight: 500;
+	text-decoration: none;
+	transition: border-color .2s ease, background-color .2s ease, transform .2s ease;
+}
+
+.sacrament-links a::after {
+	color: #9a6b00;
+	content: '›';
+	font-size: 1.35rem;
+	line-height: 1;
+}
+
+.sacrament-links a:hover,
+.sacrament-links a:focus-visible {
+	transform: translateX(2px);
+	border-color: rgba(218, 145, 0, .55);
+	background: #fff8e9;
+	color: #6F4E37;
+}
+
+.homepage-gallery-preview {
+	display: block;
+	width: 100%;
+	height: clamp(190px, 20vw, 250px);
+	border-radius: 5px;
+	object-fit: cover;
+}
+
+.gallery-preview-status {
+	color: #6F4E37;
+	font-size: .85rem;
+}
+
+.homepage-gallery-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .75rem;
+	margin-top: 1rem;
+}
+
+.homepage-community-button {
+	display: inline-flex;
+	min-height: 42px;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	padding: .55rem 1rem;
+	border: 1px solid #b87900;
+	border-radius: 4px;
+	background: #DA9100;
+	color: #fff;
+	font-size: .9rem;
+	font-weight: 600;
+	text-align: center;
+	text-decoration: none;
+	transition: background-color .2s ease, transform .2s ease;
+}
+
+.homepage-community-button:hover,
+.homepage-community-button:focus-visible {
+	transform: translateY(-1px);
+	background: #b87900;
+	color: #fff;
+}
+
+.homepage-facebook-column {
+	width: min(100%, 390px);
+	justify-self: center;
+}
+
+.homepage-facebook-profile {
+	display: flex;
+	align-items: center;
+	gap: .75rem;
+	min-height: 78px;
+	padding: .8rem;
+	border: 1px solid #d8dce2;
+	background: #fff;
+	color: #1c1e21;
+	text-decoration: none;
+}
+
+.homepage-facebook-profile img {
+	width: 48px;
+	height: 48px;
+	flex: 0 0 48px;
+	border: 1px solid #d8dce2;
+	object-fit: contain;
+}
+
+.homepage-facebook-profile span {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: .15rem;
+}
+
+.homepage-facebook-profile strong {
+	color: #365899;
+	font-size: 1rem;
+	font-weight: 500;
+	line-height: 1.2;
+}
+
+.homepage-facebook-profile small {
+	color: #4b4f56;
+	font-size: .75rem;
+}
+
+.homepage-facebook-actions {
+	display: flex;
+	min-height: 42px;
+	align-items: center;
+	justify-content: space-between;
+	padding: .35rem .55rem;
+	border: 1px solid #d8dce2;
+	border-top: 0;
+	background: #f5f6f7;
+}
+
+.homepage-facebook-actions a {
+	padding: .25rem .5rem;
+	border: 1px solid #d8dce2;
+	border-radius: 2px;
+	background: #f5f6f7;
+	color: #365899;
+	font-size: .75rem;
+	font-weight: 700;
+	text-decoration: none;
+}
+
+.homepage-facebook-actions a:hover,
+.homepage-facebook-actions a:focus-visible {
+	background: #e9ebee;
+}
+
+.homepage-facebook-feed-window {
+	height: 420px;
+	overflow: hidden;
+	border: 1px solid #d8dce2;
+	border-top: 0;
+	border-radius: 0 0 4px 4px;
+	background: #fff;
+}
+
+.homepage-facebook-embed {
+	position: relative;
+	top: -90px;
+	display: block;
+	width: 100%;
+	max-width: 340px;
+	height: 700px;
+	margin-inline: auto;
+	border: 0;
+	background: #fff;
+}
+
+@media (max-width: 991.98px) {
+	.homepage-community-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.homepage-facebook-column {
+		grid-column: 1 / -1;
+	}
+
+	.homepage-facebook-column {
+		justify-self: center;
+	}
+}
+
+@media (max-width: 575.98px) {
+	.homepage-community-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.homepage-facebook-column {
+		grid-column: auto;
+	}
 }
 
 @media (max-width: 575.98px) {

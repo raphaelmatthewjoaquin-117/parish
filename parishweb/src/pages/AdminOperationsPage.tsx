@@ -1,7 +1,8 @@
 /* The embedded operations markup still consumes legacy SQL-shaped payloads. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from 'react'
-import { apiClient, useApiError as formatApiError } from '../api/client'
+import { API_BASE_URL, apiClient, useApiError as formatApiError } from '../api/client'
+import type { ModuleOverrides } from '../utils/rbac'
 import '../PagesCSS/AdminOperationsPage.css'
 
 
@@ -30,9 +31,11 @@ const emptyServiceField = { serviceId: '', key: '', label: '', type: 'text', req
 type AdminOperationsPageProps = {
   initialTab?: AdminOperationsTab
   embedded?: boolean
+  staffRole?: string
+  overrides?: ModuleOverrides
 }
 
-export function AdminOperationsPage({ initialTab = 'schedule', embedded = false }: AdminOperationsPageProps) {
+export function AdminOperationsPage({ initialTab = 'schedule', embedded = false, staffRole = '', overrides }: AdminOperationsPageProps) {
   const [token, setToken] = useState(() => window.localStorage.getItem('adminToken') || '')
   const [tab, setTab] = useState<AdminOperationsTab>(initialTab)
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -61,6 +64,16 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const financeOverride = staffRole === 'Admin' ? undefined : overrides?.Finance
+  const scheduleOverride = staffRole === 'Admin' ? undefined : overrides?.MassSchedule
+  const canViewFinanceRecords = financeOverride ? financeOverride.view : ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper'].includes(staffRole)
+  const canManageSchedule = scheduleOverride ? scheduleOverride.edit : ['Admin', 'ParishPriest', 'Secretary', 'Staff'].includes(staffRole)
+  const canCreateSchedule = scheduleOverride ? scheduleOverride.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
+  const canDeleteSchedule = scheduleOverride ? scheduleOverride.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
+  const canManageFinance = financeOverride ? financeOverride.edit : canViewFinanceRecords
+  const canReviewFinance = financeOverride ? financeOverride.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
+  const canReconcileFinance = financeOverride ? financeOverride.edit : ['Admin', 'Bookkeeper'].includes(staffRole)
+
   const showError = (reason: unknown) => setError(formatApiError(reason))
   const run = async (operation: () => Promise<void>) => {
     setError('')
@@ -73,33 +86,16 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
     setStatsReport(reportData)
   })
 
-  const loadAll = () => run(async () => {
-    const [nextSchedules, nextIntentions, nextFinance, nextApplications] = await Promise.all([
-      apiClient.admin.operationSchedule(token),
-      apiClient.admin.massIntentions(token),
-      apiClient.admin.financeEntries(token),
-      apiClient.serviceRequests.list(token),
-    ])
-    setSchedules(nextSchedules)
-    setIntentions(nextIntentions)
-    setFinance(nextFinance)
-    setApplications(nextApplications)
-  })
-
   const loadFinanceAudit = () => run(async () => {
-    const [audit, historyItems] = await Promise.all([
-      apiClient.admin.financeAudit(token),
-      apiClient.admin.financeReportHistory(token),
-    ])
-    setFinanceAudit(audit)
+    const historyItems = await apiClient.admin.financeReportHistory(token)
     setFinanceReportHistory(historyItems)
+    if (canViewFinanceRecords) setFinanceAudit(await apiClient.admin.financeAudit(token))
   })
 
   const loadServiceFields = () => run(async () => {
-    const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:5000'
     const [fields, services] = await Promise.all([
       apiClient.admin.serviceFields(token),
-      fetch(`${baseUrl}/api/services`).then(response => response.json()),
+      fetch(`${API_BASE_URL}/api/services`).then(response => response.json()),
     ])
     setServiceFields(fields)
     setServiceOptions(services.map((s: { id: number; name: string }) => ({ id: s.id, name: s.name })))
@@ -108,9 +104,25 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (!token) return
-      void loadAll()
+      if (tab === 'schedule') void run(async () => setSchedules(await apiClient.admin.operationSchedule(token)))
+      if (tab === 'intentions') void run(async () => setIntentions(await apiClient.admin.massIntentions(token)))
+      if (tab === 'finance') void run(async () => {
+        const [nextReport, nextHistory] = await Promise.all([
+          apiClient.admin.financeReport(token),
+          apiClient.admin.financeReportHistory(token),
+        ])
+        setReport(nextReport)
+        setFinanceReportHistory(nextHistory)
+        if (canViewFinanceRecords) {
+          const [nextFinance, nextAudit] = await Promise.all([
+            apiClient.admin.financeEntries(token),
+            apiClient.admin.financeAudit(token),
+          ])
+          setFinance(nextFinance)
+          setFinanceAudit(nextAudit)
+        }
+      })
       if (tab === 'stats') void loadStats()
-      if (tab === 'finance') void loadFinanceAudit()
       if (tab === 'service-fields') void loadServiceFields()
     }, 0)
     return () => window.clearTimeout(timer)
@@ -201,8 +213,7 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
     if (reportStart) params.set('start', reportStart)
     if (reportEnd) params.set('end', reportEnd)
     if (reportType) params.set('type', reportType)
-    const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:5000'
-    const response = await fetch(`${baseUrl}/api/admin/operations/finance/report?${params.toString()}`, { headers: { 'x-admin-token': token } })
+    const response = await fetch(`${API_BASE_URL}/api/admin/operations/finance/report?${params.toString()}`, { headers: { 'x-admin-token': token } })
     if (!response.ok) throw new Error('Unable to export finance report')
     const blob = await response.blob()
     const link = document.createElement('a')
@@ -308,20 +319,83 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
   }
 
   return <section className={`operations-page container-fluid py-4 ${embedded ? 'admin-embedded-page' : ''}`}>
-    {!embedded && <div className="operations-heading"><div><p className="eyebrow">Staff workspace</p><h1>Administrative Operations</h1></div><button onClick={() => { window.localStorage.removeItem('adminToken'); setToken('') }}>Sign out</button></div>}
+    {!embedded && <div className="operations-heading"><div><p className="eyebrow">Staff workspace</p><h1>Administrative Operations</h1></div></div>}
     {!embedded && <nav className="operations-tabs nav nav-tabs mb-4" aria-label="Administrative operations">
-      {([['schedule', 'Service schedule'], ['intentions', 'Mass intentions'], ['finance', 'Finance and reports'], ['applications', 'Applications'], ['stats', 'Statistical & Demographic Reports'], ['service-fields', 'Booking form fields']] as const).map(([value, label]) => <button key={value} className={`nav-link ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)}>{label}</button>)}
+      {([['schedule', 'Service schedule'], ['intentions', 'Mass intentions'], ['finance', 'Finance and reports'], ['stats', 'Statistical & Demographic Reports'], ['service-fields', 'Booking form fields']] as const).map(([value, label]) => <button key={value} className={`nav-link ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)}>{label}</button>)}
     </nav>}
     {message && <p className="success-message">{message}</p>}
     {error && <p className="error-message">{error}</p>}
 
-    {tab === 'schedule' && <div className="operations-grid"><form className="operations-form" onSubmit={saveSchedule}><h2>{editingSchedule ? 'Edit schedule' : 'New schedule'}</h2><label>Title<input required value={scheduleForm.title} onChange={event => setScheduleForm({ ...scheduleForm, title: event.target.value })} /></label><label>Date<input required type="date" value={scheduleForm.date} onChange={event => setScheduleForm({ ...scheduleForm, date: event.target.value })} /></label><label>Time<input required type="time" value={scheduleForm.time} onChange={event => setScheduleForm({ ...scheduleForm, time: event.target.value })} /></label><label>Location<input required value={scheduleForm.location} onChange={event => setScheduleForm({ ...scheduleForm, location: event.target.value })} /></label><label>Priest / minister<input required value={scheduleForm.priestUsername} onChange={event => setScheduleForm({ ...scheduleForm, priestUsername: event.target.value })} /></label><label>Notes<textarea value={scheduleForm.notes} onChange={event => setScheduleForm({ ...scheduleForm, notes: event.target.value })} /></label><button type="submit">{editingSchedule ? 'Save changes' : 'Add schedule'}</button></form><div className="operations-list"><h2>Editable service schedules</h2>{schedules.map(item => <article key={item.id}><div><strong>{item.title}</strong><span>{item.date} at {item.time} · {item.location}</span><small>{item.priestUsername} · {item.status}</small></div><button onClick={() => { setEditingSchedule(item.id); setScheduleForm({ title: item.title, date: String(item.date).slice(0, 10), time: item.time, location: item.location, priestUsername: item.priestUsername, notes: item.notes || '', status: item.status }) }}>Edit</button><button type="button" onClick={() => deleteSchedule(item.id)}>Delete</button></article>)}</div></div>}
+    {tab === 'schedule' && <div className="operations-grid">
+      {(canCreateSchedule || editingSchedule !== null) && <form className="operations-form" onSubmit={saveSchedule}>
+        <h2>{editingSchedule ? 'Edit schedule' : 'New schedule'}</h2>
+        <label>Title<input required value={scheduleForm.title} onChange={event => setScheduleForm({ ...scheduleForm, title: event.target.value })} /></label>
+        <label>Date<input required type="date" value={scheduleForm.date} onChange={event => setScheduleForm({ ...scheduleForm, date: event.target.value })} /></label>
+        <label>Time<input required type="time" value={scheduleForm.time} onChange={event => setScheduleForm({ ...scheduleForm, time: event.target.value })} /></label>
+        <label>Location<input required value={scheduleForm.location} onChange={event => setScheduleForm({ ...scheduleForm, location: event.target.value })} /></label>
+        <label>Priest / minister<input required value={scheduleForm.priestUsername} onChange={event => setScheduleForm({ ...scheduleForm, priestUsername: event.target.value })} /></label>
+        <label>Notes<textarea value={scheduleForm.notes} onChange={event => setScheduleForm({ ...scheduleForm, notes: event.target.value })} /></label>
+        <button type="submit">{editingSchedule ? 'Save changes' : 'Add schedule'}</button>
+        {editingSchedule !== null && <button type="button" onClick={() => { setEditingSchedule(null); setScheduleForm(emptySchedule) }}>Cancel edit</button>}
+      </form>}
+      <div className="operations-list">
+        <h2>{canManageSchedule ? 'Service schedules' : 'Schedule overview'}</h2>
+        {schedules.map(item => <article key={item.id}>
+          <div><strong>{item.title}</strong><span>{item.date} at {item.time} · {item.location}</span><small>{item.priestUsername} · {item.status}</small></div>
+          {canManageSchedule && <button type="button" onClick={() => { setEditingSchedule(item.id); setScheduleForm({ title: item.title, date: String(item.date).slice(0, 10), time: item.time, location: item.location, priestUsername: item.priestUsername, notes: item.notes || '', status: item.status }) }}>Edit</button>}
+          {canDeleteSchedule && <button type="button" onClick={() => deleteSchedule(item.id)}>Delete</button>}
+        </article>)}
+      </div>
+    </div>}
 
     {tab === 'intentions' && <div className="operations-grid"><form className="operations-form" onSubmit={saveIntention}><h2>Record Mass intention</h2><label>Date<input required type="date" value={intentionForm.date} onChange={event => setIntentionForm({ ...intentionForm, date: event.target.value })} /></label><label>Time<input required type="time" value={intentionForm.time} onChange={event => setIntentionForm({ ...intentionForm, time: event.target.value })} /></label><label>Offering<input type="number" min="0" step="0.01" value={intentionForm.offering} onChange={event => setIntentionForm({ ...intentionForm, offering: event.target.value })} /></label><label>Requested by<input required value={intentionForm.requestedBy} onChange={event => setIntentionForm({ ...intentionForm, requestedBy: event.target.value })} /></label><label>Intention<textarea required value={intentionForm.intentionText} onChange={event => setIntentionForm({ ...intentionForm, intentionText: event.target.value })} /></label><button type="submit">Save intention</button></form><div className="operations-list"><h2>Mass intentions</h2>{intentions.map(item => <article key={item.MassIntentionId}><div><strong>{item.IntentionDate} at {item.IntentionTime}</strong><span>{item.IntentionText}</span><small>{item.RequestedBy} · Offering {item.Offering}</small></div><button type="button" onClick={() => cancelIntention(item.MassIntentionId)}>Cancel</button></article>)}</div></div>}
 
-    {tab === 'finance' && <div className="operations-grid"><form className="operations-form" onSubmit={saveFinance}><h2>{editingFinanceId ? 'Edit financial entry' : 'Record financial entry'}</h2><label>Date<input required type="date" value={financeForm.date} onChange={event => setFinanceForm({ ...financeForm, date: event.target.value })} /></label><label>Type<select value={financeForm.entryType} onChange={event => setFinanceForm({ ...financeForm, entryType: event.target.value })}><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label><label>Description<input required value={financeForm.description} onChange={event => setFinanceForm({ ...financeForm, description: event.target.value })} /></label><label>Amount<input required type="number" min="0.01" step="0.01" value={financeForm.amount} onChange={event => setFinanceForm({ ...financeForm, amount: event.target.value })} /></label><button type="submit">{editingFinanceId ? 'Save changes' : 'Save draft'}</button>{editingFinanceId && <button type="button" onClick={() => { setEditingFinanceId(null); setFinanceForm({ date: '', entryType: 'StoleFee', description: '', amount: '' }) }}>Cancel edit</button>}</form><div className="operations-list"><div className="list-heading"><h2>Finance report</h2><label>From<input type="date" value={reportStart} onChange={event => setReportStart(event.target.value)} /></label><label>To<input type="date" value={reportEnd} onChange={event => setReportEnd(event.target.value)} /></label><label>Category<select value={reportType} onChange={event => setReportType(event.target.value)}><option value="">All</option><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="Donation">Donation</option><option value="Rental">Rental</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label><button type="button" onClick={() => run(async () => setReport(await apiClient.admin.financeReport(token, reportFilters())))}>Refresh report</button><button type="button" onClick={exportFinanceCsv}>Export CSV</button></div>{report?.totals?.map((item: any) => <article key={item.EntryType}><div><strong>{item.EntryType}</strong><span>{item.EntryCount} approved/reconciled entries</span><small>Total: {item.Total}</small></div></article>)}<h2>Recent entries</h2>{finance.map(item => <article key={item.FinancialEntryId}><div><strong>{item.EntryDate} · {item.EntryType}</strong><span>{item.Description}</span><small>{item.Amount} · {item.EnteredBy} · {item.Status || 'Legacy'}</small></div><div className="button-row">{['Draft', 'Rejected'].includes(item.Status || 'Draft') && <button type="button" onClick={() => editFinance(item)}>Edit</button>}{['Draft', 'Rejected'].includes(item.Status || 'Draft') && <button type="button" onClick={() => submitFinance(item.FinancialEntryId)}>Submit</button>}{item.Status === 'Draft' && <button type="button" onClick={() => deleteFinance(item.FinancialEntryId)}>Delete</button>}{item.Status === 'Submitted' && <button type="button" onClick={() => approveFinance(item.FinancialEntryId)}>Approve</button>}{item.Status === 'Submitted' && <button type="button" onClick={() => rejectFinance(item.FinancialEntryId)}>Reject</button>}{item.Status === 'Approved' && <button type="button" onClick={() => reconcileFinance(item.FinancialEntryId)}>Reconcile</button>}</div></article>)}</div></div>}
-
-    {tab === 'applications' && <div className="operations-grid"><div className="operations-list scrollable"><h2>Applications</h2>{applications.map(item => <article key={item.id}><div><strong>{item.firstName} {item.lastName}</strong><span>{item.serviceName} · {item.scheduledDate} at {item.scheduledTime}</span><small>{item.status}{item.attendanceStatus ? ` · ${item.attendanceStatus}` : ''}</small></div><button onClick={() => selectApplication(item)}>Open</button></article>)}</div>{selectedApplication && <div className="operations-form printable-application"><div className="list-heading"><h2>Application</h2><button type="button" onClick={() => window.print()}>Print</button></div><form onSubmit={updateApplication}><label>First name<input value={selectedApplication.firstName} onChange={event => setSelectedApplication({ ...selectedApplication, firstName: event.target.value })} /></label><label>Last name<input value={selectedApplication.lastName} onChange={event => setSelectedApplication({ ...selectedApplication, lastName: event.target.value })} /></label><label>Email<input value={selectedApplication.email} onChange={event => setSelectedApplication({ ...selectedApplication, email: event.target.value })} /></label><label>Phone<input value={selectedApplication.mobileNumber || ''} onChange={event => setSelectedApplication({ ...selectedApplication, mobileNumber: event.target.value })} /></label><label>Address<input value={selectedApplication.address || ''} onChange={event => setSelectedApplication({ ...selectedApplication, address: event.target.value })} /></label><label>Date<input type="date" value={String(selectedApplication.scheduledDate).slice(0, 10)} onChange={event => setSelectedApplication({ ...selectedApplication, scheduledDate: event.target.value })} /></label><label>Time<input type="time" value={selectedApplication.scheduledTime} onChange={event => setSelectedApplication({ ...selectedApplication, scheduledTime: event.target.value })} /></label><label>Notes<textarea value={selectedApplication.notes || ''} onChange={event => setSelectedApplication({ ...selectedApplication, notes: event.target.value })} /></label><button type="submit">Save and log edit</button></form><div className="attendance-actions"><button onClick={() => run(async () => { await apiClient.admin.markAttendance(selectedApplication.id, 'Present', token); setMessage('Attendance marked present.'); setApplications(await apiClient.serviceRequests.list(token)) })}>Mark present</button><button onClick={() => run(async () => { await apiClient.admin.markAttendance(selectedApplication.id, 'NoShow', token); setMessage('Application voided as no-show.'); setApplications(await apiClient.serviceRequests.list(token)) })}>Mark no-show</button></div><h3>Edit history</h3>{history.map(item => <small className="history-entry" key={item.ApplicationEditLogId}>{item.ChangedAt} · {item.ChangedBy}</small>)}</div>}</div>}
+    {tab === 'finance' && <>
+      <div className="operations-grid">
+        {canManageFinance && <form className="operations-form" onSubmit={saveFinance}>
+          <h2>{editingFinanceId ? 'Edit financial entry' : 'Record financial entry'}</h2>
+          <label>Date<input required type="date" value={financeForm.date} onChange={event => setFinanceForm({ ...financeForm, date: event.target.value })} /></label>
+          <label>Type<select value={financeForm.entryType} onChange={event => setFinanceForm({ ...financeForm, entryType: event.target.value })}><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label>
+          <label>Description<input required value={financeForm.description} onChange={event => setFinanceForm({ ...financeForm, description: event.target.value })} /></label>
+          <label>Amount<input required type="number" min="0.01" step="0.01" value={financeForm.amount} onChange={event => setFinanceForm({ ...financeForm, amount: event.target.value })} /></label>
+          <button type="submit">{editingFinanceId ? 'Save changes' : 'Save draft'}</button>
+          {editingFinanceId && <button type="button" onClick={() => { setEditingFinanceId(null); setFinanceForm({ date: '', entryType: 'StoleFee', description: '', amount: '' }) }}>Cancel edit</button>}
+        </form>}
+        <div className="operations-list">
+          <div className="list-heading">
+            <h2>Finance summary</h2>
+            <label>From<input type="date" value={reportStart} onChange={event => setReportStart(event.target.value)} /></label>
+            <label>To<input type="date" value={reportEnd} onChange={event => setReportEnd(event.target.value)} /></label>
+            <label>Category<select value={reportType} onChange={event => setReportType(event.target.value)}><option value="">All</option><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="Donation">Donation</option><option value="Rental">Rental</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label>
+            <button type="button" onClick={() => run(async () => setReport(await apiClient.admin.financeReport(token, reportFilters())))}>Refresh report</button>
+            <button type="button" onClick={exportFinanceCsv}>Export CSV</button>
+          </div>
+          {report?.totals?.map((item: any) => <article key={item.EntryType}><div><strong>{item.EntryType}</strong><span>{item.EntryCount} approved/reconciled entries</span><small>Total: {item.Total}</small></div></article>)}
+          {canViewFinanceRecords && <>
+            <h2>Recent entries</h2>
+            {finance.map(item => <article key={item.FinancialEntryId}>
+              <div><strong>{item.EntryDate} · {item.EntryType}</strong><span>{item.Description}</span><small>{item.Amount} · {item.EnteredBy} · {item.Status || 'Legacy'}</small></div>
+              <div className="button-row">
+                {['Draft', 'Rejected'].includes(item.Status || 'Draft') && <button type="button" onClick={() => editFinance(item)}>Edit</button>}
+                {['Draft', 'Rejected'].includes(item.Status || 'Draft') && canReconcileFinance && <button type="button" onClick={() => submitFinance(item.FinancialEntryId)}>Submit</button>}
+                {item.Status === 'Draft' && <button type="button" onClick={() => deleteFinance(item.FinancialEntryId)}>Delete</button>}
+                {item.Status === 'Submitted' && canReviewFinance && <button type="button" onClick={() => approveFinance(item.FinancialEntryId)}>Approve</button>}
+                {item.Status === 'Submitted' && canReviewFinance && <button type="button" onClick={() => rejectFinance(item.FinancialEntryId)}>Reject</button>}
+                {item.Status === 'Approved' && canReconcileFinance && <button type="button" onClick={() => reconcileFinance(item.FinancialEntryId)}>Reconcile</button>}
+              </div>
+            </article>)}
+          </>}
+        </div>
+      </div>
+      {canViewFinanceRecords && <div className="operations-list finance-audit-panel">
+        <div className="list-heading"><h2>Finance audit history</h2><button type="button" onClick={loadFinanceAudit}>Refresh history</button></div>
+        {financeAudit.length === 0 ? <p>No finance audit entries found.</p> : financeAudit.map(item => <article key={item.AuditId}><div><strong>{item.ActionName} · Entry #{item.FinancialEntryId}</strong><span>{item.EntryType} · {item.Description}</span><small>{item.ChangedBy} · {new Date(item.ChangedAt).toLocaleString()} · {item.Details}</small></div></article>)}
+      </div>}
+      <div className="operations-list finance-audit-panel">
+        <div className="list-heading"><h2>Generated finance reports</h2><button type="button" onClick={loadFinanceAudit}>Refresh reports</button></div>
+        {financeReportHistory.length === 0 ? <p>No scheduled reports have been generated yet.</p> : financeReportHistory.map(item => <article key={item.FinanceReportSnapshotId}><div><strong>{item.ReportType} report · {String(item.PeriodStart).slice(0, 10)} to {String(item.PeriodEnd).slice(0, 10)}</strong><span>Income {item.TotalIncome} · Expenses {item.TotalExpenses} · Net {item.NetTotal}</span><small>Generated {new Date(item.GeneratedAt).toLocaleString()} by {item.GeneratedBy}</small></div></article>)}
+      </div>
+    </>}
 
     {tab === 'finance' && <div className="operations-list finance-audit-panel"><div className="list-heading"><h2>Finance audit history</h2><button type="button" onClick={loadFinanceAudit}>Refresh history</button></div>{financeAudit.length === 0 ? <p>No finance audit entries found.</p> : financeAudit.map(item => <article key={item.AuditId}><div><strong>{item.ActionName} · Entry #{item.FinancialEntryId}</strong><span>{item.EntryType} · {item.Description}</span><small>{item.ChangedBy} · {new Date(item.ChangedAt).toLocaleString()} · {item.Details}</small></div></article>)}</div>}
 
@@ -465,15 +539,15 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false 
         {serviceOptions.map(service => {
           const fieldsForService = serviceFields.filter(f => f.serviceId === service.id)
           if (fieldsForService.length === 0) return null
-          return <div key={service.id}>
-            <h3 style={{ margin: '1rem 0 .5rem' }}>{service.name}</h3>
+          return <details key={service.id} style={{ margin: '.75rem 0' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '1.1rem', padding: '.5rem 0' }}>{service.name} <small>({fieldsForService.length} fields)</small></summary>
             {fieldsForService.map(field => <article key={field.id} style={{ opacity: field.active ? 1 : 0.5 }}>
               <div><strong>{field.label}</strong><span> · {field.type}{field.required ? ' · required' : ''}</span><small>key: {field.key} · order {field.sortOrder} · {field.active ? 'visible' : 'hidden'}</small></div>
               <button type="button" onClick={() => editServiceField(field)}>Edit</button>
               <button type="button" onClick={() => toggleServiceFieldActive(field)}>{field.active ? 'Hide' : 'Show'}</button>
               <button type="button" onClick={() => deleteServiceField(field.id)}>Delete</button>
             </article>)}
-          </div>
+          </details>
         })}
       </div>
     </div>}

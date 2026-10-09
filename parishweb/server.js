@@ -1,5 +1,7 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 import { Resend } from 'resend';
@@ -15,8 +17,14 @@ import {
   isNoShowEligible,
   isUnverifiedExpired,
   ALLOWED_REQUEST_STATUSES,
+  isAllowedArchiveUpload,
+  isValidGalleryContent,
   toCsv,
+  OVERRIDABLE_MODULES,
+  moduleForPath,
+  overrideDecision,
 } from './server-rules.js';
+import { hashAspNetPassword } from './password-hash.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -66,15 +74,11 @@ const logError = (msg, data) => logger.error(msg, data);
 const logEmail = (msg, data) => logger.info('[EMAIL] ' + msg, data);
 const logAuth = (msg, data) => logger.info('[AUTH] ' + msg, data);
 
-// Simple metrics (fallback)
-const metricsCollector = {
-  recordMetric: () => {},
-  startPeriodicReporting: () => {
-    // Placeholder - metrics reporting
-  },
+let totalRequests = 0;
+const metricsMiddleware = (_req, _res, next) => {
+  totalRequests += 1;
+  next();
 };
-
-const metricsMiddleware = (_req, _res, next) => next();
 
 function dateOnly(value) {
   return value.toISOString().slice(0, 10);
@@ -149,7 +153,7 @@ async function voidNoShowAppointments() {
   const noShows = normalized.filter(row => isNoShowEligible(row, now));
   const expired = normalized.filter(row => isUnverifiedExpired(row, now));
   for (const row of noShows) {
-    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', AttendanceStatus='NoShow', AttendanceMarkedAt=SYSUTCDATETIME(), VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='Confirmed'`);
+    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='VoidedNoShow', AttendanceStatus='NoShow', AttendanceMarkedAt=SYSUTCDATETIME(), VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='Confirmed'`);
   }
   for (const row of expired) {
     await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='PendingVerification'`);
@@ -170,7 +174,7 @@ const handleHealthCheck = (_req, res) => {
 };
 
 const handleMetricsRequest = (_req, res) => {
-  res.json({ totalRequests: 0, uptime: process.uptime() });
+  res.json({ totalRequests, uptime: process.uptime() });
 };
 
 // Token management - using database storage for persistence across restarts
@@ -250,6 +254,35 @@ const startTokenCleanupSchedule = (intervalMinutes = 60) => {
 dotenv.config();
 
 const app = express();
+const trustProxyHopsValue = process.env.TRUST_PROXY_HOPS ?? '0';
+if (!/^\d+$/.test(trustProxyHopsValue) || !Number.isSafeInteger(Number(trustProxyHopsValue))) {
+  throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
+}
+app.set('trust proxy', Number(trustProxyHopsValue));
+
+const apiRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' },
+});
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many authentication attempts. Please try again later.' },
+});
+
+const contactRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many messages sent. Please try again later.' },
+});
+
 const uploadDirectory = path.resolve('uploads');
 fs.mkdirSync(uploadDirectory, { recursive: true });
 
@@ -267,21 +300,36 @@ const upload = multer({
   },
 });
 
+const archiveUpload = multer({
+  storage: upload.storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    callback(null, isAllowedArchiveUpload(file.originalname, file.mimetype, file.size || 0));
+  },
+});
+
 // CORS configuration - restrict to frontend origin for security
+const frontendOrigin = process.env.FRONTEND_URL || (
+  process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173'
+);
+if (!frontendOrigin) {
+  throw new Error('FRONTEND_URL must be configured in production.');
+}
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: frontendOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token'],
   maxAge: 3600
 };
+app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
-app.use('/uploads', express.static(uploadDirectory));
 
 // Add logging and monitoring middleware
 app.use(requestLoggingMiddleware);
 app.use(metricsMiddleware);
+app.use('/api', apiRateLimit);
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -302,7 +350,13 @@ const baseConfig = {
   database: process.env.DB_NAME || 'ParishDB',
   options: {
     encrypt: true,
-    trustServerCertificate: true,
+    trustServerCertificate: (() => {
+      const setting = process.env.DB_TRUST_SERVER_CERTIFICATE;
+      if (setting === undefined) return process.env.NODE_ENV !== 'production';
+      if (setting.toLowerCase() === 'true') return true;
+      if (setting.toLowerCase() === 'false') return false;
+      throw new Error('DB_TRUST_SERVER_CERTIFICATE must be true or false.');
+    })(),
   },
   port: Number(process.env.DB_PORT || 1433),
 };
@@ -334,7 +388,11 @@ if (dbAuth === 'sql') {
   config = baseConfig;
 }
 
-const adminSecret = process.env.ADMIN_TOKEN || 'letmein';
+const adminSecret = process.env.ADMIN_TOKEN || (process.env.NODE_ENV === 'production' ? '' : 'letmein');
+if (process.env.NODE_ENV === 'production' && !adminSecret) {
+  throw new Error('ADMIN_TOKEN must be configured in production.');
+}
+const staffTokenLifetimeMs = 8 * 60 * 60 * 1000;
 
 async function sendEmail(to, subject, html) {
   if (!process.env.RESEND_API_KEY) {
@@ -370,20 +428,54 @@ function formatTime(date) {
   return date.toISOString().slice(11, 16);
 }
 
-function parseStaffToken(token) {
-  if (!token) return null;
-  if (token === adminSecret) return { userId: null, role: 'Admin', email: null };
-  const parts = token.split('.');
-  if (parts.length !== 3 || parts[0] !== adminSecret) return null;
-  const userId = Number(parts[1]);
-  const role = String(parts[2] || '');
-  if (!Number.isInteger(userId) || !role) return null;
-  return { userId, role, email: null };
+function createStaffToken(userId, role, expiresAt = Date.now() + staffTokenLifetimeMs) {
+  return `${adminSecret}.${userId}.${role}.${expiresAt}`;
 }
 
-function requireAdmin(req, res, next) {
+function parseStaffToken(token) {
+  if (!token) return null;
+  const parts = token.split('.');
+  if (parts.length !== 4 || parts[0] !== adminSecret) return null;
+  const userId = Number(parts[1]);
+  const role = String(parts[2] || '');
+  const expiresAt = Number(parts[3]);
+  if (!Number.isInteger(userId) || !role || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+  return { userId, role, email: null, expiresAt };
+}
+
+const staffRolePriority = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
+
+async function requireAdmin(req, res, next) {
   const token = String(req.headers['x-admin-token'] ?? '')
   const staff = parseStaffToken(token);
+  if (staff && staff.userId > 0) {
+    // Roles can change after sign-in, so use the current database role instead of the one baked into the token.
+    try {
+      const result = await getPool().request().input('id', sql.Int, staff.userId)
+        .query('SELECT r.Name FROM dbo.AspNetUserRoles ur INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId WHERE ur.UserId = @id');
+      const names = result.recordset.map(row => row.Name);
+      const current = staffRolePriority.find(name => names.includes(name));
+      if (!current) return res.status(403).json({ message: 'Admin token is required.' });
+      staff.role = current;
+    } catch (error) {
+      logError(error, { context: 'requireAdminRoleRefresh' });
+    }
+    try {
+      const [overrides, account] = await Promise.all([
+        getPool().request().input('id', sql.Int, staff.userId)
+          .query('SELECT ModuleName, CanView, CanEdit FROM dbo.UserModulePermissions WHERE UserId = @id'),
+        getPool().request().input('id', sql.Int, staff.userId)
+          .query('SELECT MustChangePassword FROM dbo.AspNetUsers WHERE UserId = @id'),
+      ]);
+      staff.overrides = Object.fromEntries(overrides.recordset.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }]));
+      staff.mustChangePassword = Boolean(account.recordset[0]?.MustChangePassword);
+    } catch (error) {
+      logError(error, { context: 'requireAdminPermissionRefresh' });
+    }
+    if (staff.mustChangePassword && !passwordChangeExemptPaths.includes(req.path)) {
+      return res.status(403).json({ message: 'You must change your password before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
+    }
+  }
   if (!staff) {
     logAuth('failed', {
       endpoint: req.path,
@@ -400,13 +492,30 @@ function requireAdmin(req, res, next) {
   next()
 }
 
+const passwordChangeExemptPaths = ['/api/admin/verify', '/api/admin/change-password'];
+
 function requireRole(roles) {
   return (req, res, next) => {
+    if (req.staff && req.staff.role !== 'Admin') {
+      const action = req.method === 'GET' || req.method === 'HEAD' ? 'view' : 'edit';
+      const decision = overrideDecision(req.staff.overrides, moduleForPath(req.originalUrl), action);
+      if (decision === true) return next();
+      if (decision === false) {
+        return res.status(403).json({ message: 'Your account does not have permission for this operation.' });
+      }
+    }
     if (!req.staff || (!roles.includes(req.staff.role) && req.staff.role !== 'Admin')) {
       return res.status(403).json({ message: 'Your staff role does not have permission for this operation.' });
     }
     next();
   };
+}
+
+function requireAdminWithQueryToken(req, res, next) {
+  if (!req.headers['x-admin-token'] && typeof req.query.token === 'string') {
+    req.headers['x-admin-token'] = req.query.token;
+  }
+  return requireAdmin(req, res, next);
 }
 
 function verifyAspNetPassword(password, storedHash) {
@@ -422,12 +531,6 @@ function verifyAspNetPassword(password, storedHash) {
   }
 }
 
-function hashAspNetPassword(password) {
-  const salt = randomBytes(16);
-  const subkey = pbkdf2Sync(password, salt, 10000, 32, 'sha256');
-  return Buffer.concat([Buffer.from([0x01]), salt, subkey]).toString('base64');
-}
-
 // Parishioner portal authentication is not yet implemented; reject until a real session/token check exists.
 async function requirePortal(req, res, next) {
   const token = String(req.headers['x-portal-token'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -440,7 +543,7 @@ async function requirePortal(req, res, next) {
   } catch (error) { logError(error, { context: 'requirePortal' }); res.status(500).json({ message: 'Unable to verify portal session.' }); }
 }
 
-app.post('/api/portal/register', async (req, res) => {
+app.post('/api/portal/register', authRateLimit, async (req, res) => {
   const { firstName, lastName, email, mobileNumber, address, password } = req.body || {};
   if (!firstName || !lastName || !isValidEmail(String(email || '')) || !password || String(password).length < 8) return res.status(400).json({ message: 'Name, valid email, and an eight-character password are required.' });
   try {
@@ -453,7 +556,7 @@ app.post('/api/portal/register', async (req, res) => {
   } catch (error) { logError(error, { context: 'portalRegister' }); res.status(500).json({ message: 'Unable to create portal account.' }); }
 });
 
-app.post('/api/portal/login', async (req, res) => {
+app.post('/api/portal/login', authRateLimit, async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase(); const password = String(req.body?.password || '');
   try {
     const result = await getPool().request().input('email', sql.VarChar(255), email).query('SELECT TOP 1 a.AccountId, a.PasswordHash, a.EmailAddress FROM dbo.ParishionerAccounts a WHERE a.EmailAddress=@email AND a.IsActive=1'); const account = result.recordset[0];
@@ -471,7 +574,7 @@ app.get('/api/portal/certificate-requests', requirePortal, async (req, res) => {
   try { const result = await getPool().request().input('accountId', sql.Int, req.portal.AccountId).query('SELECT CertificateRequestId, CertificateType, PreferredDate, PreferredTime, Status, Notes, CreatedAt, UpdatedAt FROM dbo.CertificateRequests WHERE AccountId=@accountId ORDER BY CreatedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'portalCertificateRequests' }); res.status(500).json({ message: 'Unable to load certificate requests.' }); }
 });
 
-// ── Guest certificate endpoints (no auth required) ──────────────────────────
+// -- Guest certificate endpoints (no auth required) --------------------------
 
 const VALID_CERT_TYPES = ['Baptism', 'Confirmation', 'Marriage', 'Death'];
 
@@ -508,6 +611,8 @@ app.post('/api/certificate-requests', async (req, res) => {
   const referenceCode = randomBytes(3).toString('hex').toUpperCase();
 
   try {
+    const block = await findBlockedSlot(getPool(), { date: preferredDate, time: preferredTime, certificate: true });
+    if (block) return res.status(409).json({ message: blockedMessage(block) });
     const result = await getPool().request()
       .input('certificateType', sql.VarChar(30), certificateType)
       .input('preferredDate', sql.Date, preferredDate)
@@ -541,7 +646,7 @@ app.post('/api/certificate-requests', async (req, res) => {
           <p><strong>Reference code:</strong> <span style="font-family:monospace;font-size:1.2em;letter-spacing:.1em">${escapeHtml(referenceCode)}</span></p>
           <p><strong>Preferred date:</strong> ${escapeHtml(preferredDate)} at ${escapeHtml(preferredTime)}</p>
         </div>
-        <p>Keep your reference code — you can use it to check your request status on the Services page.</p>
+        <p>Keep your reference code ï¿½ you can use it to check your request status on the Services page.</p>
         <p>Best regards,<br>Saint John Parish</p>
       </div>
     `;
@@ -669,6 +774,36 @@ app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
   res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
 });
 
+// Public access is limited to files referenced by an event's PhotoUrl; other uploads stay private.
+app.get('/uploads/:filename', async (req, res) => {
+  const filename = String(req.params.filename || '');
+  if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+    return res.status(400).json({ message: 'Invalid file name.' });
+  }
+
+  try {
+    const result = await getPool().request()
+      .input('url', sql.NVarChar(1000), `/uploads/${filename}`)
+      .query(`
+        SELECT TOP 1 1 AS found
+        WHERE EXISTS (SELECT 1 FROM dbo.Events WHERE PhotoUrl = @url)
+           OR EXISTS (
+             SELECT 1 FROM dbo.SiteContent
+             WHERE ContentKey = 'gallery' AND ContentJson LIKE '%' + @url + '%'
+           )
+      `);
+    const filePath = path.join(uploadDirectory, filename);
+    if (result.recordset.length === 0 || !fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'Photo not found.' });
+    }
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    return res.sendFile(filePath);
+  } catch (error) {
+    logError(error, { context: 'serveEventPhoto' });
+    return res.status(500).json({ message: 'Unable to load photo.' });
+  }
+});
+
 function formatEventDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -711,6 +846,24 @@ async function getServicePolicy(pool, serviceId, scheduledDate) {
 async function quotaCount(pool, serviceId, scheduledDate) {
   const result = await pool.request().input('serviceId', sql.Int, serviceId).input('scheduledDate', sql.Date, scheduledDate).query(`SELECT COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND Status IN ('PendingVerification','Confirmed')`);
   return Number(result.recordset[0]?.total || 0);
+}
+
+// Returns the first admin block covering this date/time, or null. A null BlockTime blocks the whole day.
+async function findBlockedSlot(pool, { date, time, serviceId = null, certificate = false }) {
+  const result = await pool.request()
+    .input('date', sql.Date, date)
+    .input('time', sql.VarChar(5), time ? String(time).slice(0, 5) : null)
+    .input('serviceId', sql.Int, serviceId)
+    .input('certificate', sql.Bit, certificate ? 1 : 0)
+    .query(`SELECT TOP 1 Reason FROM dbo.BlockedSlots
+      WHERE BlockDate=@date
+        AND (BlockTime IS NULL OR BlockTime=@time)
+        AND (Scope='All' OR (Scope='Certificate' AND @certificate=1) OR (Scope='Service' AND ServiceId=@serviceId))`);
+  return result.recordset[0] || null;
+}
+
+function blockedMessage(block) {
+  return block?.Reason ? `This date or time is unavailable: ${block.Reason}` : 'This date or time is unavailable for booking.';
 }
 
 function sanitizeText(text) {
@@ -766,6 +919,7 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
 
   let bookedSet = new Set();
   let quotaFullDates = new Set();
+  let blocks = [];
   let policy = { name: '' };
   const numericServiceId = Number(serviceId);
   const useServiceId = Number.isInteger(numericServiceId) && String(numericServiceId) === serviceId;
@@ -789,6 +943,9 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
         const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','Confirmed') GROUP BY ScheduledDate`);
         quotaFullDates = new Set(quotaResult.recordset.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
       }
+
+      const blockResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS blockDate, BlockTime, Reason FROM dbo.BlockedSlots WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date) AND (Scope='All' OR (Scope='Service' AND ServiceId=@serviceId))`);
+      blocks = blockResult.recordset;
 
       bookedSet = new Set(bookedResult.recordset.map((row) => {
         const timeText = row.ScheduledTime instanceof Date
@@ -820,7 +977,8 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
         slotTimes.forEach(time => {
           const key = `${isoDate}|${time}`;
           const quotaFull = quotaFullDates.has(isoDate);
-          slots.push({ date: isoDate, time, available: policyForDate.allowed && !quotaFull && !bookedSet.has(key), restricted: !policyForDate.allowed || quotaFull, message: policyForDate.message || (quotaFull ? `Daily booking limit reached for ${policy.quotaLabel}.` : undefined) });
+          const block = blocks.find(b => b.blockDate === isoDate && (!b.BlockTime || b.BlockTime === time));
+          slots.push({ date: isoDate, time, available: policyForDate.allowed && !quotaFull && !block && !bookedSet.has(key), restricted: !policyForDate.allowed || quotaFull || !!block, message: policyForDate.message || (quotaFull ? `Daily booking limit reached for ${policy.quotaLabel}.` : block ? blockedMessage(block) : undefined) });
         });
         weekdayCount += 1;
       }
@@ -944,6 +1102,8 @@ app.post('/api/service-requests', async (req, res) => {
     const pool = getPool();
     const policy = await getServicePolicy(pool, numericServiceId, scheduledDate);
     if (!policy.allowed) return res.status(400).json({ message: policy.message });
+    const block = await findBlockedSlot(pool, { date: scheduledDate, time: scheduledTime, serviceId: numericServiceId });
+    if (block) return res.status(409).json({ message: blockedMessage(block) });
     if (policy.quota && await quotaCount(pool, numericServiceId, scheduledDate) >= policy.quota) {
       return res.status(409).json({ message: `${policy.quotaLabel} bookings are limited to ${policy.quota} per day.` });
     }
@@ -1183,12 +1343,16 @@ app.get('/api/events', async (_req, res) => {
       .map((row, index) => {
         const id = row.EventId ?? row.Id ?? row.ID ?? row.id ?? 'event-' + index;
         const title = row.Title ?? row.Name ?? row.title ?? 'Untitled event';
+        const titleTl = row.TitleTl ?? row.titleTl ?? '';
         const description = row.Description ?? row.description ?? row.Body ?? row.body ?? '';
+        const descriptionTl = row.DescriptionTl ?? row.descriptionTl ?? '';
         const detail = row.Body ?? row.body ?? row.Detail ?? row.detail ?? '';
+        const detailTl = row.BodyTl ?? row.bodyTl ?? row.DetailTl ?? row.detailTl ?? '';
         const dateValue = row.EventDate ?? row.Date ?? row.eventDate ?? row.date;
         const date = formatEventDate(dateValue);
         const time = String(row.EventTime ?? row.Time ?? row.eventTime ?? row.time ?? '').slice(0, 8);
         const location = row.Location ?? row.Venue ?? row.location ?? '';
+        const locationTl = row.LocationTl ?? row.locationTl ?? '';
         const photoUrl = row.PhotoUrl ?? row.photoUrl ?? '';
 
         if (!date) return null;
@@ -1196,11 +1360,15 @@ app.get('/api/events', async (_req, res) => {
         return {
           id: String(id),
           title: String(title),
+          titleTl: String(titleTl),
           description: String(description),
+          descriptionTl: String(descriptionTl),
           detail: String(detail),
+          detailTl: String(detailTl),
           date,
           time,
           location: String(location),
+          locationTl: String(locationTl),
           photoUrl: String(photoUrl),
         };
       })
@@ -1214,7 +1382,7 @@ app.get('/api/events', async (_req, res) => {
 });
 
 app.post('/api/events', requireAdmin, async (req, res) => {
-  const { title, description, detail, date, time, location, photoUrl } = req.body;
+  const { title, titleTl, description, descriptionTl, detail, detailTl, date, time, location, locationTl, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -1234,21 +1402,29 @@ app.post('/api/events', requireAdmin, async (req, res) => {
     const pool = getPool();
     const request = pool.request()
       .input('title', sql.NVarChar(255), title)
+      .input('titleTl', sql.NVarChar(255), titleTl || '')
       .input('description', sql.NVarChar(sql.MAX), description || '')
+      .input('descriptionTl', sql.NVarChar(sql.MAX), descriptionTl || '')
       .input('detail', sql.NVarChar(sql.MAX), detail || '')
+      .input('detailTl', sql.NVarChar(sql.MAX), detailTl || '')
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
       .input('location', sql.NVarChar(255), location || '')
+      .input('locationTl', sql.NVarChar(255), locationTl || '')
       .input('photoUrl', sql.NVarChar(1000), photoUrl || '');
 
     const result = await request.query(`
-      INSERT INTO dbo.Events (Title, Description, Body, EventDate, EventTime, Location, PhotoUrl)
+      INSERT INTO dbo.Events (Title, TitleTl, Description, DescriptionTl, Body, BodyTl, EventDate, EventTime, Location, LocationTl, PhotoUrl)
       OUTPUT INSERTED.EventId
-      VALUES (@title, @description, @detail, @date, @time, @location, @photoUrl)
+      VALUES (@title, @titleTl, @description, @descriptionTl, @detail, @detailTl, @date, @time, @location, @locationTl, @photoUrl)
     `);
 
     const eventId = result.recordset[0]?.EventId;
-    res.status(201).json({ id: String(eventId), title, description: description || '', detail, date, time: time || '', location, photoUrl: photoUrl || '' });
+    res.status(201).json({
+      id: String(eventId), title, titleTl: titleTl || '', description: description || '',
+      descriptionTl: descriptionTl || '', detail, detailTl: detailTl || '', date,
+      time: time || '', location, locationTl: locationTl || '', photoUrl: photoUrl || '',
+    });
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ message: 'Unable to create event.' });
@@ -1257,7 +1433,7 @@ app.post('/api/events', requireAdmin, async (req, res) => {
 
 app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
   const { eventId } = req.params;
-  const { title, description, detail, date, time, location, photoUrl } = req.body;
+  const { title, titleTl, description, descriptionTl, detail, detailTl, date, time, location, locationTl, photoUrl } = req.body;
 
   if (!title || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
@@ -1267,21 +1443,31 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
     const pool = getPool();
     const request = pool.request()
       .input('title', sql.NVarChar(255), title)
+      .input('titleTl', sql.NVarChar(255), titleTl || '')
       .input('description', sql.NVarChar(sql.MAX), description || '')
+      .input('descriptionTl', sql.NVarChar(sql.MAX), descriptionTl || '')
       .input('detail', sql.NVarChar(sql.MAX), detail || '')
+      .input('detailTl', sql.NVarChar(sql.MAX), detailTl || '')
       .input('date', sql.Date, date)
       .input('time', sql.VarChar(10), time || '')
       .input('location', sql.NVarChar(255), location || '')
+      .input('locationTl', sql.NVarChar(255), locationTl || '')
       .input('photoUrl', sql.NVarChar(1000), photoUrl || '')
       .input('eventId', sql.Int, eventId);
 
     await request.query(`
       UPDATE dbo.Events
-      SET Title = @title, Description = @description, Body = @detail, EventDate = @date, EventTime = @time, Location = @location, PhotoUrl = @photoUrl
+      SET Title = @title, TitleTl = @titleTl, Description = @description, DescriptionTl = @descriptionTl,
+          Body = @detail, BodyTl = @detailTl, EventDate = @date, EventTime = @time,
+          Location = @location, LocationTl = @locationTl, PhotoUrl = @photoUrl
       WHERE EventId = @eventId
     `);
 
-    res.json({ id: String(eventId), title, description: description || '', detail, date, time: time || '', location, photoUrl: photoUrl || '' });
+    res.json({
+      id: String(eventId), title, titleTl: titleTl || '', description: description || '',
+      descriptionTl: descriptionTl || '', detail, detailTl: detailTl || '', date,
+      time: time || '', location, locationTl: locationTl || '', photoUrl: photoUrl || '',
+    });
   } catch (error) {
     console.error('Update event error:', error);
     res.status(500).json({ message: 'Unable to update event.' });
@@ -1307,7 +1493,236 @@ app.delete('/api/events/:eventId', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/login', async (req, res) => {
+const siteContentPages = new Set(['about', 'gallery', 'contact', 'footer']);
+
+const isOptionalText = (value, max) => value === undefined || (typeof value === 'string' && value.length <= max);
+
+function isSiteContentDocument(page, content) {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return false;
+
+  if (page === 'about') {
+    return typeof content.heading === 'string'
+      && content.heading.length <= 300
+      && isOptionalText(content.headingTl, 300)
+      && (content.paragraphsTl === undefined || (Array.isArray(content.paragraphsTl)
+        && content.paragraphsTl.length <= 30
+        && content.paragraphsTl.every(paragraph => typeof paragraph === 'string' && paragraph.length <= 10000)))
+      && Array.isArray(content.paragraphs)
+      && content.paragraphs.length <= 30
+      && content.paragraphs.every(paragraph => typeof paragraph === 'string' && paragraph.length <= 10000)
+      && Array.isArray(content.stats)
+      && content.stats.length <= 20
+      && content.stats.every(stat => stat && typeof stat.value === 'string' && stat.value.length <= 100
+        && typeof stat.label === 'string' && stat.label.length <= 300
+        && isOptionalText(stat.labelTl, 300))
+      && isOptionalText(content.intro, 1000)
+      && isOptionalText(content.introTl, 1000)
+      && (content.heroImage === undefined || content.heroImage === ''
+        || (typeof content.heroImage === 'string' && content.heroImage.length <= 2000
+          && (/^https?:\/\//i.test(content.heroImage) || content.heroImage.startsWith('/assets/') || content.heroImage.startsWith('/uploads/'))))
+      && (content.timeline === undefined || (Array.isArray(content.timeline)
+        && content.timeline.length <= 30
+        && content.timeline.every(item => item && typeof item.year === 'string' && item.year.length <= 50
+          && typeof item.title === 'string' && item.title.length <= 200
+          && isOptionalText(item.titleTl, 200)
+          && typeof item.description === 'string' && item.description.length <= 2000
+          && isOptionalText(item.descriptionTl, 2000))))
+      && (content.quote === undefined || (content.quote && typeof content.quote === 'object'
+        && typeof content.quote.text === 'string' && content.quote.text.length <= 1000
+        && isOptionalText(content.quote.textTl, 1000)
+        && isOptionalText(content.quote.attribution, 200)));
+  }
+
+  if (page === 'contact') {
+    return typeof content.heading === 'string' && content.heading.length <= 300
+      && isOptionalText(content.headingTl, 300)
+      && isOptionalText(content.eyebrow, 100)
+      && isOptionalText(content.eyebrowTl, 100)
+      && isOptionalText(content.description, 1000)
+      && isOptionalText(content.descriptionTl, 1000)
+      && isOptionalText(content.formTitle, 200)
+      && isOptionalText(content.formTitleTl, 200)
+      && isOptionalText(content.formDescription, 1000)
+      && isOptionalText(content.formDescriptionTl, 1000)
+      && Array.isArray(content.cards)
+      && content.cards.length <= 12
+      && content.cards.every(card => card
+        && ['visit', 'call', 'email'].includes(card.type)
+        && typeof card.title === 'string' && card.title.length <= 200
+        && isOptionalText(card.titleTl, 200)
+        && Array.isArray(card.lines) && card.lines.length <= 10
+        && card.lines.every(line => typeof line === 'string' && line.length <= 300)
+        && (card.linesTl === undefined || (Array.isArray(card.linesTl) && card.linesTl.length <= 10
+          && card.linesTl.every(line => typeof line === 'string' && line.length <= 300))));
+  }
+
+  if (page === 'footer') {
+    const isTextList = (value, maxItems, maxLength) => Array.isArray(value)
+      && value.length <= maxItems
+      && value.every(item => typeof item === 'string' && item.length <= maxLength);
+    return typeof content.parishTitle === 'string' && content.parishTitle.length <= 200
+      && isTextList(content.addressLines, 10, 300)
+      && typeof content.scheduleTitle === 'string' && content.scheduleTitle.length <= 100
+      && isTextList(content.scheduleLines, 20, 300)
+      && typeof content.officeHoursTitle === 'string' && content.officeHoursTitle.length <= 100
+      && isTextList(content.officeHoursLines, 20, 300)
+      && typeof content.contactTitle === 'string' && content.contactTitle.length <= 100
+      && typeof content.contactIntro === 'string' && content.contactIntro.length <= 500
+      && isTextList(content.phoneNumbers, 10, 50)
+      && typeof content.email === 'string' && content.email.length <= 320
+      && typeof content.quickLinksTitle === 'string' && content.quickLinksTitle.length <= 100
+      && Array.isArray(content.quickLinks) && content.quickLinks.length <= 12
+      && content.quickLinks.every(link => link
+        && typeof link.label === 'string' && link.label.length <= 100
+        && typeof link.path === 'string' && link.path.length <= 500
+        && link.path.startsWith('/') && !link.path.startsWith('//'))
+      && typeof content.copyright === 'string' && content.copyright.length <= 300;
+  }
+
+  return page === 'gallery' && isValidGalleryContent(content);
+}
+
+app.get('/api/site-content/:page', async (req, res) => {
+  const page = String(req.params.page || '').toLowerCase();
+  if (!siteContentPages.has(page)) {
+    return res.status(404).json({ message: 'Website content page not found.' });
+  }
+
+  try {
+    const result = await getPool().request()
+      .input('key', sql.NVarChar(50), page)
+      .query('SELECT ContentJson FROM dbo.SiteContent WHERE ContentKey = @key');
+    const stored = result.recordset[0]?.ContentJson;
+    return res.json({ content: stored ? JSON.parse(stored) : null });
+  } catch (error) {
+    logError(error, { context: 'getSiteContent', page });
+    return res.status(500).json({ message: 'Unable to load website content.' });
+  }
+});
+
+app.put('/api/admin/site-content/:page', requireAdmin, requireRole(['Admin', 'Secretary', 'ParishPriest']), async (req, res) => {
+  const page = String(req.params.page || '').toLowerCase();
+  const content = req.body?.content;
+  if (!siteContentPages.has(page)) {
+    return res.status(404).json({ message: 'Website content page not found.' });
+  }
+  if (!isSiteContentDocument(page, content)) {
+    return res.status(400).json({ message: 'The website content has an invalid format.' });
+  }
+
+  try {
+    const contentJson = JSON.stringify(content);
+    await getPool().request()
+      .input('key', sql.NVarChar(50), page)
+      .input('content', sql.NVarChar(sql.MAX), contentJson)
+      .input('updatedBy', sql.NVarChar(256), req.staff?.email || String(req.staff?.userId || ''))
+      .query(`
+        MERGE dbo.SiteContent WITH (HOLDLOCK) AS target
+        USING (SELECT @key AS ContentKey) AS source
+        ON target.ContentKey = source.ContentKey
+        WHEN MATCHED THEN
+          UPDATE SET ContentJson = @content, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @updatedBy
+        WHEN NOT MATCHED THEN
+          INSERT (ContentKey, ContentJson, UpdatedBy)
+          VALUES (@key, @content, @updatedBy);
+      `);
+    return res.json({ content });
+  } catch (error) {
+    logError(error, { context: 'saveSiteContent', page });
+    return res.status(500).json({ message: 'Unable to save website content.' });
+  }
+});
+
+app.post('/api/contact', contactRateLimit, async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const message = String(req.body?.message || '').trim();
+
+  if (name.length < 2 || name.length > 200) {
+    return res.status(400).json({ message: 'Please provide your name.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
+    return res.status(400).json({ message: 'Please provide a valid email address.' });
+  }
+  if (phone.length > 50) {
+    return res.status(400).json({ message: 'Phone number is too long.' });
+  }
+  if (message.length < 5 || message.length > 5000) {
+    return res.status(400).json({ message: 'Message must be between 5 and 5000 characters.' });
+  }
+
+  try {
+    await getPool().request()
+      .input('name', sql.NVarChar(200), name)
+      .input('email', sql.NVarChar(320), email)
+      .input('phone', sql.NVarChar(50), phone || null)
+      .input('message', sql.NVarChar(sql.MAX), message)
+      .query('INSERT INTO dbo.ContactMessages (Name, Email, Phone, Message) VALUES (@name, @email, @phone, @message)');
+    return res.json({ success: true });
+  } catch (error) {
+    logError(error, { context: 'submitContactMessage' });
+    return res.status(500).json({ message: 'Unable to send your message.' });
+  }
+});
+
+// Any signed-in staff role may read and mark messages; only senior roles may delete.
+app.get('/api/admin/contact-messages', requireAdmin, requireRole(staffRolePriority), async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT ContactMessageId, Name, Email, Phone, Message, IsRead, CreatedAt
+      FROM dbo.ContactMessages
+      ORDER BY CreatedAt DESC
+    `);
+    return res.json(result.recordset.map(row => ({
+      id: row.ContactMessageId,
+      name: row.Name,
+      email: row.Email,
+      phone: row.Phone,
+      message: row.Message,
+      isRead: !!row.IsRead,
+      createdAt: row.CreatedAt,
+    })));
+  } catch (error) {
+    logError(error, { context: 'listContactMessages' });
+    return res.status(500).json({ message: 'Unable to load messages.' });
+  }
+});
+
+app.patch('/api/admin/contact-messages/:id', requireAdmin, requireRole(staffRolePriority), async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || typeof req.body?.isRead !== 'boolean') {
+    return res.status(400).json({ message: 'Invalid request.' });
+  }
+  try {
+    await getPool().request()
+      .input('id', sql.Int, id)
+      .input('isRead', sql.Bit, req.body.isRead ? 1 : 0)
+      .query('UPDATE dbo.ContactMessages SET IsRead = @isRead WHERE ContactMessageId = @id');
+    return res.json({ success: true });
+  } catch (error) {
+    logError(error, { context: 'updateContactMessage' });
+    return res.status(500).json({ message: 'Unable to update message.' });
+  }
+});
+
+app.delete('/api/admin/contact-messages/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ message: 'Invalid request.' });
+  }
+  try {
+    await getPool().request()
+      .input('id', sql.Int, id)
+      .query('DELETE FROM dbo.ContactMessages WHERE ContactMessageId = @id');
+    return res.json({ success: true });
+  } catch (error) {
+    logError(error, { context: 'deleteContactMessage' });
+    return res.status(500).json({ message: 'Unable to delete message.' });
+  }
+});
+
+app.post('/api/admin/login', authRateLimit, async (req, res) => {
   const email = String(req.body?.email || '').trim();
   const password = String(req.body?.password || '');
 
@@ -1319,7 +1734,7 @@ app.post('/api/admin/login', async (req, res) => {
     const result = await getPool().request()
       .input('email', sql.NVarChar(510), email)
       .query(`
-        SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, r.Name AS RoleName
+        SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, u.MustChangePassword, r.Name AS RoleName
         FROM dbo.AspNetUsers u
         INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
         INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
@@ -1333,8 +1748,8 @@ app.post('/api/admin/login', async (req, res) => {
     }
 
     return res.json({
-      token: `${adminSecret}.${user.UserId}.${user.RoleName}`,
-      user: { id: user.UserId, email: user.EmailAddress, role: user.RoleName },
+      token: createStaffToken(user.UserId, user.RoleName),
+      user: { id: user.UserId, email: user.EmailAddress, role: user.RoleName, mustChangePassword: Boolean(user.MustChangePassword) },
     });
   } catch (error) {
     console.error('Admin login error:', error);
@@ -1342,12 +1757,215 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-app.get('/api/admin/verify', requireAdmin, (_req, res) => {
-  res.json({ ok: true, user: { role: _req.staff?.role || 'Admin' } })
-})
+app.post('/api/admin/forgot-password', authRateLimit, (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (email.length > 510) return res.status(400).json({ message: 'Enter a valid email address.' });
 
-app.get('/api/admin/users', requireAdmin, requireRole(['Admin']), async (_req, res) => {
-  try { const result = await getPool().request().query(`SELECT u.UserId AS userId, u.EmailAddress AS email, u.EmailAddress AS userName, u.EmailConfirmed AS emailConfirmed, CAST(0 AS bit) AS lockoutEnabled, 0 AS accessFailedCount, COALESCE(r.Name, 'Staff') AS roleName FROM dbo.AspNetUsers u LEFT JOIN dbo.AspNetUserRoles ur ON ur.UserId=u.UserId LEFT JOIN dbo.AspNetRoles r ON r.RoleId=ur.RoleId ORDER BY u.EmailAddress`); const users = result.recordset.reduce((items, row) => { const item = items.find(value => value.userId === row.userId); if (item) item.roles.push(row.roleName); else items.push({ userId: row.userId, userName: row.userName, email: row.email, emailConfirmed: Boolean(row.emailConfirmed), lockoutEnabled: Boolean(row.lockoutEnabled), accessFailedCount: row.accessFailedCount, roles: row.roleName ? [row.roleName] : [] }); return items; }, []); res.json(users); } catch (error) { logError(error, { context: 'adminUsers' }); res.status(500).json({ message: 'Unable to load staff accounts.' }); }
+  return res.status(202).json({
+    message: 'If a staff account matches that email, password reset instructions will be sent when email delivery is enabled.',
+  });
+});
+
+app.get('/api/admin/verify', requireAdmin, async (req, res) => {
+  const staff = req.staff;
+  let profile = { userName: '', email: '' };
+  if (staff.userId > 0) {
+    try {
+      const result = await getPool().request().input('id', sql.Int, staff.userId)
+        .query('SELECT UserName, EmailAddress FROM dbo.AspNetUsers WHERE UserId = @id');
+      const row = result.recordset[0];
+      if (row) profile = { userName: row.UserName, email: row.EmailAddress };
+    } catch (error) {
+      logError(error, { context: 'adminVerifyProfile' });
+    }
+  }
+  res.json({
+    ok: true,
+    user: {
+      id: staff.userId,
+      role: staff.role || 'Admin',
+      ...profile,
+      mustChangePassword: Boolean(staff.mustChangePassword),
+      overrides: staff.overrides || {},
+    },
+  });
+});
+
+function defaultStaffPassword() {
+  return process.env.DEFAULT_STAFF_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'Parish@12345');
+}
+
+app.post('/api/admin/change-password', authRateLimit, requireAdmin, async (req, res) => {
+  const currentPassword = String(req.body?.currentPassword || '');
+  const newPassword = String(req.body?.newPassword || '');
+  if (req.staff.userId <= 0) return res.status(400).json({ message: 'This sign-in method has no password to change.' });
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    return res.status(400).json({ message: 'The new password must be 8 to 128 characters.' });
+  }
+  if (newPassword === currentPassword || newPassword === defaultStaffPassword()) {
+    return res.status(400).json({ message: 'Choose a new password that is different from your current and default password.' });
+  }
+  try {
+    const result = await getPool().request().input('id', sql.Int, req.staff.userId)
+      .query('SELECT UserName, PasswordHash FROM dbo.AspNetUsers WHERE UserId = @id');
+    const user = result.recordset[0];
+    if (!user || !verifyAspNetPassword(currentPassword, user.PasswordHash)) {
+      return res.status(401).json({ message: 'Your current password is incorrect.' });
+    }
+    const updateResult = await getPool().request()
+      .input('id', sql.Int, req.staff.userId)
+      .input('hash', sql.NVarChar(1024), hashAspNetPassword(newPassword))
+      .query('UPDATE dbo.AspNetUsers SET PasswordHash = @hash, MustChangePassword = 0 WHERE UserId = @id');
+    if (updateResult.rowsAffected[0] !== 1) {
+      return res.status(500).json({ message: 'Unable to change password.' });
+    }
+    try {
+      await getPool().request()
+        .input('action', sql.VarChar(40), 'ChangeOwnPassword')
+        .input('target', sql.Int, req.staff.userId)
+        .input('targetName', sql.NVarChar(512), user.UserName)
+        .input('by', sql.NVarChar(512), user.UserName)
+        .input('details', sql.NVarChar(sql.MAX), null)
+        .query(`
+          INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+          VALUES (@action, @target, @targetName, @by, @details)
+        `);
+    } catch (auditError) {
+      logError(auditError, { context: 'auditChangeOwnPassword', userId: req.staff.userId });
+    }
+    return res.json({ message: 'Password changed.' });
+  } catch (error) {
+    logError(error, { context: 'changeOwnPassword' });
+    return res.status(500).json({ message: 'Unable to change password.' });
+  }
+});
+
+app.put('/api/admin/profile', requireAdmin, async (req, res) => {
+  const userName = typeof req.body?.userName === 'string' ? req.body.userName.trim() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (req.staff.userId <= 0) return res.status(400).json({ message: 'This sign-in method has no profile.' });
+  if (!userName || userName.length > 256 || !isValidEmail(email) || email.length > 510) {
+    return res.status(400).json({ message: 'A username and valid email address are required.' });
+  }
+  try {
+    const duplicate = await getPool().request()
+      .input('id', sql.Int, req.staff.userId)
+      .input('email', sql.NVarChar(510), email)
+      .query('SELECT TOP 1 UserId FROM dbo.AspNetUsers WHERE EmailAddress = @email AND UserId <> @id');
+    if (duplicate.recordset.length) return res.status(409).json({ message: 'Another account already uses this email address.' });
+    await getPool().request()
+      .input('id', sql.Int, req.staff.userId)
+      .input('userName', sql.NVarChar(256), userName)
+      .input('email', sql.NVarChar(510), email)
+      .query('UPDATE dbo.AspNetUsers SET UserName = @userName, EmailAddress = @email WHERE UserId = @id');
+    return res.json({ userName, email });
+  } catch (error) {
+    logError(error, { context: 'updateOwnProfile' });
+    return res.status(500).json({ message: 'Unable to update profile.' });
+  }
+});
+
+app.get('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
+  try {
+    const result = await getPool().request().input('id', sql.Int, id)
+      .query('SELECT ModuleName, CanView, CanEdit FROM dbo.UserModulePermissions WHERE UserId = @id');
+    res.json({ overrides: Object.fromEntries(result.recordset.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }])) });
+  } catch (error) {
+    logError(error, { context: 'getUserPermissions' });
+    res.status(500).json({ message: 'Unable to load permissions.' });
+  }
+});
+
+app.put('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  const id = Number(req.params.id);
+  const overrides = req.body?.overrides;
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides) ||
+      !Object.entries(overrides).every(([module, value]) =>
+        OVERRIDABLE_MODULES.includes(module) && value && typeof value.view === 'boolean' && typeof value.edit === 'boolean')) {
+    return res.status(400).json({ message: 'The permissions have an invalid format.' });
+  }
+
+  let transaction;
+  let transactionStarted = false;
+  try {
+    transaction = new sql.Transaction(getPool());
+    await transaction.begin();
+    transactionStarted = true;
+    const target = await transaction.request().input('id', sql.Int, id)
+      .query('SELECT UserName FROM dbo.AspNetUsers WHERE UserId = @id');
+    if (!target.recordset[0]) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ message: 'Staff account not found.' });
+    }
+    await transaction.request().input('id', sql.Int, id).query('DELETE FROM dbo.UserModulePermissions WHERE UserId = @id');
+    for (const [module, value] of Object.entries(overrides)) {
+      await transaction.request()
+        .input('id', sql.Int, id)
+        .input('module', sql.NVarChar(50), module)
+        .input('view', sql.Bit, value.view || value.edit)
+        .input('edit', sql.Bit, value.edit)
+        .input('by', sql.NVarChar(512), staffName(req))
+        .query('INSERT INTO dbo.UserModulePermissions (UserId, ModuleName, CanView, CanEdit, UpdatedBy) VALUES (@id, @module, @view, @edit, @by)');
+    }
+    await transaction.request()
+      .input('action', sql.VarChar(40), 'UpdatePermissions')
+      .input('target', sql.Int, id)
+      .input('targetName', sql.NVarChar(512), target.recordset[0].UserName)
+      .input('by', sql.NVarChar(512), staffName(req))
+      .input('details', sql.NVarChar(sql.MAX), JSON.stringify(overrides))
+      .query(`
+        INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+        VALUES (@action, @target, @targetName, @by, @details)
+      `);
+    await transaction.commit();
+    transactionStarted = false;
+    res.json({ message: 'Permissions updated.' });
+  } catch (error) {
+    if (transactionStarted) {
+      try { await transaction.rollback(); } catch (rollbackError) { logError(rollbackError, { context: 'updatePermissionsRollback' }); }
+    }
+    logError(error, { context: 'updateUserPermissions' });
+    res.status(500).json({ message: 'Unable to update permissions.' });
+  }
+});
+
+app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 'Secretary']), async (req, res) => {
+  try {
+    const result = await getPool().request()
+      .input('includeDetails', sql.Bit, req.staff.role === 'Admin' ? 1 : 0)
+      .query(`
+      SELECT u.UserId AS userId, u.UserName AS userName,
+        CASE WHEN @includeDetails = 1 THEN u.EmailAddress ELSE NULL END AS email,
+        u.EmailConfirmed AS emailConfirmed, CAST(0 AS bit) AS lockoutEnabled,
+        0 AS accessFailedCount, COALESCE(r.Name, 'Staff') AS roleName
+      FROM dbo.AspNetUsers u
+      LEFT JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
+      LEFT JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+      ORDER BY u.UserName
+    `);
+    const users = result.recordset.reduce((items, row) => {
+      const item = items.find(value => value.userId === row.userId);
+      if (item) item.roles.push(row.roleName);
+      else items.push({
+        userId: row.userId,
+        userName: row.userName,
+        email: row.email,
+        emailConfirmed: Boolean(row.emailConfirmed),
+        lockoutEnabled: Boolean(row.lockoutEnabled),
+        accessFailedCount: row.accessFailedCount,
+        roles: row.roleName ? [row.roleName] : [],
+      });
+      return items;
+    }, []);
+    res.json(users);
+  } catch (error) {
+    logError(error, { context: 'adminUsers' });
+    res.status(500).json({ message: 'Unable to load staff accounts.' });
+  }
 });
 
 app.get('/api/admin/audit/user-management', requireAdmin, requireRole(['Admin']), async (req, res) => {
@@ -1355,21 +1973,276 @@ app.get('/api/admin/audit/user-management', requireAdmin, requireRole(['Admin'])
 });
 
 app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, res) => {
-  const { userName, email, password, role } = req.body || {}; const selectedRole = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'].includes(role) ? role : 'Staff';
-  if (!userName || !isValidEmail(String(email || '')) || !password || String(password).length < 8) return res.status(400).json({ message: 'Username, valid email, and an eight-character password are required.' });
-  try { const db = getPool(); const user = await db.request().input('email', sql.NVarChar(510), String(email).trim().toLowerCase()).input('hash', sql.NVarChar(1024), hashAspNetPassword(password)).query('INSERT INTO dbo.AspNetUsers (EmailAddress, EmailConfirmed, PasswordHash) OUTPUT INSERTED.UserId VALUES (@email, 1, @hash)'); const roleRow = await db.request().input('name', sql.NVarChar(510), selectedRole).query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name=@name'); if (!roleRow.recordset[0]) return res.status(500).json({ message: 'Role is not configured in the database.' }); await db.request().input('userId', sql.Int, user.recordset[0].UserId).input('roleId', sql.Int, roleRow.recordset[0].RoleId).query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@userId,@roleId)'); await db.request().input('action', sql.VarChar(40), 'CreateUser').input('target', sql.Int, user.recordset[0].UserId).input('targetName', sql.NVarChar(512), userName).input('by', sql.NVarChar(512), staffName(req)).input('details', sql.NVarChar(sql.MAX), selectedRole).query('INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details) VALUES (@action,@target,@targetName,@by,@details)'); res.status(201).json({ userId: user.recordset[0].UserId }); } catch (error) { logError(error, { context: 'createAdminUser' }); res.status(500).json({ message: 'Unable to create staff account.' }); }
+  const { userName, email, role } = req.body || {};
+  const password = req.body?.password ? req.body.password : defaultStaffPassword();
+  const username = typeof userName === 'string' ? userName.trim() : '';
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const validRoles = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
+  const selectedRole = role || 'Staff';
+  if (!username || username.length > 256 || !isValidEmail(normalizedEmail) || normalizedEmail.length > 510 ||
+      typeof password !== 'string' || password.length < 8 || !validRoles.includes(selectedRole)) {
+    return res.status(400).json({ message: 'A username, valid email, and valid role are required, and a default password of at least eight characters must be configured.' });
+  }
+
+  let transaction;
+  let transactionStarted = false;
+  try {
+    const db = getPool();
+    const roleResult = await db.request()
+      .input('name', sql.NVarChar(510), selectedRole)
+      .query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name = @name');
+    if (!roleResult.recordset[0]) {
+      return res.status(500).json({ message: 'Role is not configured in the database.' });
+    }
+
+    transaction = new sql.Transaction(db);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    transactionStarted = true;
+    const duplicate = await transaction.request()
+      .input('email', sql.NVarChar(510), normalizedEmail)
+      .query('SELECT TOP 1 UserId FROM dbo.AspNetUsers WHERE EmailAddress = @email');
+    if (duplicate.recordset.length) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ message: 'An account with this email address already exists.' });
+    }
+
+    const user = await transaction.request()
+      .input('username', sql.NVarChar(256), username)
+      .input('email', sql.NVarChar(510), normalizedEmail)
+      .input('hash', sql.NVarChar(1024), hashAspNetPassword(password))
+      .query(`
+        INSERT INTO dbo.AspNetUsers (UserName, EmailAddress, EmailConfirmed, PasswordHash, MustChangePassword)
+        OUTPUT INSERTED.UserId
+        VALUES (@username, @email, 1, @hash, 1)
+      `);
+    const userId = user.recordset[0].UserId;
+
+    await transaction.request()
+      .input('userId', sql.Int, userId)
+      .input('roleId', sql.Int, roleResult.recordset[0].RoleId)
+      .query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@userId, @roleId)');
+    await transaction.request()
+      .input('action', sql.VarChar(40), 'CreateUser')
+      .input('target', sql.Int, userId)
+      .input('targetName', sql.NVarChar(512), username)
+      .input('by', sql.NVarChar(512), staffName(req))
+      .input('details', sql.NVarChar(sql.MAX), JSON.stringify({ role: selectedRole, email: normalizedEmail }))
+      .query(`
+        INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+        VALUES (@action, @target, @targetName, @by, @details)
+      `);
+    await transaction.commit();
+    transactionStarted = false;
+    res.status(201).json({ userId });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        logError(rollbackError, { context: 'createAdminUserRollback' });
+      }
+    }
+    logError(error, { context: 'createAdminUser' });
+    res.status(500).json({ message: 'Unable to create staff account.' });
+  }
 });
 
-app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (req, res) => {
-  const id = Number(req.params.id); const role = req.body?.role; const password = req.body?.password;
-  try { const db = getPool(); if (password) await db.request().input('id', sql.Int, id).input('hash', sql.NVarChar(1024), hashAspNetPassword(password)).query('UPDATE dbo.AspNetUsers SET PasswordHash=@hash WHERE UserId=@id'); if (role) { const roleRow = await db.request().input('name', sql.NVarChar(510), role).query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name=@name'); await db.request().input('id', sql.Int, id).query('DELETE FROM dbo.AspNetUserRoles WHERE UserId=@id'); await db.request().input('id', sql.Int, id).input('role', sql.Int, roleRow.recordset[0].RoleId).query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@id,@role)'); } await db.request().input('action', sql.VarChar(40), 'UpdateUser').input('target', sql.Int, id).input('by', sql.NVarChar(512), staffName(req)).input('details', sql.NVarChar(sql.MAX), JSON.stringify(req.body || {})).query('INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, ChangedBy, Details) VALUES (@action,@target,@by,@details)'); res.json({ message: 'Staff account updated.' }); } catch (error) { logError(error, { context: 'updateAdminUser' }); res.status(500).json({ message: 'Unable to update staff account.' }); }
+app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin', 'ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number(req.params.id);
+  const resetToDefault = req.body?.resetToDefault === true;
+  const password = resetToDefault ? defaultStaffPassword() : req.body?.password;
+  const hasEmail = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const email = hasEmail && typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const validRoles = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
+  const requestedRoles = Array.isArray(req.body?.roles) ? req.body.roles : (req.body?.role ? [req.body.role] : null);
+  const hasPassword = password !== undefined && password !== null && password !== '';
+  if (resetToDefault && req.body?.password) return res.status(400).json({ message: 'Choose either a default reset or a custom password.' });
+  if (req.staff.role !== 'Admin' && (
+    hasEmail ||
+    hasPassword ||
+    !requestedRoles ||
+    Object.keys(req.body || {}).some(key => !['roles', 'role'].includes(key)) ||
+    requestedRoles.includes('Admin')
+  )) {
+    return res.status(403).json({ message: 'Only Admin users can change account details or assign the Admin role.' });
+  }
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
+  if (hasEmail && (!isValidEmail(email) || email.length > 510)) {
+    return res.status(400).json({ message: 'A valid email address is required.' });
+  }
+  if (hasPassword && (typeof password !== 'string' || password.length < 8)) {
+    return res.status(400).json({ message: 'The password must be at least eight characters.' });
+  }
+  if (requestedRoles && (requestedRoles.length === 0 || !requestedRoles.every(name => validRoles.includes(name)))) {
+    return res.status(400).json({ message: 'A valid role is required.' });
+  }
+  if (!hasEmail && !hasPassword && !requestedRoles) {
+    return res.status(400).json({ message: 'At least one account change is required.' });
+  }
+
+  let transaction;
+  let transactionStarted = false;
+  try {
+    const db = getPool();
+    const roleIds = [];
+    if (requestedRoles) {
+      for (const name of [...new Set(requestedRoles)]) {
+        const roleRow = await db.request()
+          .input('name', sql.NVarChar(510), name)
+          .query('SELECT RoleId FROM dbo.AspNetRoles WHERE Name = @name');
+        if (!roleRow.recordset[0]) {
+          return res.status(400).json({ message: `Role ${name} is not configured.` });
+        }
+        roleIds.push(roleRow.recordset[0].RoleId);
+      }
+    }
+
+    transaction = new sql.Transaction(db);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    transactionStarted = true;
+    const targetResult = await transaction.request()
+      .input('id', sql.Int, id)
+      .query(`
+        SELECT u.UserName, u.EmailAddress,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.AspNetUserRoles ur
+            INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+            WHERE ur.UserId = u.UserId AND r.Name = 'Admin'
+          ) THEN 1 ELSE 0 END AS IsAdmin
+        FROM dbo.AspNetUsers u
+        WHERE u.UserId = @id
+      `);
+    const target = targetResult.recordset[0];
+    if (!target) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ message: 'Staff account not found.' });
+    }
+    if (req.staff.role !== 'Admin' && target.IsAdmin) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(403).json({ message: 'Only Admin users can change an Admin account.' });
+    }
+
+    if (hasEmail) {
+      const duplicate = await transaction.request()
+        .input('id', sql.Int, id)
+        .input('email', sql.NVarChar(510), email)
+        .query('SELECT TOP 1 UserId FROM dbo.AspNetUsers WHERE EmailAddress = @email AND UserId <> @id');
+      if (duplicate.recordset.length) {
+        await transaction.rollback();
+        transactionStarted = false;
+        return res.status(409).json({ message: 'Another account already uses this email address.' });
+      }
+      await transaction.request()
+        .input('id', sql.Int, id)
+        .input('email', sql.NVarChar(510), email)
+        .query('UPDATE dbo.AspNetUsers SET EmailAddress = @email WHERE UserId = @id');
+    }
+    if (hasPassword) {
+      await transaction.request()
+        .input('id', sql.Int, id)
+        .input('hash', sql.NVarChar(1024), hashAspNetPassword(password))
+        .query('UPDATE dbo.AspNetUsers SET PasswordHash = @hash, MustChangePassword = 1 WHERE UserId = @id');
+    }
+    if (requestedRoles) {
+      await transaction.request()
+        .input('id', sql.Int, id)
+        .query('DELETE FROM dbo.AspNetUserRoles WHERE UserId = @id');
+      for (const roleId of roleIds) {
+        await transaction.request()
+          .input('id', sql.Int, id)
+          .input('role', sql.Int, roleId)
+          .query('INSERT INTO dbo.AspNetUserRoles (UserId, RoleId) VALUES (@id, @role)');
+      }
+    }
+
+    const details = {};
+    if (hasEmail) details.email = email;
+    if (hasPassword) details.passwordChanged = true;
+    if (resetToDefault) details.passwordResetToDefault = true;
+    if (requestedRoles) details.roles = [...new Set(requestedRoles)];
+    await transaction.request()
+      .input('action', sql.VarChar(40), 'UpdateUser')
+      .input('target', sql.Int, id)
+      .input('targetName', sql.NVarChar(512), target.UserName)
+      .input('by', sql.NVarChar(512), staffName(req))
+      .input('details', sql.NVarChar(sql.MAX), JSON.stringify(details))
+      .query(`
+        INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+        VALUES (@action, @target, @targetName, @by, @details)
+      `);
+    await transaction.commit();
+    transactionStarted = false;
+    res.json({ message: 'Staff account updated.' });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        logError(rollbackError, { context: 'updateAdminUserRollback' });
+      }
+    }
+    logError(error, { context: 'updateAdminUser' });
+    res.status(500).json({ message: 'Unable to update staff account.' });
+  }
 });
 
-app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (req, res) => { try { const id = Number(req.params.id); await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.AspNetUserRoles WHERE UserId=@id; DELETE FROM dbo.AspNetUsers WHERE UserId=@id'); res.json({ message: 'Staff account deleted.' }); } catch (error) { logError(error, { context: 'deleteAdminUser' }); res.status(500).json({ message: 'Unable to delete staff account.' }); } });
+app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
 
-app.post('/api/admin/emergency-override', requireAdmin, requireRole(['Admin']), async (req, res) => { const minutes = Math.min(120, Math.max(1, Number(req.body?.durationMinutes) || 15)); const token = `${adminSecret}.${req.staff?.userId || 0}.Admin`; const expiresAt = new Date(Date.now() + minutes * 60 * 1000); try { await getPool().request().input('event', sql.VarChar(40), 'EmergencyOverride').input('actor', sql.NVarChar(256), staffName(req)).input('target', sql.NVarChar(256), req.body?.targetUserName || null).input('reason', sql.NVarChar(1000), req.body?.reason || null).input('expires', sql.DateTime2, expiresAt).query('INSERT INTO dbo.SecurityAuditLog (EventType, ActorUserName, TargetUserName, Reason, ExpiresAt) VALUES (@event,@actor,@target,@reason,@expires)'); res.json({ token, expiresAt }); } catch (error) { logError(error, { context: 'emergencyOverride' }); res.status(500).json({ message: 'Unable to create emergency override.' }); } });
+  let transaction;
+  let transactionStarted = false;
+  try {
+    const db = getPool();
+    transaction = new sql.Transaction(db);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    transactionStarted = true;
+    const targetResult = await transaction.request()
+      .input('id', sql.Int, id)
+      .query('SELECT UserName, EmailAddress FROM dbo.AspNetUsers WHERE UserId = @id');
+    const target = targetResult.recordset[0];
+    if (!target) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ message: 'Staff account not found.' });
+    }
 
-app.get('/api/admin/prayers', requireAdmin, async (_req, res) => {
+    await transaction.request()
+      .input('id', sql.Int, id)
+      .query('DELETE FROM dbo.AspNetUserRoles WHERE UserId = @id');
+    await transaction.request()
+      .input('id', sql.Int, id)
+      .query('DELETE FROM dbo.AspNetUsers WHERE UserId = @id');
+    await transaction.request()
+      .input('action', sql.VarChar(40), 'DeleteUser')
+      .input('target', sql.Int, id)
+      .input('targetName', sql.NVarChar(512), target.UserName)
+      .input('by', sql.NVarChar(512), staffName(req))
+      .input('details', sql.NVarChar(sql.MAX), JSON.stringify({ email: target.EmailAddress }))
+      .query(`
+        INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+        VALUES (@action, @target, @targetName, @by, @details)
+      `);
+    await transaction.commit();
+    transactionStarted = false;
+    res.json({ message: 'Staff account deleted.' });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        logError(rollbackError, { context: 'deleteAdminUserRollback' });
+      }
+    }
+    logError(error, { context: 'deleteAdminUser' });
+    res.status(500).json({ message: 'Unable to delete staff account.' });
+  }
+});
+
+app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -1398,7 +2271,7 @@ app.get('/api/admin/prayers', requireAdmin, async (_req, res) => {
   }
 })
 
-app.delete('/api/prayers/:prayerId', requireAdmin, async (req, res) => {
+app.delete('/api/prayers/:prayerId', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
   const { prayerId } = req.params;
 
   try {
@@ -1417,7 +2290,7 @@ app.delete('/api/prayers/:prayerId', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/service-requests', requireAdmin, async (_req, res) => {
+app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -1623,7 +2496,7 @@ app.delete('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPr
   }
 });
 
-app.put('/api/admin/service-requests/:requestId', requireAdmin, async (req, res) => {
+app.put('/api/admin/service-requests/:requestId', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const requestId = Number(req.params.requestId);
   const { status, adminNotes } = req.body;
 
@@ -1647,14 +2520,14 @@ app.put('/api/admin/service-requests/:requestId', requireAdmin, async (req, res)
         UPDATE dbo.ServiceRequest
         SET Status = @status,
             Notes = CONCAT(ISNULL(Notes, N''), @adminNote),
-            VoidedAt = CASE WHEN @status IN ('Voided','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+            VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
         WHERE ServiceRequestId = @requestId
       `);
     } else {
       await request.query(`
         UPDATE dbo.ServiceRequest
         SET Status = @status,
-            VoidedAt = CASE WHEN @status IN ('Voided','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+            VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
         WHERE ServiceRequestId = @requestId
       `);
     }
@@ -1666,7 +2539,7 @@ app.put('/api/admin/service-requests/:requestId', requireAdmin, async (req, res)
   }
 });
 
-app.delete('/api/admin/service-requests/:requestId', requireAdmin, async (req, res) => {
+app.delete('/api/admin/service-requests/:requestId', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const requestId = Number(req.params.requestId);
 
   if (!Number.isInteger(requestId) || requestId <= 0) {
@@ -1709,14 +2582,14 @@ const sqlBitToBoolean = (value) => {
   return Boolean(value);
 };
 
-app.get('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
+app.get('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (_req, res) => {
   try {
     const result = await getPool().request().query(`SELECT MassScheduleId AS id, Title AS title, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Notes AS notes, Status AS status FROM dbo.MassSchedule ORDER BY MassDate, MassTime`);
     res.json(result.recordset);
   } catch (error) { logError(error, { context: 'operationSchedule' }); res.status(500).json({ message: 'Unable to load schedules.' }); }
 });
 
-app.post('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+app.post('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
   const { title, date, time, location, priestUsername, notes, status } = req.body || {};
   if (!title || !date || !time || !location || !priestUsername) return res.status(400).json({ message: 'Schedule title, date, time, location, and minister are required.' });
   try {
@@ -1781,18 +2654,18 @@ app.get('/api/admin/operations/finance', requireAdmin, requireRole(['ParishPries
   try { const result = await getPool().request().query('SELECT TOP 200 * FROM dbo.FinancialEntries ORDER BY EntryDate DESC, FinancialEntryId DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeEntries' }); res.status(500).json({ message: 'Unable to load financial entries.' }); }
 });
 
-app.post('/api/admin/operations/finance', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+app.post('/api/admin/operations/finance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
   const { date, entryType, description, amount } = req.body || {};
   if (!date || !entryType || !description || Number(amount) <= 0) return res.status(400).json({ message: 'A valid finance date, type, description, and amount are required.' });
   try { const result = await getPool().request().input('date', sql.Date, date).input('type', sql.VarChar(30), entryType).input('description', sql.NVarChar(500), description).input('amount', sql.Decimal(12, 2), Number(amount)).input('enteredBy', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.FinancialEntries (EntryDate, EntryType, Description, Amount, EnteredBy) OUTPUT INSERTED.FinancialEntryId VALUES (@date,@type,@description,@amount,@enteredBy)`); res.status(201).json(result.recordset[0]); } catch (error) { logError(error, { context: 'createFinanceEntry' }); res.status(500).json({ message: 'Unable to save financial entry.' }); }
 });
 
-app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
   const id = Number(req.params.id); const { date, entryType, description, amount } = req.body || {};
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid financial entry.' });
   try {
     const pool = getPool();
-    const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    const current = await pool.request().input('id', sql.Int, id).query('SELECT * FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
     if (!current.recordset[0]) return res.status(404).json({ message: 'Financial entry not found.' });
     const status = current.recordset[0].Status || 'Draft';
     const next = financeTransition(status, 'edit');
@@ -1804,7 +2677,7 @@ app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Bookkee
   } catch (error) { logError(error, { context: 'editFinanceEntry' }); res.status(500).json({ message: 'Unable to update financial entry.' }); }
 });
 
-app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Bookkeeper']), async (req, res) => {
+app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid financial entry.' });
   try {
@@ -1812,7 +2685,7 @@ app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Book
     const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
     if (!current.recordset[0]) return res.status(404).json({ message: 'Financial entry not found.' });
     if (financeTransition(current.recordset[0].Status || 'Draft', 'delete') !== 'Deleted') return res.status(409).json({ message: `Entries with status '${current.recordset[0].Status}' cannot be deleted.` });
-    await pool.request().input('id', sql.Int, id).query('DELETE FROM dbo.FinancialEntryAudit WHERE FinancialEntryId=@id; DELETE FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
+    await pool.request().input('id', sql.Int, id).input('by', sql.NVarChar(256), staffName(req)).input('details', sql.NVarChar(sql.MAX), JSON.stringify(current.recordset[0])).query(`INSERT INTO dbo.FinancialEntryAudit (FinancialEntryId, ActionName, ChangedBy, Details) VALUES (@id,'Delete',@by,@details); DELETE FROM dbo.FinancialEntries WHERE FinancialEntryId=@id`);
     res.json({ message: 'Draft entry deleted.' });
   } catch (error) { logError(error, { context: 'deleteFinanceEntry' }); res.status(500).json({ message: 'Unable to delete financial entry.' }); }
 });
@@ -1836,10 +2709,10 @@ async function changeFinanceStatus(req, res, status) {
 }
 app.post('/api/admin/operations/finance/:id/submit', requireAdmin, requireRole(['Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Submitted'));
 app.post('/api/admin/operations/finance/:id/reject', requireAdmin, requireRole(['ParishPriest', 'Secretary']), (req, res) => changeFinanceStatus(req, res, 'Rejected'));
-app.post('/api/admin/operations/finance/:id/approve', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Approved'));
+app.post('/api/admin/operations/finance/:id/approve', requireAdmin, requireRole(['ParishPriest', 'Secretary']), (req, res) => changeFinanceStatus(req, res, 'Approved'));
 app.post('/api/admin/operations/finance/:id/reconcile', requireAdmin, requireRole(['Bookkeeper']), (req, res) => changeFinanceStatus(req, res, 'Reconciled'));
 
-app.get('/api/admin/operations/finance/report', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
+app.get('/api/admin/operations/finance/report', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (req, res) => {
   const { start, end, type, format } = req.query || {};
   try {
     const request = getPool().request();
@@ -1862,7 +2735,7 @@ app.get('/api/admin/operations/finance/audit', requireAdmin, requireRole(['Paris
   try { const result = await getPool().request().query(`SELECT TOP 200 a.*, f.EntryType, f.Description FROM dbo.FinancialEntryAudit a JOIN dbo.FinancialEntries f ON f.FinancialEntryId=a.FinancialEntryId ORDER BY a.ChangedAt DESC`); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeAudit' }); res.status(500).json({ message: 'Unable to load finance audit history.' }); }
 });
 
-app.get('/api/admin/operations/finance/reports', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (_req, res) => {
+app.get('/api/admin/operations/finance/reports', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (_req, res) => {
   try { const result = await getPool().request().query('SELECT TOP 100 * FROM dbo.FinanceReportSnapshots ORDER BY GeneratedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeReportHistory' }); res.status(500).json({ message: 'Unable to load finance report history.' }); }
 });
 
@@ -1883,7 +2756,7 @@ app.put('/api/admin/operations/applications/:id', requireAdmin, requireRole(['Pa
 app.post('/api/admin/operations/applications/:id/attendance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const attendanceStatus = String(req.body?.attendanceStatus || '');
   if (!['Present', 'NoShow'].includes(attendanceStatus)) return res.status(400).json({ message: 'Attendance must be Present or NoShow.' });
-  try { await getPool().request().input('id', sql.Int, Number(req.params.id)).input('attendance', sql.VarChar(30), attendanceStatus).query(`UPDATE dbo.ServiceRequest SET AttendanceStatus=@attendance, AttendanceMarkedAt=SYSUTCDATETIME(), Status=CASE WHEN @attendance='NoShow' THEN 'Voided' ELSE Status END, VoidedAt=CASE WHEN @attendance='NoShow' THEN SYSUTCDATETIME() ELSE VoidedAt END WHERE ServiceRequestId=@id`); res.json({ message: 'Attendance recorded.' }); } catch (error) { logError(error, { context: 'markAttendance' }); res.status(500).json({ message: 'Unable to record attendance.' }); }
+  try { await getPool().request().input('id', sql.Int, Number(req.params.id)).input('attendance', sql.VarChar(30), attendanceStatus).query(`UPDATE dbo.ServiceRequest SET AttendanceStatus=@attendance, AttendanceMarkedAt=SYSUTCDATETIME(), Status=CASE WHEN @attendance='NoShow' THEN 'VoidedNoShow' ELSE Status END, VoidedAt=CASE WHEN @attendance='NoShow' THEN SYSUTCDATETIME() ELSE VoidedAt END WHERE ServiceRequestId=@id`); res.json({ message: 'Attendance recorded.' }); } catch (error) { logError(error, { context: 'markAttendance' }); res.status(500).json({ message: 'Unable to record attendance.' }); }
 });
 
 app.get('/api/admin/operations/statistics', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Admin']), async (req, res) => {
@@ -1907,8 +2780,8 @@ app.get('/api/admin/operations/reports/utilization', requireAdmin, requireRole([
   try {
     const db = getPool();
     const [utilization, noShows] = await Promise.all([
-      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS TotalRequests, SUM(CASE WHEN sr.Status='Completed' THEN 1 ELSE 0 END) AS Completed, SUM(CASE WHEN sr.Status='Confirmed' THEN 1 ELSE 0 END) AS Confirmed, SUM(CASE WHEN sr.Status IN ('Cancelled','Voided','ConflictVoided') THEN 1 ELSE 0 END) AS CancelledOrVoided FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year GROUP BY s.Name ORDER BY TotalRequests DESC`),
-      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS NoShows FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year AND sr.AttendanceStatus='NoShow' GROUP BY s.Name ORDER BY NoShows DESC`),
+      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS TotalRequests, SUM(CASE WHEN sr.Status='Completed' THEN 1 ELSE 0 END) AS Completed, SUM(CASE WHEN sr.Status='Confirmed' THEN 1 ELSE 0 END) AS Confirmed, SUM(CASE WHEN sr.Status IN ('Cancelled','Voided','VoidedNoShow','ConflictVoided') THEN 1 ELSE 0 END) AS CancelledOrVoided FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year GROUP BY s.Name ORDER BY TotalRequests DESC`),
+      db.request().input('year', sql.Int, year).query(`SELECT s.Name AS ServiceName, COUNT(*) AS NoShows FROM dbo.ServiceRequest sr JOIN dbo.Service s ON s.ServiceId=sr.ServiceId WHERE YEAR(sr.ScheduledDate)=@year AND (sr.Status='VoidedNoShow' OR sr.AttendanceStatus='NoShow') GROUP BY s.Name ORDER BY NoShows DESC`),
     ]);
     if (String(req.query.format || '').toLowerCase() === 'csv') {
       const csv = toCsv(utilization.recordset, [{ key: 'ServiceName', label: 'Service' }, { key: 'TotalRequests', label: 'Requests' }, { key: 'Completed', label: 'Completed' }, { key: 'Confirmed', label: 'Confirmed' }, { key: 'CancelledOrVoided', label: 'CancelledOrVoided' }]);
@@ -2002,7 +2875,16 @@ app.get('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPri
     res.json({ archives });
   } catch (error) { logError(error, { context: 'sacramentalArchives' }); res.status(500).json({ message: 'Unable to load archives.' }); }
 });
-app.post('/api/admin/sacramental/upload-archive', requireAdmin, requireRole(['ParishPriest', 'Secretary']), upload.single('document'), (req, res) => { if (!req.file) return res.status(400).json({ message: 'A scanned document is required.' }); res.status(201).json({ fileUrl: `/uploads/${req.file.filename}` }); });
+app.post('/api/admin/sacramental/upload-archive', requireAdmin, requireRole(['ParishPriest', 'Secretary']), (req, res, next) => {
+  archiveUpload.single('document')(req, res, error => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'Archive files must be 20 MB or smaller.' });
+    if (error) return res.status(400).json({ message: 'Archive files must be JPEG, PNG, TIFF, or PDF.' });
+    next();
+  });
+}, (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'A scanned document is required.' });
+  res.status(201).json({ fileUrl: `/uploads/${req.file.filename}` });
+});
 app.post('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => { const { sacramentType, bookNumber, pageNumber, fileUrl, notes } = req.body || {}; try { const result = await getPool().request().input('type', sql.VarChar(30), sacramentType).input('book', sql.Int, Number(bookNumber)).input('page', sql.Int, Number(pageNumber)).input('url', sql.NVarChar(1000), fileUrl).input('notes', sql.NVarChar(sql.MAX), notes || null).input('by', sql.NVarChar(256), staffName(req)).query('INSERT INTO dbo.SacramentalArchives (SacramentType, BookNumber, PageNumber, FileUrl, Notes, UploadedBy) OUTPUT INSERTED.ArchiveId VALUES (@type,@book,@page,@url,@notes,@by)'); res.status(201).json(result.recordset[0]); } catch (error) { logError(error, { context: 'createSacramentalArchive' }); res.status(500).json({ message: 'Unable to save archive entry.' }); } });
 app.put('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
   const id = Number(req.params.id); const { bookNumber, pageNumber, notes } = req.body || {};
@@ -2028,9 +2910,7 @@ app.delete('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['Pa
   } catch (error) { logError(error, { context: 'deleteSacramentalArchive' }); res.status(500).json({ message: 'Unable to delete archive entry.' }); }
 });
 // Protected archive download: requires a valid staff token (header or query) instead of the public /uploads URL.
-app.get('/api/admin/sacramental/archives/:id/file', async (req, res) => {
-  const staff = parseStaffToken(String(req.headers['x-admin-token'] || req.query.token || ''));
-  if (!staff) return res.status(403).json({ message: 'Admin token is required.' });
+app.get('/api/admin/sacramental/archives/:id/file', requireAdminWithQueryToken, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
   try {
@@ -2140,7 +3020,7 @@ app.get('/api/prayers/:prayerId', async (req, res) => {
   }
 });
 
-app.post('/api/prayers/:prayerId/approve', requireAdmin, async (req, res) => {
+app.post('/api/prayers/:prayerId/approve', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
   const prayerId = Number(req.params.prayerId);
 
   if (!Number.isInteger(prayerId) || prayerId <= 0) {
@@ -2198,11 +3078,15 @@ app.post('/api/test-email', async (req, res) => {
   }
 });
 
-app.listen(5000, () => {
+const port = Number(process.env.PORT || 5000);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('PORT must be an integer between 1 and 65535.');
+}
+
+app.listen(port, () => {
   logger.info('API server started', {
-    port: 5000,
+    port,
     environment: process.env.NODE_ENV || 'development',
-    url: 'http://localhost:5000'
   });
 });
 
@@ -2214,10 +3098,6 @@ app.listen(5000, () => {
 
     // Start cleanup of expired tokens every 60 minutes
     startTokenCleanupSchedule(60);
-
-    // Start periodic metrics reporting (every 5 minutes)
-    metricsCollector.startPeriodicReporting(300);
-    logger.info('Metrics collection started');
 
     startFinanceReportSchedule();
     logger.info('Weekly and monthly finance report generation started');
@@ -2281,7 +3161,70 @@ app.post('/api/portal/certificate-requests/:requestId/documents', requirePortal,
   });
 });
 
-app.get('/api/admin/certificate-requests', requireAdmin, async (_req, res) => {
+const BLOCK_SCOPES = ['All', 'Service', 'Certificate'];
+
+app.get('/api/blocked-slots', async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS date, BlockTime AS time, Scope AS scope, ServiceId AS serviceId, Reason AS reason FROM dbo.BlockedSlots WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date)`);
+    res.json(result.recordset);
+  } catch (error) {
+    logError(error, { context: 'publicBlockedSlots' });
+    res.status(500).json({ message: 'Unable to load unavailable dates.' });
+  }
+});
+
+app.get('/api/admin/blocked-slots', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT b.BlockedSlotId AS id, CONVERT(varchar(10), b.BlockDate, 23) AS date, b.BlockTime AS time,
+             b.Scope AS scope, b.ServiceId AS serviceId, s.Name AS serviceName, b.Reason AS reason,
+             b.CreatedBy AS createdBy, b.CreatedAt AS createdAt
+      FROM dbo.BlockedSlots b LEFT JOIN dbo.Service s ON s.ServiceId = b.ServiceId
+      WHERE b.BlockDate >= CAST(SYSUTCDATETIME() AS date)
+      ORDER BY b.BlockDate, b.BlockTime`);
+    res.json(result.recordset);
+  } catch (error) {
+    logError(error, { context: 'listBlockedSlots' });
+    res.status(500).json({ message: 'Unable to load blocked slots.' });
+  }
+});
+
+app.post('/api/admin/blocked-slots', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const { date, time, scope, serviceId, reason } = req.body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !isValidDate(date)) return res.status(400).json({ message: 'Please provide a valid date.' });
+  if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time))) return res.status(400).json({ message: 'Please provide a valid time.' });
+  if (!BLOCK_SCOPES.includes(scope)) return res.status(400).json({ message: 'Please choose what to block.' });
+  const numericServiceId = scope === 'Service' ? Number(serviceId) : null;
+  if (scope === 'Service' && (!Number.isInteger(numericServiceId) || numericServiceId <= 0)) return res.status(400).json({ message: 'Please choose a service.' });
+  try {
+    const result = await getPool().request()
+      .input('date', sql.Date, date)
+      .input('time', sql.VarChar(5), time || null)
+      .input('scope', sql.VarChar(20), scope)
+      .input('serviceId', sql.Int, numericServiceId)
+      .input('reason', sql.NVarChar(300), reason ? String(reason).trim().slice(0, 300) : null)
+      .input('createdBy', sql.NVarChar(100), String(req.staff?.email || req.staff?.userId || '').slice(0, 100))
+      .query(`INSERT INTO dbo.BlockedSlots (BlockDate, BlockTime, Scope, ServiceId, Reason, CreatedBy) OUTPUT INSERTED.BlockedSlotId AS id VALUES (@date, @time, @scope, @serviceId, @reason, @createdBy)`);
+    res.status(201).json({ id: result.recordset[0].id });
+  } catch (error) {
+    logError(error, { context: 'createBlockedSlot' });
+    res.status(500).json({ message: 'Unable to block that date or time.' });
+  }
+});
+
+app.delete('/api/admin/blocked-slots/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ message: 'Invalid request.' });
+  try {
+    await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.BlockedSlots WHERE BlockedSlotId=@id');
+    res.json({ success: true });
+  } catch (error) {
+    logError(error, { context: 'deleteBlockedSlot' });
+    res.status(500).json({ message: 'Unable to unblock that slot.' });
+  }
+});
+
+app.get('/api/admin/certificate-requests', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
     // Include guest requests (AccountId is NULL) by preferring the stored contact fields,
     // falling back to the linked parishioner profile for account-based requests.
@@ -2307,7 +3250,7 @@ app.get('/api/admin/certificate-requests', requireAdmin, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/certificate-requests/:requestId/documents', requireAdmin, async (req, res) => {
+app.get('/api/admin/certificate-requests/:requestId/documents', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const requestId = Number(req.params.requestId);
   if (!Number.isInteger(requestId) || requestId <= 0) {
     return res.status(400).json({ message: 'Invalid certificate request ID.' });
@@ -2319,22 +3262,72 @@ app.get('/api/admin/certificate-requests/:requestId/documents', requireAdmin, as
       WHERE CertificateRequestId = @requestId
       ORDER BY UploadedAt DESC
     `);
-    res.json(result.recordset);
+    res.json(result.recordset.map(document => ({
+      ...document,
+      FileUrl: `/api/admin/certificate-requests/${requestId}/documents/${document.CertificateRequestDocumentId}/file`,
+    })));
   } catch (error) {
     logError(error, { context: 'adminCertificateDocuments' });
     res.status(500).json({ message: 'Unable to load request documents.' });
   }
 });
 
-app.put('/api/admin/certificate-requests/:requestId', requireAdmin, async (req, res) => {
+app.get('/api/admin/certificate-requests/:requestId/documents/:documentId/file', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const requestId = Number(req.params.requestId);
+  const documentId = Number(req.params.documentId);
+  if (!Number.isInteger(requestId) || requestId <= 0 || !Number.isInteger(documentId) || documentId <= 0) {
+    return res.status(400).json({ message: 'Invalid certificate document ID.' });
+  }
+  try {
+    const result = await getPool().request()
+      .input('requestId', sql.Int, requestId)
+      .input('documentId', sql.Int, documentId)
+      .query('SELECT FileUrl, OriginalFileName, MimeType FROM dbo.CertificateRequestDocuments WHERE CertificateRequestId=@requestId AND CertificateRequestDocumentId=@documentId');
+    const document = result.recordset[0];
+    if (!document?.FileUrl || !String(document.FileUrl).startsWith('/uploads/')) {
+      return res.status(404).json({ message: 'Certificate document not found.' });
+    }
+    const filePath = path.join(uploadDirectory, path.basename(String(document.FileUrl)));
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Certificate document not found.' });
+    res.type(document.MimeType || 'application/octet-stream');
+    return res.sendFile(filePath, { headers: { 'Content-Disposition': `inline; filename="${path.basename(document.OriginalFileName || 'document')}"` } });
+  } catch (error) {
+    logError(error, { context: 'downloadCertificateDocument' });
+    return res.status(500).json({ message: 'Unable to download certificate document.' });
+  }
+});
+
+app.put('/api/admin/certificate-requests/:requestId', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const allowed = ['Requested', 'Confirmed', 'ReadyForClaim', 'Claimed', 'Rejected'];
   if (!allowed.includes(req.body.status)) return res.status(400).json({ message: 'Invalid certificate request status.' });
   try {
-    await getPool().request().input('requestId', sql.Int, Number(req.params.requestId)).input('status', sql.VarChar(30), req.body.status).query(`
+    const requestId = Number(req.params.requestId);
+    if (!Number.isInteger(requestId) || requestId <= 0) return res.status(400).json({ message: 'Invalid certificate request ID.' });
+    if (req.body.status === 'Confirmed') {
+      const conflict = await getPool().request().input('requestId', sql.Int, requestId).query(`
+        SELECT TOP 1 CertificateRequestId
+        FROM dbo.CertificateRequests
+        WHERE CertificateRequestId=@requestId
+          AND Status IN ('Confirmed', 'ReadyForClaim', 'Claimed')
+      `);
+      if (!conflict.recordset[0]) {
+        const requested = await getPool().request().input('requestId', sql.Int, requestId).query('SELECT PreferredDate, PreferredTime FROM dbo.CertificateRequests WHERE CertificateRequestId=@requestId');
+        const appointment = requested.recordset[0];
+        if (!appointment) return res.status(404).json({ message: 'Certificate request not found.' });
+        const clash = await getPool().request()
+          .input('requestId', sql.Int, requestId)
+          .input('date', sql.Date, appointment.PreferredDate)
+          .input('time', sql.VarChar(10), appointment.PreferredTime)
+          .query("SELECT TOP 1 CertificateRequestId FROM dbo.CertificateRequests WHERE CertificateRequestId<>@requestId AND PreferredDate=@date AND PreferredTime=@time AND Status IN ('Confirmed','ReadyForClaim','Claimed')");
+        if (clash.recordset[0]) return res.status(409).json({ message: 'That certificate appointment slot is already confirmed.' });
+      }
+    }
+    await getPool().request().input('requestId', sql.Int, requestId).input('status', sql.VarChar(30), req.body.status).query(`
       UPDATE dbo.CertificateRequests SET Status = @status, UpdatedAt = SYSUTCDATETIME() WHERE CertificateRequestId = @requestId
     `);
     res.json({ message: 'Certificate request updated.' });
   } catch (error) {
+    if (error?.number === 2601 || error?.number === 2627) return res.status(409).json({ message: 'That certificate appointment slot is already confirmed.' });
     logError(error, { context: 'updateAdminCertificateRequest' });
     res.status(500).json({ message: 'Unable to update certificate request.' });
   }

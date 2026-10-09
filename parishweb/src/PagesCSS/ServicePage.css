@@ -68,6 +68,12 @@
   gap: 1.5rem;
 }
 
+.booking-grid--certificate {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
 /* ── Row 1: calendar + time slots ── */
 .calendar-row {
   display: grid;

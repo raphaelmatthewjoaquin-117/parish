@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE_URL } from '../api/client'
 
 interface Prayer {
   id: number
@@ -45,8 +46,6 @@ const truncateText = (text: string, maxLength: number = 120): string => {
   return text.substring(0, maxLength) + '...'
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-
 export function PrayerWall() {
   const [prayers, setPrayers] = useState<Prayer[]>([])
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -59,7 +58,7 @@ export function PrayerWall() {
       try {
         setLoading(true)
         setError(null)
-        const response = await fetch(`${API_URL}/api/prayers`)
+        const response = await fetch(`${API_BASE_URL}/api/prayers`)
         if (!response.ok) throw new Error('Failed to load prayers')
         const data = await response.json()
         setPrayers(data || [])

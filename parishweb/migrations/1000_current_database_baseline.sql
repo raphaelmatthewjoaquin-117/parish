@@ -28,6 +28,7 @@ IF OBJECT_ID(N'dbo.AspNetUsers', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.AspNetUsers (
         UserId INT NOT NULL IDENTITY(1,1) CONSTRAINT PK_AspNetUsers PRIMARY KEY,
+        UserName NVARCHAR(256) NOT NULL,
         EmailAddress NVARCHAR(510) NOT NULL,
         EmailConfirmed BIT NOT NULL CONSTRAINT DF_AspNetUsers_EmailConfirmed DEFAULT ((0)),
         PasswordHash NVARCHAR(1024) NULL,
@@ -206,11 +207,15 @@ BEGIN
     CREATE TABLE dbo.Events (
         EventId INT NOT NULL IDENTITY(1,1) CONSTRAINT PK_Events PRIMARY KEY,
         Title NVARCHAR(510) NOT NULL,
+        TitleTl NVARCHAR(510) NULL,
         Description NVARCHAR(MAX) NULL,
+        DescriptionTl NVARCHAR(MAX) NULL,
         Body NVARCHAR(MAX) NULL,
+        BodyTl NVARCHAR(MAX) NULL,
         EventDate DATE NULL,
         EventTime TIME NULL,
         Location NVARCHAR(510) NULL,
+        LocationTl NVARCHAR(510) NULL,
         CreatedBy INT NULL,
         CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_Events_CreatedAt DEFAULT (SYSUTCDATETIME()),
         PhotoUrl NVARCHAR(2000) NULL

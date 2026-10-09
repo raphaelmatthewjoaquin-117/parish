@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { PrayerWall } from '../components/PrayerWall'
+import { API_BASE_URL as API_URL } from '../api/client'
 import '../PagesCSS/PrayerRequest.css'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 type PrayerCategory = 'healing' | 'thanksgiving' | 'guidance' | 'family' | 'deceased' | 'other'
 

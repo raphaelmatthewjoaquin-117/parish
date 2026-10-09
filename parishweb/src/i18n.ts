@@ -1,0 +1,565 @@
+export type Language = 'en' | 'tl'
+
+const tagalogTranslations: Record<string, string> = {
+  'Home': 'Tahanan',
+  'About Us': 'Tungkol sa Amin',
+  'News & Events': 'Balita at mga Kaganapan',
+  'Gallery': 'Galeriya',
+  'Services': 'Mga Serbisyo',
+  'Contact Us': 'Makipag-ugnayan',
+  'Prayer Requests': 'Mga Kahilingan sa Panalangin',
+  'Go to home': 'Pumunta sa tahanan',
+  'Toggle navigation menu': 'Buksan o isara ang menu',
+  'Main navigation': 'Pangunahing nabigasyon',
+  'Parish Information': 'Impormasyon ng Parokya',
+  'Quick Links': 'Mabilisang Link',
+  'Contact': 'Makipag-ugnayan',
+  'Certificate Request': 'Kahilingan ng Sertipiko',
+  'Service Times': 'Oras ng Misa',
+  'Saturday: 5:30 PM': 'Sabado: 5:30 PM',
+  'Sunday: 8:00 AM': 'Linggo: 8:00 AM',
+  'Sunday: 10:30 AM': 'Linggo: 10:30 AM',
+  'Weekday: 7:00 AM': 'Araw ng Linggo: 7:00 AM',
+  'Phone: (555) 123-4567': 'Telepono: (555) 123-4567',
+  'Email: office@saintjohnparish.org': 'Email: office@saintjohnparish.org',
+  'Phone:': 'Telepono:',
+  'Email:': 'Email:',
+  'All rights reserved.': 'Nakalaan ang lahat ng karapatan.',
+  '© 2026 Saint John Parish. All rights reserved.': '© 2026 Parokya ni San Juan. Nakalaan ang lahat ng karapatan.',
+  'Santo Domingo Parish': 'Parokya ng Santo Domingo',
+  'National Shrine · La Naval de Manila': 'Pambansang Dambana · La Naval de Manila',
+  'National Shrine of Our Lady of the Most Holy Rosary La Naval de Manila': 'Pambansang Dambana ng Mahal na Birhen ng Santo Rosaryo, La Naval de Manila',
+  'Plan Your Visit': 'Planuhin ang Iyong Pagbisita',
+  'Learn More': 'Alamin Pa',
+  'Events': 'Mga Kaganapan',
+  'Upcoming moments to share': 'Mga nalalapit na kaganapang pagsasaluhan',
+  'Loading events...': 'Naglo-load ng mga kaganapan...',
+  'Unable to load events': 'Hindi ma-load ang mga kaganapan',
+  'Invalid events response': 'Hindi wastong tugon para sa mga kaganapan',
+  'Untitled event': 'Kaganapang walang pamagat',
+  'No upcoming events are published yet.': 'Wala pang nailalathalang nalalapit na kaganapan.',
+  'Learn more': 'Alamin pa',
+  'From the Holy See': 'Mula sa Banal na Luklukan',
+  'Vatican News': 'Balita mula sa Vatican',
+  'Loading Vatican News...': 'Naglo-load ng balita mula sa Vatican...',
+  'Unable to load Vatican News': 'Hindi ma-load ang balita mula sa Vatican',
+  'Invalid Vatican News response': 'Hindi wastong tugon para sa balita mula sa Vatican',
+  'Read on Vatican News': 'Basahin sa Vatican News',
+  'Growing in faith together': 'Sabay-sabay na lumalago sa pananampalataya',
+  'We are a vibrant parish community centered on worship, service, and friendship. Our mission is to help people encounter Christ, grow in faith, and share God’s love with the wider community.': 'Kami ay masiglang pamayanan ng parokya na nakasentro sa pagsamba, paglilingkod, at pagkakaibigan. Layunin naming tulungan ang bawat isa na makatagpo si Kristo, lumago sa pananampalataya, at ibahagi ang pag-ibig ng Diyos sa mas malawak na pamayanan.',
+  'From children’s ministry to adult formation, prayer groups, and outreach, every part of parish life is designed to help people belong, pray, and serve.': 'Mula sa ministeryo para sa mga bata hanggang sa paghubog ng mga nasa hustong gulang, mga pangkat panalangin, at paglilingkod sa pamayanan, nilalayong tulungan ng bawat bahagi ng buhay-parokya ang mga tao na makibahagi, manalangin, at maglingkod.',
+  'We welcome families, visitors, and individuals of every age and stage of life. Whether you are new to the area or looking for a parish home, you are welcome here.': 'Tinatanggap namin ang mga pamilya, bisita, at indibidwal sa bawat edad at yugto ng buhay. Bago ka man sa lugar o naghahanap ng parokyang mauuwian, malugod kang tinatanggap dito.',
+  'active parish families': 'pamilyang aktibo sa parokya',
+  'ministries and groups': 'mga ministeryo at pangkat',
+  'community volunteers': 'mga boluntaryo sa pamayanan',
+  'Life in our parish': 'Buhay sa aming parokya',
+  'Faith': 'Pananampalataya',
+  'Music': 'Musika',
+  'Community': 'Pamayanan',
+  'Service': 'Paglilingkod',
+  'We would love to hear from you': 'Nais naming makipag-ugnayan sa inyo',
+  "Get in touch with our parish community. We're here to help answer any questions you may have.": 'Makipag-ugnayan sa aming pamayanan ng parokya. Narito kami upang sagutin ang inyong mga katanungan.',
+  'Visit Us': 'Bisitahin Kami',
+  'Call Us': 'Tawagan Kami',
+  'Email Us': 'Mag-email sa Amin',
+  'Open Monday to Saturday': 'Bukas mula Lunes hanggang Sabado',
+  'Monday - Friday': 'Lunes - Biyernes',
+  'We respond within 24 hours': 'Sasagot kami sa loob ng 24 oras',
+  'Send us a message': 'Magpadala sa amin ng mensahe',
+  "Fill out the form below and we'll get back to you as soon as possible.": 'Punan ang form sa ibaba at sasagot kami sa lalong madaling panahon.',
+  'Full Name *': 'Buong Pangalan *',
+  'Email Address *': 'Email Address *',
+  'Phone Number': 'Numero ng Telepono',
+  'Message *': 'Mensahe *',
+  'How can we help you?': 'Paano ka namin matutulungan?',
+  'Send Message': 'Ipadala ang Mensahe',
+  "Thank you for your message! We'll get back to you soon.": 'Salamat sa iyong mensahe! Sasagot kami sa iyo sa lalong madaling panahon.',
+  'Something went wrong. Please try again.': 'Nagkaproblema. Pakisubukang muli.',
+  'Your Prayer Has Been Received': 'Natanggap na ang Iyong Panalangin',
+  'Thank you for sharing your prayer intention with us. Our prayer team will lift up your request during our daily prayers and Masses.': 'Salamat sa pagbabahagi ng iyong kahilingan sa panalangin. Isasama ito ng aming pangkat panalangin sa mga araw-araw na panalangin at Misa.',
+  'Your request will remain completely anonymous.': 'Mananatiling hindi ibinubunyag ang iyong pagkakakilanlan.',
+  'Thank you for sharing with us.': 'Salamat sa pagbabahagi sa amin.',
+  'Submit Another Prayer': 'Magsumite ng Panibagong Panalangin',
+  'A place to pray together': 'Isang lugar upang sama-samang manalangin',
+  'Share Your Prayer Request': 'Ibahagi ang Iyong Kahilingan sa Panalangin',
+  'Bring your intentions to our parish community. You can also pray for the requests shared below.': 'Ibahagi ang iyong mga kahilingan sa aming pamayanan ng parokya. Maaari ka ring manalangin para sa mga kahilingang nasa ibaba.',
+  'Submit Request': 'Isumite ang Kahilingan',
+  'Prayer Request Form': 'Form ng Kahilingan sa Panalangin',
+  'Prayer Category': 'Kategorya ng Panalangin',
+  'Your Prayer Request': 'Ang Iyong Kahilingan sa Panalangin',
+  'Minimum 10 characters. You may include names (with permission) and specific details.': 'Hindi bababa sa 10 karakter. Maaari kang magsama ng mga pangalan (kung may pahintulot) at mahahalagang detalye.',
+  'Your Name': 'Iyong Pangalan',
+  'Enter your name': 'Ilagay ang iyong pangalan',
+  'Privacy Options': 'Mga Opsyon sa Pagkapribado',
+  'Keep my request anonymous': 'Huwag ibunyag ang aking pagkakakilanlan',
+  'My name will not be shared with the prayer team or published anywhere': 'Hindi ibabahagi sa pangkat panalangin o ilalathala saanman ang aking pangalan',
+  'Share with parish community': 'Ibahagi sa pamayanan ng parokya',
+  'Allow my request (without personal details) to be included in the weekly bulletin/prayer list': 'Pahintulutang isama ang aking kahilingan (nang walang personal na detalye) sa lingguhang pahayagan o talaan ng panalangin',
+  'By submitting, you agree to our': 'Sa pagsusumite, sumasang-ayon ka sa aming',
+  'Privacy Policy': 'Patakaran sa Pagkapribado',
+  'Please enter your name': 'Pakilagay ang iyong pangalan',
+  'Please write your prayer request': 'Pakisulat ang iyong kahilingan sa panalangin',
+  'Prayer request must be at least 10 characters': 'Dapat hindi bababa sa 10 karakter ang kahilingan sa panalangin',
+  'Failed to submit prayer': 'Hindi naisumite ang panalangin',
+  'Unable to submit prayer. Please try again.': 'Hindi maisumite ang panalangin. Pakisubukang muli.',
+  'Healing & Health': 'Pagpapagaling at Kalusugan',
+  'Thanksgiving & Praise': 'Pasasalamat at Papuri',
+  'Guidance & Wisdom': 'Patnubay at Karunungan',
+  'Family & Relationships': 'Pamilya at mga Ugnayan',
+  'For the Deceased': 'Para sa mga Yumao',
+  'Other Intentions': 'Iba Pang Kahilingan',
+  'Community Prayer Wall': 'Pader ng Panalangin ng Pamayanan',
+  'prayer': 'panalangin',
+  'prayers': 'mga panalangin',
+  'All Prayers': 'Lahat ng Panalangin',
+  'Healing': 'Pagpapagaling',
+  'Thanksgiving': 'Pasasalamat',
+  'Guidance': 'Patnubay',
+  'Family': 'Pamilya',
+  'Deceased': 'Yumao',
+  'Other': 'Iba pa',
+  'Loading prayers...': 'Naglo-load ng mga panalangin...',
+  'Failed to load prayers': 'Hindi ma-load ang mga panalangin',
+  'Unable to load prayers': 'Hindi ma-load ang mga panalangin',
+  'No prayers yet. Be the first to share your intention.': 'Wala pang panalangin. Ikaw ang unang magbahagi ng kahilingan.',
+  'View →': 'Tingnan →',
+  'Close': 'Isara',
+  'Baptism': 'Binyag',
+  'Confirmation': 'Kumpil',
+  'Funeral Mass': 'Misa ng Libing',
+  'House Blessing': 'Basbas ng Tahanan',
+  'Marriage': 'Kasal',
+  'Death': 'Pagkamatay',
+  'Certificate': 'Sertipiko',
+  'First Communion': 'Unang Komunyon',
+  'Parish services': 'Mga serbisyo ng parokya',
+  'How it works': 'Paano ito gumagana',
+  "Request an appointment to claim an official certificate (Baptism, Confirmation, Marriage, or Death) from the parish office. No account needed — you'll receive a reference code to track your request.": 'Humiling ng appointment upang kunin sa tanggapan ng parokya ang opisyal na sertipiko (Binyag, Kumpil, Kasal, o Pagkamatay). Hindi kailangan ng account — makakatanggap ka ng reference code upang masubaybayan ang iyong kahilingan.',
+  'Check request status': 'Tingnan ang kalagayan ng kahilingan',
+  'Email address': 'Email address',
+  'Reference code': 'Reference code',
+  'Check status': 'Tingnan ang kalagayan',
+  'Request a certificate': 'Humiling ng sertipiko',
+  'First name': 'Pangalan',
+  'Last name': 'Apelyido',
+  'Email': 'Email',
+  'Phone': 'Telepono',
+  'Certificate type': 'Uri ng sertipiko',
+  'Preferred date': 'Nais na petsa',
+  'Preferred time': 'Nais na oras',
+  'Supporting documents': 'Mga kalakip na dokumento',
+  '(optional)': '(opsyonal)',
+  'Up to 5 files — PDF or image, 10 MB each.': 'Hanggang 5 file — PDF o larawan, tig-10 MB.',
+  'Notes': 'Mga tala',
+  'Any additional information for the parish office': 'Karagdagang impormasyon para sa tanggapan ng parokya',
+  'Submit request': 'Isumite ang kahilingan',
+  'Fill out the form with your contact details, the certificate type, and your preferred pick-up date and time.': 'Punan ang form ng iyong mga detalye sa pakikipag-ugnayan, uri ng sertipiko, at nais na petsa at oras ng pagkuha.',
+  'Attach any supporting documents if required (e.g., baptism record, marriage contract).': 'Maglakip ng mga kinakailangang dokumento (halimbawa, tala ng binyag o kontrata ng kasal).',
+  "Submit — you'll receive a": 'Isumite — makakatanggap ka ng',
+  'reference code': 'reference code',
+  'to track your request status.': 'upang masubaybayan ang kalagayan ng iyong kahilingan.',
+  'The parish office will review your request and confirm the appointment.': 'Susuriin ng tanggapan ng parokya ang iyong kahilingan at kukumpirmahin ang appointment.',
+  'Certificates are prepared by the parish office. This form reserves your claiming appointment only — it does not issue the certificate itself.': 'Inihahanda ng tanggapan ng parokya ang mga sertipiko. Para lamang sa pagreserba ng appointment sa pagkuha ang form na ito — hindi ito nag-iisyu ng sertipiko.',
+  'Loading events…': 'Naglo-load ng mga kaganapan…',
+  'today': 'ngayon',
+  'month': 'buwan',
+  'week': 'linggo',
+  'day': 'araw',
+  'Su': 'Li',
+  'Mo': 'Lu',
+  'Tu': 'Ma',
+  'We': 'Mi',
+  'Th': 'Hu',
+  'Fr': 'Bi',
+  'Sa': 'Sa',
+  'Available': 'May bakante',
+  'Fully booked': 'Puno na ang mga appointment',
+  'Previous month': 'Nakaraang buwan',
+  'Next month': 'Susunod na buwan',
+  'Looking up…': 'Hinahanap…',
+  'Request submitted': 'Naipasa na ang kahilingan',
+  "Save your reference code — you'll need it to check your appointment status.": 'Itago ang iyong reference code — kakailanganin mo ito upang tingnan ang kalagayan ng appointment.',
+  'The parish office will review your request and confirm your appointment schedule.': 'Susuriin ng tanggapan ng parokya ang iyong kahilingan at kukumpirmahin ang iskedyul ng appointment.',
+  'Submit another request': 'Magsumite ng panibagong kahilingan',
+  'Type:': 'Uri:',
+  'Preferred date:': 'Nais na petsa:',
+  'Status:': 'Kalagayan:',
+  'Unknown': 'Hindi alam',
+  'Available times': 'Mga bakanteng oras',
+  'Loading calendar...': 'Naglo-load ng kalendaryo...',
+  'No dates available right now.': 'Walang bakanteng petsa sa ngayon.',
+  'Select a date to see available times.': 'Pumili ng petsa upang makita ang mga bakanteng oras.',
+  'Loading times...': 'Naglo-load ng mga oras...',
+  'Choose this time': 'Piliin ang oras na ito',
+  'No availability': 'Walang bakante',
+  'Book this service': 'Magpa-appointment para sa serbisyong ito',
+  'Sacrament': 'Sakramento',
+  'Select a sacrament to see its required details.': 'Pumili ng sakramento upang makita ang mga kinakailangang detalye nito.',
+  'Book appointment': 'Magpa-appointment',
+  'Address': 'Address',
+  'Street, city': 'Kalye, lungsod',
+  'details': 'mga detalye',
+  'Choose a service and book an appointment.': 'Pumili ng serbisyo at magpa-appointment.',
+  'Unable to submit certificate request. Please try again.': 'Hindi maisumite ang kahilingan para sa sertipiko. Pakisubukang muli.',
+  'No matching request found. Check your email and reference code.': 'Walang tumutugmang kahilingan. Tingnan ang iyong email at reference code.',
+  'Booking submitted successfully.': 'Matagumpay na naisumite ang pagpapa-appointment.',
+  'Unable to submit request. Please try again.': 'Hindi maisumite ang kahilingan. Pakisubukang muli.',
+  'Please select a date and time.': 'Pumili ng petsa at oras.',
+  'Please complete all required fields.': 'Pakikumpleto ang lahat ng kinakailangang patlang.',
+  'Appointment request submitted successfully.': 'Matagumpay na naisumite ang kahilingan para sa appointment.',
+  'Service request submitted successfully.': 'Matagumpay na naisumite ang kahilingan para sa serbisyo.',
+  'Close event details': 'Isara ang mga detalye ng kaganapan',
+  'Description': 'Paglalarawan',
+  'Detail': 'Detalye',
+  'Date': 'Petsa',
+  'Time': 'Oras',
+  'Location': 'Lokasyon',
+  'Dashboard': 'Dashboard',
+  'Events Management': 'Pamamahala ng mga Kaganapan',
+  'Schedule': 'Iskedyul',
+  'Mass Schedule': 'Iskedyul ng Misa',
+  'Mass Intentions': 'Mga Kahilingan sa Misa',
+  'Applications': 'Mga Aplikasyon',
+  'Service Requests': 'Mga Kahilingan sa Serbisyo',
+  'Certificate Appointments': 'Mga Appointment para sa Sertipiko',
+  'Sacramental Ledger': 'Talaan ng mga Sakramento',
+  'Finance & Reports': 'Pananalapi at mga Ulat',
+  'Stats & Demographics': 'Istatistika at Demograpiko',
+  'Booking Form Fields': 'Mga Patlang ng Form ng Pagpapa-book',
+  'Staff & Roles': 'Mga Kawani at Tungkulin',
+  'Overview': 'Pangkalahatang-ideya',
+  'Operations': 'Mga Operasyon',
+  'Records': 'Mga Rekord',
+  'Pastoral': 'Pastoral',
+  'Administration': 'Administrasyon',
+  'Parish office': 'Tanggapan ng Parokya',
+  'Toggle admin navigation': 'Buksan o isara ang nabigasyon ng admin',
+  'Admin navigation': 'Nabigasyon ng admin',
+  'Expand admin navigation': 'Palawakin ang nabigasyon ng admin',
+  'Collapse admin navigation': 'Paliitin ang nabigasyon ng admin',
+  'Expand sidebar': 'Palawakin ang sidebar',
+  'Collapse sidebar': 'Paliitin ang sidebar',
+  'Staff workspace': 'Lugar ng trabaho ng kawani',
+  'Sign out': 'Mag-sign out',
+  'Admin login required': 'Kailangan ang pag-login ng admin',
+  'Staff administration': 'Pangangasiwa ng mga kawani',
+  'Checking admin access…': 'Sinusuri ang access ng admin…',
+  'Enter an authorized staff token to continue.': 'Maglagay ng awtorisadong token ng kawani upang magpatuloy.',
+  'Staff token': 'Token ng kawani',
+  'Sign in': 'Mag-sign in',
+  'Email or username': 'Email o username',
+  'Enter your password': 'Ilagay ang iyong password',
+  'Use your parish email or username and password. If the ASP.NET Identity tables are connected, the app will validate the role from': 'Gamitin ang iyong parish email o username at password. Kung nakakonekta ang mga talahanayan ng ASP.NET Identity, susuriin ng app ang tungkulin mula sa',
+  'and': 'at',
+  '.': '.',
+  'Log in': 'Mag-login',
+  'Continue': 'Magpatuloy',
+  'Password': 'Password',
+  'Email address:': 'Email address:',
+  'Add event': 'Magdagdag ng kaganapan',
+  'Add Event': 'Magdagdag ng Kaganapan',
+  'New Event': 'Bagong Kaganapan',
+  'Event title': 'Pamagat ng kaganapan',
+  'Event description': 'Paglalarawan ng kaganapan',
+  'Event details': 'Mga detalye ng kaganapan',
+  'Event date': 'Petsa ng kaganapan',
+  'Event time': 'Oras ng kaganapan',
+  'Event location': 'Lokasyon ng kaganapan',
+  'Upload photo': 'Mag-upload ng larawan',
+  'Choose file': 'Pumili ng file',
+  'No file chosen': 'Walang napiling file',
+  'Update event': 'I-update ang kaganapan',
+  'Delete event': 'Tanggalin ang kaganapan',
+  'Event created successfully.': 'Matagumpay na nagawa ang kaganapan.',
+  'Event updated successfully.': 'Matagumpay na na-update ang kaganapan.',
+  'Event deleted successfully.': 'Matagumpay na natanggal ang kaganapan.',
+  'No events found.': 'Walang nahanap na kaganapan.',
+  'All': 'Lahat',
+  'Pending': 'Nakabinbin',
+  'Approved': 'Inaprubahan',
+  'Rejected': 'Tinanggihan',
+  'Approve': 'Aprubahan',
+  'Reject': 'Tanggihan',
+  'Archive': 'I-archive',
+  'Add': 'Idagdag',
+  'Create': 'Gumawa',
+  'Edit event': 'I-edit ang kaganapan',
+  'No prayer requests found.': 'Walang nahanap na kahilingan sa panalangin.',
+  'No service requests found.': 'Walang nahanap na kahilingan sa serbisyo.',
+  'Service request details': 'Mga detalye ng kahilingan sa serbisyo',
+  'Prayer request details': 'Mga detalye ng kahilingan sa panalangin',
+  'Search records': 'Maghanap ng mga rekord',
+  'Search by name or registry number': 'Maghanap ayon sa pangalan o numero sa rehistro',
+  'Start date': 'Petsa ng pagsisimula',
+  'End date': 'Petsa ng pagtatapos',
+  'Priest': 'Pari',
+  'Type': 'Uri',
+  'Category': 'Kategorya',
+  'All types': 'Lahat ng uri',
+  'All statuses': 'Lahat ng kalagayan',
+  'No results found.': 'Walang nakitang resulta.',
+  'Invalid admin token': 'Hindi wastong token ng admin',
+  'Invalid stored admin token. Please log in again.': 'Hindi wastong nakaimbak na token ng admin. Mag-login muli.',
+  'Administrative Operations': 'Mga Operasyong Administratibo',
+  'Pastoral administration': 'Pangangasiwang Pastoral',
+  'Certificate appointments': 'Mga Appointment para sa Sertipiko',
+  'No certificate appointment requests.': 'Walang kahilingan para sa appointment ng sertipiko.',
+  'Refresh': 'I-refresh',
+  'Hide documents': 'Itago ang mga dokumento',
+  'View documents': 'Tingnan ang mga dokumento',
+  'Loading documents…': 'Naglo-load ng mga dokumento…',
+  'No documents uploaded.': 'Walang dokumentong na-upload.',
+  'No documents': 'Walang dokumento',
+  'Unable to open certificate document.': 'Hindi mabuksan ang dokumento ng sertipiko.',
+  'Certificate request updated.': 'Na-update ang kahilingan ng sertipiko.',
+  'Update certificate request status': 'I-update ang kalagayan ng kahilingan ng sertipiko',
+  'Requested': 'Hiniling',
+  'Confirmed': 'Nakumpirma',
+  'ReadyForClaim': 'Handa nang kunin',
+  'Claimed': 'Nakuha na',
+  'Staff sign-in is required.': 'Kailangan mag-sign in ang kawani.',
+  'Admin sign-in is required.': 'Kailangan mag-sign in ang admin.',
+  'Access control': 'Pamamahala ng access',
+  'Staff accounts': 'Mga account ng kawani',
+  'Staff accounts and roles': 'Mga account at tungkulin ng kawani',
+  'Only Admin users can assign roles, revoke access, or delete staff accounts.': 'Mga admin lamang ang maaaring magtalaga ng tungkulin, mag-alis ng access, o magtanggal ng account ng kawani.',
+  'Create staff account': 'Gumawa ng account ng kawani',
+  'Username': 'Username',
+  'Temporary password': 'Pansamantalang password',
+  'Initial role': 'Paunang tungkulin',
+  'Create account': 'Gumawa ng account',
+  'Directory': 'Direktoryo',
+  'Current staff': 'Kasalukuyang kawani',
+  'All roles': 'Lahat ng tungkulin',
+  'Loading staff accounts...': 'Naglo-load ng mga account ng kawani...',
+  'No staff accounts found.': 'Walang nahanap na account ng kawani.',
+  'No staff accounts have the role.': 'Walang account ng kawani na may ganitong tungkulin.',
+  'Delete': 'Tanggalin',
+  'Assigned roles': 'Mga nakatalagang tungkulin',
+  'Change email': 'Palitan ang email',
+  'Reset password': 'I-reset ang password',
+  'Accountability': 'Pananagutan',
+  'Role and account audit history': 'Kasaysayan ng pagsusuri sa tungkulin at account',
+  'entries': 'mga tala',
+  'No user-management changes recorded yet.': 'Wala pang naitatalang pagbabago sa pamamahala ng user.',
+  'When': 'Kailan',
+  'Action': 'Aksyon',
+  'Target': 'Target',
+  'Changed by': 'Binago ni',
+  'Details': 'Mga detalye',
+  'Create staff account for': 'Gumawa ng account ng kawani para kay',
+  'with the': 'na may tungkuling',
+  'role?': '?',
+  'An email address is required.': 'Kailangan ang email address.',
+  'The password must be at least eight characters.': 'Dapat hindi bababa sa walong karakter ang password.',
+  'Enter the new email address:': 'Ilagay ang bagong email address:',
+  'Enter a new password (at least 8 characters):': 'Ilagay ang bagong password (hindi bababa sa 8 karakter):',
+  'Edit': 'I-edit',
+  'New': 'Bago',
+  'Save record': 'I-save ang rekord',
+  'Saving...': 'Sine-save...',
+  'Save': 'I-save',
+  'Cancel': 'Kanselahin',
+  'Search': 'Maghanap',
+  'Filter': 'Salain',
+  'Name': 'Pangalan',
+  'Status': 'Kalagayan',
+  'Actions': 'Mga Aksyon',
+  'No records found.': 'Walang nahanap na rekord.',
+  'Loading...': 'Naglo-load...',
+  'Error': 'Error',
+  'Success': 'Tagumpay',
+  'Submit': 'Isumite',
+  'Update': 'I-update',
+  'Upload': 'Mag-upload',
+  'Download': 'I-download',
+  'View': 'Tingnan',
+  'Back': 'Bumalik',
+  'Next': 'Susunod',
+  'Previous': 'Nakaraan',
+  'Page': 'Pahina',
+  'of': 'ng',
+  'No data available.': 'Walang makukuhang datos.',
+  'Unable to save sacramental record.': 'Hindi ma-save ang rekord ng sakramento.',
+  'Save schedule': 'I-save ang iskedyul',
+  'Schedule saved.': 'Na-save ang iskedyul.',
+  'Mass intention saved.': 'Na-save ang kahilingan sa Misa.',
+  'Loading schedule...': 'Naglo-load ng iskedyul...',
+  'No schedule found.': 'Walang nahanap na iskedyul.',
+  'Date of birth': 'Petsa ng kapanganakan',
+  'Place of birth': 'Lugar ng kapanganakan',
+  'Date of baptism': 'Petsa ng binyag',
+  'Date of confirmation': 'Petsa ng kumpil',
+  'Date of marriage': 'Petsa ng kasal',
+  'Date of death': 'Petsa ng pagkamatay',
+  'Date of burial': 'Petsa ng libing',
+  'Registry number': 'Numero sa rehistro',
+  'Sponsors': 'Mga ninong at ninang',
+  'Remarks': 'Mga puna',
+  'Groom': 'Lalaking ikakasal',
+  'Bride': 'Babaeng ikakasal',
+  'Age': 'Edad',
+  'Witnesses': 'Mga saksi',
+  'Minister name': 'Pangalan ng ministro',
+  'Bishop or minister': 'Obispo o ministro',
+  'Parish of baptism': 'Parokya ng binyag',
+  'Cause of death': 'Sanhi ng pagkamatay',
+  'Place of burial': 'Lugar ng libing',
+  'Sacraments received': 'Mga sakramentong tinanggap',
+  'Officiating priest': 'Paring nangasiwa',
+  'Record not provided': 'Hindi ibinigay ang rekord',
+  'Not provided': 'Hindi ibinigay',
+}
+
+const textMap = new Map(Object.entries(tagalogTranslations))
+const originalText = new WeakMap<Text, string>()
+const originalAttributes = new WeakMap<Element, Map<string, string>>()
+const monthNames: Record<string, string> = {
+  January: 'Enero',
+  February: 'Pebrero',
+  March: 'Marso',
+  April: 'Abril',
+  May: 'Mayo',
+  June: 'Hunyo',
+  July: 'Hulyo',
+  August: 'Agosto',
+  September: 'Setyembre',
+  October: 'Oktubre',
+  November: 'Nobyembre',
+  December: 'Disyembre',
+  Jan: 'Ene',
+  Feb: 'Peb',
+  Mar: 'Mar',
+  Apr: 'Abr',
+  Jun: 'Hun',
+  Jul: 'Hul',
+  Aug: 'Ago',
+  Sep: 'Set',
+  Oct: 'Okt',
+  Nov: 'Nob',
+  Dec: 'Dis',
+}
+const weekdays: Record<string, string> = {
+  Sunday: 'Linggo',
+  Monday: 'Lunes',
+  Tuesday: 'Martes',
+  Wednesday: 'Miyerkules',
+  Thursday: 'Huwebes',
+  Friday: 'Biyernes',
+  Saturday: 'Sabado',
+  Sun: 'Lin',
+  Mon: 'Lun',
+  Tue: 'Mar',
+  Wed: 'Miy',
+  Thu: 'Huw',
+  Fri: 'Biy',
+  Sat: 'Sab',
+}
+
+export function translateText(text: string, language: Language): string {
+  if (language === 'en') return text
+  const match = text.match(/^(\s*)([\s\S]*?)(\s*)$/)
+  if (!match) return text
+  const [, leading, content, trailing] = match
+  const translated = textMap.get(content)
+  if (translated) return `${leading}${translated}${trailing}`
+  const datePattern = /^(?:(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat), )?(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:, \d{4})?$|^(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}$/
+  if (!datePattern.test(content)) return text
+  const localizedDate = content.replace(
+    /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat|January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g,
+    part => weekdays[part] ?? monthNames[part] ?? part,
+  )
+  return `${leading}${localizedDate}${trailing}`
+}
+
+function isExcluded(element: Element | null): boolean {
+  return Boolean(element?.closest('[data-no-translate], script, style, code, pre'))
+}
+
+export function observeTranslations(root: HTMLElement, language: Language): () => void {
+  const translatedAttributes = ['aria-label', 'title', 'placeholder', 'alt']
+
+  const translateTextNode = (node: Text) => {
+    const current = node.data
+    const original = originalText.get(node)
+    if (language === 'en') {
+      if (original === undefined || current === original) return
+      if (current === translateText(original, 'tl')) node.data = original
+      else originalText.set(node, current)
+      return
+    }
+
+    const isKnownSource = textMap.has(current.trim())
+    const source = isKnownSource ? current : original ?? current
+    originalText.set(node, source)
+    const next = translateText(source, language)
+    if (next !== current) node.data = next
+  }
+
+  const translateElement = (element: Element) => {
+    if (isExcluded(element)) return
+    for (const attribute of translatedAttributes) {
+      const current = element.getAttribute(attribute)
+      if (current === null) continue
+      let originals = originalAttributes.get(element)
+      if (!originals) {
+        originals = new Map()
+        originalAttributes.set(element, originals)
+      }
+      const original = originals.get(attribute)
+      if (language === 'en') {
+        if (original !== undefined && current !== original) {
+          if (current === translateText(original, 'tl')) element.setAttribute(attribute, original)
+          else originals.set(attribute, current)
+        }
+        continue
+      }
+      const isKnownSource = textMap.has(current.trim())
+      const source = isKnownSource ? current : original ?? current
+      originals.set(attribute, source)
+      const next = translateText(source, language)
+      if (next !== current) element.setAttribute(attribute, next)
+    }
+  }
+
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (!isExcluded(node.parentElement)) translateTextNode(node as Text)
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    const element = node as Element
+    translateElement(element)
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
+    let child: Node | null
+    while ((child = walker.nextNode())) {
+      if (child.nodeType === Node.TEXT_NODE && !isExcluded(child.parentElement)) {
+        translateTextNode(child as Text)
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        translateElement(child as Element)
+      }
+    }
+  }
+
+  visit(root)
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      if (record.type === 'characterData' && record.target.nodeType === Node.TEXT_NODE) {
+        const node = record.target as Text
+        if (!isExcluded(node.parentElement)) translateTextNode(node)
+      }
+      for (const added of record.addedNodes) visit(added)
+      if (record.type === 'attributes' && record.target.nodeType === Node.ELEMENT_NODE) {
+        translateElement(record.target as Element)
+      }
+    }
+  })
+  observer.observe(root, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: translatedAttributes,
+  })
+  return () => observer.disconnect()
+}

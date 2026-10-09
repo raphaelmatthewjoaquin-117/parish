@@ -52,4 +52,11 @@ export function financeTransition(currentStatus: string, action: string): string
 export function isNoShowEligible(request: ServiceRequestLike, now?: Date, graceHours?: number): boolean;
 export function isUnverifiedExpired(request: ServiceRequestLike, now?: Date, expireHours?: number): boolean;
 export const ALLOWED_REQUEST_STATUSES: string[];
+export function isAllowedArchiveUpload(originalName: string, mimeType: string, size: number): boolean;
+export function isValidGalleryContent(content: unknown): boolean;
 export function toCsv(rows: Array<Record<string, unknown>>, columns: CsvColumn[]): string;
+
+export const OVERRIDABLE_MODULES: string[];
+export interface ModuleOverride { view: boolean; edit: boolean }
+export function moduleForPath(path: string): string | null;
+export function overrideDecision(overrides: Record<string, ModuleOverride> | undefined | null, module: string | null, action: 'view' | 'edit'): boolean | null;

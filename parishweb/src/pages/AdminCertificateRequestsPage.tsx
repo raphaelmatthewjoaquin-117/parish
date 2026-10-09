@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { apiClient, useApiError as formatApiError } from '../api/client'
+import { API_BASE_URL as API_URL, apiClient, useApiError as formatApiError } from '../api/client'
 import '../PagesCSS/AdminOperationsPage.css'
 
 type CertificateRequest = { CertificateRequestId: number; CertificateType: string; PreferredDate: string; PreferredTime: string; Status: string; Notes?: string; FirstName: string; LastName: string; EmailAddress: string; ReferenceCode?: string; DocumentCount?: number }
 type CertificateDocument = { CertificateRequestDocumentId: number; OriginalFileName: string; FileUrl: string; MimeType: string; FileSizeBytes: number; UploadedAt: string }
 const statuses = ['Requested', 'Confirmed', 'ReadyForClaim', 'Claimed', 'Rejected']
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-
 export function AdminCertificateRequestsPage() {
   const [token] = useState(() => window.localStorage.getItem('adminToken') || '')
   const [items, setItems] = useState<CertificateRequest[]>([])
@@ -25,6 +23,24 @@ export function AdminCertificateRequestsPage() {
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
   }, [token, load])
+
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      const link = (event.target as HTMLElement).closest<HTMLAnchorElement>('a')
+      if (!link || !link.href.includes('/api/admin/certificate-requests/') || !link.href.endsWith('/file')) return
+      event.preventDefault()
+      void fetch(link.href, { headers: { 'x-admin-token': token } })
+        .then(response => response.ok ? response.blob() : Promise.reject(new Error('Unable to open certificate document.')))
+        .then(blob => {
+          const url = URL.createObjectURL(blob)
+          window.open(url, '_blank', 'noopener,noreferrer')
+          window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+        })
+        .catch(reason => setError(formatApiError(reason)))
+    }
+    document.addEventListener('click', handleDocumentClick)
+    return () => document.removeEventListener('click', handleDocumentClick)
+  }, [token])
 
   const update = async (id: number, status: string) => {
     setError(''); setMessage('')

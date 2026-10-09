@@ -13,24 +13,10 @@
 import sql from 'mssql';
 import crypto from 'node:crypto';
 import dotenv from 'dotenv';
+import { hashAspNetPassword } from './password-hash.js';
 
 // Load environment variables
 dotenv.config();
-
-// ============================================================
-// ASP.NET Identity PBKDF2 Password Hashing (HMACSHA256, 10000 iterations)
-// Format: 0x01 | 16-byte salt | 32-byte subkey (base64 encoded)
-// Copied from server.js to ensure identical hashing
-// ============================================================
-function hashAspNetPassword(password) {
-  const salt = crypto.randomBytes(16);
-  const subkey = crypto.pbkdf2Sync(password, salt, 10000, 32, 'sha256');
-  const buffer = Buffer.alloc(49);
-  buffer[0] = 0x01;
-  salt.copy(buffer, 1);
-  subkey.copy(buffer, 17);
-  return buffer.toString('base64');
-}
 
 function verifyAspNetPasswordHash(password, storedHash) {
   try {
@@ -173,15 +159,16 @@ async function createTestUsers() {
 
       const userResult = await pool.request()
         .input('emailAddress', sql.VarChar(256), user.email)
+        .input('userName', sql.NVarChar(256), user.username)
         .input('emailConfirmed', sql.Bit, 1)
         .input('passwordHash', sql.VarChar(512), passwordHash)
         .input('createdAt', sql.DateTime2, new Date())
         .query(`
           INSERT INTO dbo.AspNetUsers (
-            EmailAddress, EmailConfirmed, PasswordHash, CreatedAt
+            UserName, EmailAddress, EmailConfirmed, PasswordHash, CreatedAt
           )
           VALUES (
-            @emailAddress, @emailConfirmed, @passwordHash, @createdAt
+            @userName, @emailAddress, @emailConfirmed, @passwordHash, @createdAt
           );
           SELECT SCOPE_IDENTITY() AS UserId;
         `);

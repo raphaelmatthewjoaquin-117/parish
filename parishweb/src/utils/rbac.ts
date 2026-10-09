@@ -1,4 +1,4 @@
-export type ModuleName = 'MassSchedule' | 'ServiceRequest' | 'PrayerRequest' | 'Finance' | 'RoleAssignment' | 'UserManagement' | 'SacramentalRecords';
+export type ModuleName = 'MassSchedule' | 'ServiceRequest' | 'PrayerRequest' | 'Finance' | 'RoleAssignment' | 'UserManagement' | 'SacramentalRecords' | 'WebsiteContent' | 'Gallery' | 'ContactMessages';
 export type ActionName = 'view' | 'create' | 'edit' | 'delete' | 'approve' | 'manage' | 'assign';
 
 export type RoleDefinition = {
@@ -17,30 +17,39 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       RoleAssignment: ['view', 'assign', 'manage'],
       UserManagement: ['view', 'create', 'edit', 'delete', 'manage'],
       SacramentalRecords: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
+      WebsiteContent: ['view', 'edit', 'manage'],
+      Gallery: ['view', 'edit', 'manage'],
+      ContactMessages: ['view', 'edit', 'delete', 'manage'],
     },
   },
   {
     name: 'ParishPriest',
     permissions: {
-      MassSchedule: ['view', 'create', 'edit', 'approve', 'manage'],
-      ServiceRequest: ['view', 'create', 'edit', 'approve', 'manage'],
+      MassSchedule: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
+      ServiceRequest: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
       PrayerRequest: ['view', 'create', 'edit', 'approve', 'manage'],
-      Finance: ['view', 'approve'],
+      Finance: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
       RoleAssignment: ['view', 'assign'],
       UserManagement: ['view'],
       SacramentalRecords: ['view', 'create', 'edit', 'approve', 'manage'],
+      WebsiteContent: ['view', 'edit', 'manage'],
+      Gallery: ['view', 'edit', 'manage'],
+      ContactMessages: ['view', 'edit', 'delete', 'manage'],
     },
   },
   {
     name: 'Secretary',
     permissions: {
-      MassSchedule: ['view', 'create', 'edit', 'approve', 'manage'],
-      ServiceRequest: ['view', 'create', 'edit', 'approve', 'manage'],
+      MassSchedule: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
+      ServiceRequest: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
       PrayerRequest: ['view', 'create', 'edit', 'approve', 'manage'],
-      Finance: ['view', 'approve'],
+      Finance: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
       RoleAssignment: ['view', 'assign'],
       UserManagement: ['view'],
       SacramentalRecords: ['view', 'create', 'edit', 'approve', 'manage'],
+      WebsiteContent: ['view', 'edit', 'manage'],
+      Gallery: ['view', 'edit', 'manage'],
+      ContactMessages: ['view', 'edit', 'delete', 'manage'],
     },
   },
   {
@@ -49,22 +58,28 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       MassSchedule: ['view'],
       ServiceRequest: [],
       PrayerRequest: [],
-      Finance: ['view', 'create', 'edit', 'approve', 'manage'],
+      Finance: ['view', 'create', 'edit', 'delete', 'manage'],
       RoleAssignment: [],
       UserManagement: [],
       SacramentalRecords: [],
+      WebsiteContent: [],
+      Gallery: [],
+      ContactMessages: ['view', 'edit'],
     },
   },
   {
     name: 'Staff',
     permissions: {
-      MassSchedule: ['view', 'create', 'edit'],
-      ServiceRequest: ['view', 'create', 'edit'],
-      PrayerRequest: ['view', 'create', 'edit'],
+      MassSchedule: ['view', 'edit'],
+      ServiceRequest: ['view', 'create', 'edit', 'delete', 'approve', 'manage'],
+      PrayerRequest: ['view'],
       Finance: ['view'],
       RoleAssignment: [],
       UserManagement: [],
       SacramentalRecords: ['view'],
+      WebsiteContent: [],
+      Gallery: [],
+      ContactMessages: ['view', 'edit'],
     },
   },
 ];
@@ -110,4 +125,32 @@ export function canAccessModule(userRoles: string[], module: ModuleName, action:
   }
 
   return false;
+}
+
+export type ModuleAccess = { view: boolean; edit: boolean };
+export type ModuleOverrides = Partial<Record<ModuleName, ModuleAccess>>;
+
+/** Modules whose access can be adjusted per account (user management stays Admin-only). */
+export const PERMISSION_MODULES: { module: ModuleName; label: string }[] = [
+  { module: 'MassSchedule', label: 'Mass schedule & intentions' },
+  { module: 'ServiceRequest', label: 'Service requests & bookings' },
+  { module: 'PrayerRequest', label: 'Prayer requests' },
+  { module: 'Finance', label: 'Finance & reports' },
+  { module: 'SacramentalRecords', label: 'Sacramental records & stats' },
+  { module: 'WebsiteContent', label: 'Website content (About, Contact, Footer)' },
+  { module: 'Gallery', label: 'Photo gallery' },
+  { module: 'ContactMessages', label: 'Contact messages' },
+];
+
+export function roleModuleAccess(userRoles: string[], module: ModuleName): ModuleAccess {
+  const edit = canAccessModule(userRoles, module, 'edit');
+  return { view: edit || canAccessModule(userRoles, module, 'view'), edit };
+}
+
+/** Role defaults, replaced by the account override when one exists for the module. */
+export function effectiveModuleAccess(userRoles: string[], module: ModuleName, overrides?: ModuleOverrides): ModuleAccess {
+  if (userRoles.map(normalizeRoleName).includes('Admin')) return { view: true, edit: true };
+  const override = overrides?.[module];
+  if (override) return { view: override.view || override.edit, edit: override.edit };
+  return roleModuleAccess(userRoles, module);
 }

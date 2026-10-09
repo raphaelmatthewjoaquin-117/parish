@@ -5,7 +5,7 @@
 /* The API surface returns legacy SQL-shaped payloads; response types are refined at call sites. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 type RequestConfig = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -216,6 +216,49 @@ export const apiClient = {
     },
   },
 
+  siteContent: {
+    async get<T>(page: 'about' | 'gallery' | 'contact' | 'footer') {
+      return apiRequest<{ content: T | null }>(`/api/site-content/${page}`);
+    },
+
+    async save<T>(page: 'about' | 'gallery' | 'contact' | 'footer', content: T, adminToken: string) {
+      return apiRequest<{ content: T }>(`/api/admin/site-content/${page}`, {
+        method: 'PUT',
+        body: { content },
+        adminToken,
+      });
+    },
+
+    async uploadImage(file: File, adminToken: string) {
+      const body = new FormData();
+      body.append('photo', file);
+      return apiRequest<{ photoUrl: string }>('/api/admin/uploads', {
+        method: 'POST',
+        body,
+        adminToken,
+      });
+    },
+  },
+
+  contactMessages: {
+    async create(data: { name: string; email: string; phone: string; message: string }) {
+      return apiRequest<{ success: boolean }>('/api/contact', { method: 'POST', body: data });
+    },
+
+    async list(adminToken: string) {
+      return apiRequest<Array<{ id: number; name: string; email: string; phone: string | null; message: string; isRead: boolean; createdAt: string }>>(
+        '/api/admin/contact-messages', { adminToken });
+    },
+
+    async setRead(id: number, isRead: boolean, adminToken: string) {
+      return apiRequest<{ success: boolean }>(`/api/admin/contact-messages/${id}`, { method: 'PATCH', body: { isRead }, adminToken });
+    },
+
+    async remove(id: number, adminToken: string) {
+      return apiRequest<{ success: boolean }>(`/api/admin/contact-messages/${id}`, { method: 'DELETE', adminToken });
+    },
+  },
+
   prayers: {
     async list() {
       return apiRequest<any[]>('/api/prayers');
@@ -307,6 +350,16 @@ export const apiClient = {
 
     async certificateRequests(adminToken: string) {
       return apiRequest<any[]>('/api/admin/certificate-requests', { adminToken });
+    },
+
+    async blockedSlots(adminToken: string) {
+      return apiRequest<any[]>('/api/admin/blocked-slots', { adminToken });
+    },
+    async createBlockedSlot(data: unknown, adminToken: string) {
+      return apiRequest<{ id: number }>('/api/admin/blocked-slots', { method: 'POST', body: data, adminToken });
+    },
+    async deleteBlockedSlot(id: number, adminToken: string) {
+      return apiRequest<{ success: boolean }>(`/api/admin/blocked-slots/${id}`, { method: 'DELETE', adminToken });
     },
 
     async serviceFields(adminToken: string) {
