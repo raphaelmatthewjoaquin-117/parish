@@ -47,13 +47,167 @@
 	gap: 1rem;
 }
 
-.gallery-album-photos img {
+/* Photo button wrapper — replaces the plain <img> */
+.gallery-photo-btn {
+	display: block;
+	width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	cursor: zoom-in;
+	position: relative;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.gallery-photo-btn:focus-visible {
+	outline: 3px solid #D3BC8D;
+	outline-offset: 2px;
+}
+
+.gallery-photo-btn img {
 	display: block;
 	width: 100%;
 	max-height: 75vh;
 	object-fit: contain;
+	transition: opacity .15s ease;
+}
+
+.gallery-photo-btn:hover img {
+	opacity: .9;
+}
+
+/* Caption shown beneath each thumbnail */
+.gallery-photo-caption {
+	display: block;
+	padding: .45rem .6rem;
+	font-size: .8rem;
+	color: #555;
+	text-align: left;
+	line-height: 1.4;
 }
 
 .gallery-album-not-found {
 	margin-top: 1rem;
 }
+
+/* ── Lightbox ─────────────────────────────────────────────── */
+
+.gallery-lightbox-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, .88);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+	padding: 1rem;
+}
+
+.gallery-lightbox {
+	position: relative;
+	background: transparent;
+	border: none;
+	padding: 0;
+	margin: 0;
+	max-width: 100%;
+	max-height: 100%;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: .75rem;
+	/* Safari: <dialog> needs an explicit color */
+	color: #fff;
+}
+
+.gallery-lightbox-close {
+	position: absolute;
+	top: -2.5rem;
+	right: 0;
+	background: none;
+	border: none;
+	color: #fff;
+	font-size: 1.4rem;
+	line-height: 1;
+	cursor: pointer;
+	padding: .35rem .6rem;
+	border-radius: 4px;
+	opacity: .8;
+	transition: opacity .15s ease;
+}
+
+.gallery-lightbox-close:hover,
+.gallery-lightbox-close:focus-visible {
+	opacity: 1;
+	outline: 2px solid #D3BC8D;
+}
+
+.gallery-lightbox-body {
+	display: flex;
+	align-items: center;
+	gap: .75rem;
+	width: 100%;
+	max-height: calc(100dvh - 6rem);
+}
+
+.gallery-lightbox-figure {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: .75rem;
+	margin: 0;
+	min-width: 0;
+}
+
+.gallery-lightbox-img {
+	display: block;
+	max-width: 100%;
+	max-height: calc(100dvh - 9rem);
+	object-fit: contain;
+	border-radius: 4px;
+}
+
+.gallery-lightbox-caption {
+	font-size: .9rem;
+	color: #ddd;
+	text-align: center;
+	max-width: 60ch;
+	line-height: 1.5;
+}
+
+.gallery-lightbox-nav {
+	flex-shrink: 0;
+	background: rgba(255, 255, 255, .1);
+	border: 1px solid rgba(255, 255, 255, .2);
+	color: #fff;
+	font-size: 2rem;
+	line-height: 1;
+	padding: .5rem .8rem;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: background .15s ease;
+	align-self: center;
+}
+
+.gallery-lightbox-nav:hover:not(:disabled) {
+	background: rgba(255, 255, 255, .2);
+}
+
+.gallery-lightbox-nav:disabled {
+	opacity: .25;
+	cursor: default;
+}
+
+.gallery-lightbox-nav:focus-visible {
+	outline: 2px solid #D3BC8D;
+}
+
+.gallery-lightbox-counter {
+	font-size: .78rem;
+	color: rgba(255, 255, 255, .55);
+	margin: 0;
+	letter-spacing: .05em;
+}
+

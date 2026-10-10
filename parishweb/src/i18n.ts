@@ -409,6 +409,72 @@ const tagalogTranslations: Record<string, string> = {
   'Officiating priest': 'Paring nangasiwa',
   'Record not provided': 'Hindi ibinigay ang rekord',
   'Not provided': 'Hindi ibinigay',
+
+  // GalleryPage
+  'Back to gallery': 'Bumalik sa galeriya',
+  'Loading album…': 'Naglo-load ng album…',
+  'Album not found.': 'Hindi nahanap ang album.',
+  'Unable to load the updated gallery. Showing the default photos.': 'Hindi ma-load ang na-update na galeriya. Ipinapakita ang mga default na larawan.',
+  'Close photo': 'Isara ang larawan',
+  'Previous photo': 'Nakaraang larawan',
+  'Next photo': 'Susunod na larawan',
+
+  // AboutPage
+  'Unable to load updated About Us content. Showing the default content.': 'Hindi ma-load ang na-update na nilalaman ng Tungkol sa Amin. Ipinapakita ang default na nilalaman.',
+  'Come and pray with us': 'Halika at manalangin kasama kami',
+  'Mass schedule': 'Iskedyul ng Misa',
+  'Contact the parish': 'Makipag-ugnayan sa parokya',
+
+  // HomePage
+  'Discover Santo Domingo': 'Tuklasin ang Santo Domingo',
+  'Faith, community, and parish life': 'Pananampalataya, pamayanan, at buhay-parokya',
+  'Find a sacrament, revisit a parish moment, or follow our latest updates.': 'Maghanap ng sakramento, balikan ang mga sandali sa parokya, o sundan ang aming mga pinakabagong balita.',
+  'Sacraments Available': 'Mga Available na Sakramento',
+  'Unable to load the latest gallery photo. Showing the default photo.': 'Hindi ma-load ang pinakabagong larawan mula sa galeriya. Ipinapakita ang default na larawan.',
+  'More Photos': 'Higit pang Mga Larawan',
+  'Follow Us on Facebook': 'Sundan Kami sa Facebook',
+  'Sto. Domingo Parish': 'Parokya ng Sto. Domingo',
+  'Official Facebook page': 'Opisyal na pahina sa Facebook',
+  'Follow Page': 'Sundan ang Pahina',
+  'Share': 'Ibahagi',
+
+  // ContactPage — placeholders
+  'John Doe': 'Juan dela Cruz',
+  'john@example.com': 'juan@halimbawa.com',
+  '(555) 123-4567': '(02) 8123-4567',
+
+  // NewsPage / HomePage events
+  'Loading events…': 'Naglo-load ng mga kaganapan…',
+
+  // ServicePage
+  'Booking created.': 'Nagawa na ang appointment.',
+  'Unable to create booking: services not loaded. Please refresh the page.': 'Hindi magawa ang appointment: hindi pa na-load ang mga serbisyo. I-refresh ang pahina.',
+  'Please choose a sacrament to book.': 'Pumili ng sakramento para sa appointment.',
+  'Please provide a valid email address.': 'Magbigay ng wastong email address.',
+  'Please provide a valid phone number (10-15 digits).': 'Magbigay ng wastong numero ng telepono (10-15 digit).',
+  'First and Last name are required.': 'Kailangan ang pangalan at apelyido.',
+  'Notes cannot exceed 500 characters.': 'Hindi maaaring lumampas sa 500 karakter ang mga tala.',
+  'files selected': 'mga file ang napili',
+  'Choose files': 'Pumili ng mga file',
+  'Submitting…': 'Isinusumite…',
+  'you@example.com': 'ikaw@halimbawa.com',
+  '09XX-XXX-XXXX': '09XX-XXX-XXXX',
+  'Any additional information': 'Anumang karagdagang impormasyon',
+  'e.g. A1B2C3': 'hal. A1B2C3',
+
+  // PrayerRequest / PrayerWall
+  'Submitting...': 'Isinusumite...',
+  'Submit Prayer Request': 'Isumite ang Kahilingan sa Panalangin',
+  'Clear Form': 'Linisin ang Form',
+  'By submitting, you agree to our Privacy Policy. Prayer requests are reviewed by our pastoral team and may be included in Mass intentions at the discretion of the celebrant.': 'Sa pagsusumite, sumasang-ayon ka sa aming Patakaran sa Pagkapribado. Sinusuri ng aming pastoral na pangkat ang mga kahilingan sa panalangin at maaaring isama sa mga kahilingan sa Misa ayon sa pagpapasya ng selebrant.',
+  'Please share your prayer intention here...': 'Ibahagi dito ang iyong kahilingan sa panalangin...',
+  'Shared with community': 'Ibinabahagi sa pamayanan',
+  'Private': 'Pribado',
+  'Anonymous': 'Hindi kilala',
+  'Pending approval': 'Naghihintay ng pag-apruba',
+
+  // EventDetailsModal
+  'Detail': 'Detalye',
 }
 
 const textMap = new Map(Object.entries(tagalogTranslations))

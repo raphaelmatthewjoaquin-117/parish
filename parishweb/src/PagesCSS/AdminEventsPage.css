@@ -1,16 +1,23 @@
+/* ══════════════════════════════════════════════════════════
+   Admin Events — tokens inherit from UnifiedAdminPage.css
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Dashboard entry animation ── */
 .admin-dashboard {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  max-width: 1280px;
-  animation: admin-content-enter .45s ease both;
+  max-width: 1260px;
 }
-
+@media (prefers-reduced-motion: no-preference) {
+  .admin-dashboard { animation: admin-content-enter .38s ease both }
+}
 @keyframes admin-content-enter {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px) }
+  to   { opacity: 1; transform: translateY(0) }
 }
 
+/* ── Summary tiles ── */
 .dashboard-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -19,51 +26,54 @@
 
 .dashboard-card {
   position: relative;
-  min-height: 126px;
-  padding: 1.2rem 1.25rem;
-  border: 1px solid rgba(13, 13, 13, .1);
-  border-radius: 6px;
-  background: rgba(255, 253, 248, .92);
-  box-shadow: 0 10px 24px rgba(42, 34, 19, .08);
-  transition: transform .2s ease, box-shadow .2s ease;
+  min-height: 120px;
+  padding: 1.2rem 1.3rem;
+  border: 1px solid rgba(30,40,34,.1);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(22,28,24,.05), 0 8px 24px rgba(22,28,24,.06);
+  transition: transform .18s ease, box-shadow .18s ease;
+  overflow: hidden;
 }
-
-.dashboard-card:hover { transform: translateY(-3px); box-shadow: 0 14px 28px rgba(42, 34, 19, .12); }
-
-.dashboard-card.pending {
-  border-top: 4px solid #d6a83f;
+.dashboard-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
 }
+.dashboard-card.pending::before  { background: #c9941f }
+.dashboard-card.approved::before { background: #2d5d40 }
+.dashboard-card.rejected::before { background: #8b3029 }
+.dashboard-card.total::before    { background: #3d4840 }
 
-.dashboard-card.approved {
-  border-top: 4px solid #151515;
-}
-
-.dashboard-card.rejected {
-  border-top: 4px solid #9d6b58;
-}
-
-.dashboard-card.total {
-  border-top: 4px solid #6c8172;
+.dashboard-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(22,28,24,.08), 0 16px 36px rgba(22,28,24,.1);
 }
 
 .card-label {
   display: block;
-  color: #716e66;
-  font-size: 0.68rem;
+  color: #7a8a80;
+  font-size: .66rem;
   font-weight: 800;
-  margin-bottom: 0.5rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: .1em;
+  margin-bottom: .45rem;
 }
 
 .dashboard-card strong {
   display: block;
-  margin-top: .8rem;
-  font-size: 2.35rem;
+  margin-top: .65rem;
+  font-size: 2.3rem;
+  font-weight: 700;
   line-height: 1;
-  color: #151515;
+  color: #161c18;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
 }
 
+/* ── Panel grid ── */
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(280px, 1fr));
@@ -71,25 +81,24 @@
 }
 
 .dashboard-panel {
-  background: rgba(255, 253, 248, .94);
-  border: 1px solid rgba(13, 13, 13, .1);
-  border-radius: 6px;
-  padding: 1.35rem;
-  box-shadow: 0 8px 22px rgba(42, 34, 19, .05);
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.1);
+  border-radius: 14px;
+  padding: 1.4rem;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04), 0 6px 20px rgba(22,28,24,.05);
 }
 
 .dashboard-panel h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  color: #151515;
-  font-size: 1.08rem;
+  margin: 0 0 1rem;
+  color: #161c18;
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 .admin-embedded-page > .operations-page,
-.admin-embedded-page > .admin-dashboard {
-  width: 100%;
-}
+.admin-embedded-page > .admin-dashboard { width: 100% }
 
+/* ── Breakdown / activity lists ── */
 .breakdown-list,
 .activity-list {
   list-style: none;
@@ -97,7 +106,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: .6rem;
 }
 
 .breakdown-list li,
@@ -105,106 +114,89 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.7rem 0.8rem;
-  background: #f4f1e9;
-  border: 1px solid rgba(13, 13, 13, .08);
-  border-radius: 4px;
+  padding: .6rem .8rem;
+  background: #f8f5ef;
+  border: 1px solid rgba(30,40,34,.08);
+  border-radius: 8px;
+  font-size: .875rem;
 }
 
 .activity-list li {
   justify-content: flex-start;
-  gap: 0.8rem;
+  gap: .75rem;
 }
-
 .activity-list strong,
-.activity-list small {
-  display: block;
-}
+.activity-list small { display: block }
+.activity-list small { color: #7a8a80; font-size: .78rem; margin-top: .1rem }
 
 .activity-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  display: inline-block;
   flex-shrink: 0;
 }
+.activity-dot.booking { background: #c9941f }
+.activity-dot.prayer  { background: #6e4a2a }
+.activity-dot.event   { background: #3d4840 }
 
-.activity-dot.booking {
-  background: #DA9100;
-}
-
-.activity-dot.prayer {
-  background: #6F4E37;
-}
-
-.activity-dot.event {
-  background: #000000;
-}
-
-.quick-links-panel {
-  margin-top: 0;
-}
-
+/* ── Quick links ── */
+.quick-links-panel { margin-top: 0 }
 .quick-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: .65rem;
 }
 
 .quick-link {
-  padding: 0.8rem 1rem;
-  border: 1px solid #d6a83f;
+  padding: .65rem 1rem;
+  border: 1px solid rgba(201,148,31,.45);
   background: #fffdf8;
-  color: #000000;
-  border-radius: 4px;
+  color: #161c18;
+  border-radius: 9px;
   cursor: pointer;
+  font-size: .875rem;
   font-weight: 600;
+  transition: background .15s, border-color .15s, transform .15s;
 }
-
 .quick-link:hover {
-  background: #f4f1e9;
+  background: #f2ede4;
+  border-color: #c9941f;
+  transform: translateY(-1px);
 }
 
+/* ── Tabs ── */
 .admin-tabs {
   display: flex;
-  gap: 1rem;
+  gap: .5rem;
   margin-bottom: 2rem;
-  border-bottom: 2px solid #D3BC8D;
+  border-bottom: 1.5px solid rgba(30,40,34,.12);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.admin-tabs::-webkit-scrollbar { display: none }
 
 .admin-tab {
-  padding: 12px 24px;
+  padding: .75rem 1.1rem;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: .9rem;
   font-weight: 500;
-  color: #6F4E37;
-  border-bottom: 3px solid transparent;
-  transition: all 0.3s ease;
+  color: #7a8a80;
+  border-bottom: 2.5px solid transparent;
   position: relative;
-  bottom: -2px;
+  bottom: -1.5px;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
 }
-
-.admin-tab:hover {
-  color: #000000;
-}
-
+.admin-tab:hover { color: #161c18 }
 .admin-tab.active {
-  color: #DA9100;
-  border-bottom-color: #DA9100;
+  color: #b8891e;
+  border-bottom-color: #b8891e;
+  font-weight: 700;
 }
 
-@media (max-width: 760px) {
-  .dashboard-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dashboard-grid { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 480px) {
-  .dashboard-summary { grid-template-columns: 1fr; }
-}
-
-/* Admin Panel Layout */
+/* ── Events workspace two-column layout ── */
 .admin-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -213,185 +205,193 @@
 }
 
 .events-workspace {
-  grid-template-columns: minmax(320px, .92fr) minmax(360px, 1.08fr);
+  grid-template-columns: minmax(300px, .9fr) minmax(340px, 1.1fr);
   gap: 1.25rem;
   align-items: start;
   margin-top: .75rem;
 }
 
+/* ── Form card ── */
 .admin-form {
-  background: #D3BC8D;
+  background: #ffffff;
   padding: 1.5rem;
-  border-radius: 8px;
-  border: 1px solid #D3BC8D;
+  border-radius: 14px;
+  border: 1px solid rgba(30,40,34,.1);
+  box-shadow: 0 2px 8px rgba(22,28,24,.04);
 }
 
 .events-workspace .admin-form,
 .events-workspace .admin-list {
-  border: 1px solid #e3ded2;
-  border-radius: 10px;
-  background: #fffdf8;
-  box-shadow: 0 14px 34px rgba(42, 34, 19, .08);
+  border: 1px solid rgba(30,40,34,.1);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04), 0 8px 24px rgba(22,28,24,.05);
 }
 
 .events-workspace .admin-form {
   padding: 1.5rem;
-  border-top: 3px solid #d6a83f;
+  border-top: 3px solid #c9941f;
 }
 
 .events-workspace .admin-list {
-  min-height: 100%;
   padding: 1.5rem;
 }
 
 .admin-form h3 {
-  margin-top: 0;
-  margin-bottom: 1.5rem;
-  color: #000000;
-  font-size: 1.2rem;
+  margin: 0 0 1.35rem;
+  color: #161c18;
+  font-size: 1.1rem;
+  font-weight: 700;
 }
 
 .events-form-intro {
-  margin: -.7rem 0 1.35rem;
-  color: #716e66;
-  font-size: .88rem;
+  margin: -.5rem 0 1.2rem;
+  color: #7a8a80;
+  font-size: .875rem;
   line-height: 1.5;
 }
 
 .events-workspace .admin-form form label {
-  margin-bottom: 1.05rem;
-  color: #3d3a34;
-  font-size: .82rem;
+  display: block;
+  margin-bottom: 1rem;
+  color: #3d4840;
+  font-size: .8rem;
   font-weight: 700;
   letter-spacing: .01em;
 }
 
 .events-workspace .admin-form input,
 .events-workspace .admin-form textarea {
-  margin-top: .4rem;
-  border: 1px solid #d8d2c5;
-  border-radius: 5px;
-  background: #fff;
-  color: #151515;
-  transition: border-color .2s ease, box-shadow .2s ease;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: .35rem;
+  padding: .6rem .8rem;
+  border: 1px solid rgba(30,40,34,.2);
+  border-radius: 8px;
+  background: #f8f5ef;
+  color: #161c18;
+  font: inherit;
+  font-size: .875rem;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.events-workspace .admin-form input:focus,
+.events-workspace .admin-form textarea:focus {
+  outline: none;
+  border-color: #b8891e;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.15);
 }
 
 .events-workspace .admin-form input[type="file"] {
-  padding: .55rem;
-  color: #716e66;
-  font-size: .85rem;
-}
-
-.events-workspace .admin-form input:focus,
-.events-workspace .admin-form textarea:focus {
-  border-color: #b48628;
-  box-shadow: 0 0 0 3px rgba(214, 168, 63, .2);
+  padding: .5rem;
+  color: #7a8a80;
+  font-size: .82rem;
+  background: transparent;
+  border-style: dashed;
 }
 
 .events-workspace .admin-form small {
   display: block;
-  margin-top: .45rem;
-  color: #716e66;
-  font-size: .78rem;
+  margin-top: .35rem;
+  color: #7a8a80;
+  font-size: .76rem;
 }
 
-.admin-form form label {
-  display: block;
-  margin-bottom: 1rem;
-  font-weight: 500;
-  color: #000000;
-}
+/* ── Generic form inputs (outside events-workspace) ── */
+.admin-form form label { display: block; margin-bottom: 1rem; font-weight: 500; color: #161c18 }
 
 .admin-form input,
 .admin-form textarea,
 .admin-form select {
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #D3BC8D;
-  border-radius: 4px;
-  font-size: 1rem;
+  padding: .65rem .8rem;
+  border: 1px solid rgba(30,40,34,.2);
+  border-radius: 8px;
+  font-size: .9rem;
   font-family: inherit;
   box-sizing: border-box;
+  background: #f8f5ef;
+  color: #161c18;
+  transition: border-color .15s, box-shadow .15s;
 }
-
-.admin-form textarea {
-  resize: vertical;
-  min-height: 100px;
-}
-
+.admin-form textarea { resize: vertical; min-height: 100px }
 .admin-form input:focus,
 .admin-form textarea:focus,
 .admin-form select:focus {
   outline: none;
-  border-color: #DA9100;
-  box-shadow: 0 0 0 3px #000000;
+  border-color: #b8891e;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.15);
 }
 
+/* ── Button row ── */
 .button-row {
   display: flex;
-  gap: 1rem;
-  margin-top: 1.5rem;
+  gap: .75rem;
+  margin-top: 1.35rem;
 }
-
 .button-row button {
   flex: 1;
-  padding: 0.75rem 1.5rem;
+  padding: .68rem 1.25rem;
   border: none;
-  border-radius: 4px;
-  font-size: 1rem;
+  border-radius: 9px;
+  font-size: .875rem;
+  font-weight: 600;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  transition: background .15s, transform .15s, box-shadow .15s;
 }
-
 .button-row button[type="submit"] {
-  background: #DA9100;
-  color: #000000;
+  background: #161c18;
+  color: #ffffff;
 }
-
 .button-row button[type="submit"]:hover {
-  background: #DA9100;
+  background: #2d3d35;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(22,28,24,.18);
 }
-
 .button-row button[type="button"] {
-  background: #D3BC8D;
-  color: #000000;
+  background: #f2ede4;
+  color: #3d4840;
+  border: 1px solid rgba(30,40,34,.14);
 }
-
 .button-row button[type="button"]:hover {
-  background: #D3BC8D;
+  background: #e8e2d8;
 }
 
-/* Admin List */
+.events-workspace .button-row button[type="submit"] {
+  background: #161c18;
+  color: #ffffff;
+}
+.events-workspace .button-row button[type="submit"]:hover { background: #2d3d35 }
+.events-workspace .button-row button[type="button"] {
+  background: #f2ede4;
+  color: #3d4840;
+  border: 1px solid rgba(30,40,34,.14);
+}
+
+/* ── List card ── */
 .admin-list {
-  background: #D3BC8D;
+  background: #ffffff;
   padding: 1.5rem;
-  border-radius: 8px;
-  border: 1px solid #D3BC8D;
+  border-radius: 14px;
+  border: 1px solid rgba(30,40,34,.1);
 }
+.admin-list h3 { margin: 0 0 1.25rem; color: #161c18; font-size: 1.1rem; font-weight: 700 }
+.admin-list ul { list-style: none; padding: 0; margin: 0 }
 
-.admin-list h3 {
-  margin-top: 0;
-  margin-bottom: 1.5rem;
-  color: #000000;
-  font-size: 1.2rem;
-}
-
+/* ── List heading (reused in service, ledger) ── */
 .events-list-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.35rem;
+  margin-bottom: 1.25rem;
 }
-
-.events-list-heading h3 {
-  margin: .2rem 0 0;
-}
+.events-list-heading h3 { margin: .15rem 0 0 }
 
 .events-section-kicker {
-  color: #8b6a22;
-  font-size: .68rem;
+  color: #b8891e;
+  font-size: .65rem;
   font-weight: 800;
   letter-spacing: .14em;
   text-transform: uppercase;
@@ -400,200 +400,127 @@
 .events-count {
   display: grid;
   place-items: center;
-  min-width: 2rem;
-  height: 2rem;
+  min-width: 1.9rem;
+  height: 1.9rem;
   border-radius: 50%;
-  background: #f4f1e9;
-  color: #8b6a22;
-  font-size: .82rem;
+  background: #f2ede4;
+  color: #b8891e;
+  font-size: .78rem;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
+/* ── Empty state ── */
 .events-empty-state {
   display: grid;
   justify-items: center;
-  padding: 3.25rem 1rem;
-  border: 1px dashed #d8d2c5;
-  border-radius: 7px;
-  color: #3d3a34;
+  padding: 3rem 1rem;
+  border: 1.5px dashed rgba(30,40,34,.15);
+  border-radius: 10px;
   text-align: center;
 }
-
 .events-empty-icon {
   display: grid;
   place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  margin-bottom: .85rem;
-  border: 1px solid #d6a83f;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-bottom: .8rem;
+  border: 1.5px solid rgba(184,137,30,.5);
   border-radius: 50%;
-  color: #b48628;
-  font-size: 1.35rem;
-  font-weight: 300;
+  color: #b8891e;
+  font-size: 1.25rem;
 }
-
 .events-empty-state strong {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 1.1rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  color: #161c18;
 }
-
 .events-empty-state p {
-  max-width: 240px;
-  margin: .4rem 0 0;
-  color: #716e66;
-  font-size: .86rem;
+  max-width: 230px;
+  margin: .35rem 0 0;
+  color: #7a8a80;
+  font-size: .84rem;
 }
 
-.events-workspace .button-row button[type="submit"] {
-  background: #151515;
-  color: #fff;
-}
-
-.events-workspace .button-row button[type="submit"]:hover {
-  background: #34322d;
-}
-
-.events-workspace .button-row button[type="button"] {
-  background: #f4f1e9;
-  color: #3d3a34;
-  border: 1px solid #d8d2c5;
-}
-
-.admin-prayers-list,
-.admin-service-list,
-.mass-schedule-list {
-  border: 1px solid #e3ded2;
-  border-radius: 10px;
-  background: #fffdf8;
-  box-shadow: 0 12px 28px rgba(42, 34, 19, .07);
-}
-
-.admin-prayers-list,
-.admin-service-list {
-  padding: 1.5rem;
-}
-
-.admin-prayers-list h3,
-.admin-service-list h3,
-.mass-schedule-list h3 {
-  color: #151515;
-}
-
-.admin-prayer-row,
-.admin-service-row {
-  background: #fffdf8;
-  border-color: #e3ded2;
-  box-shadow: none;
-}
-
-.admin-prayer-row strong,
-.admin-service-row strong {
-  color: #151515;
-}
-
-.prayer-meta,
-.service-meta,
-.admin-prayer-row small,
-.admin-service-row small {
-  color: #716e66;
-}
-
-.admin-prayer-row .admin-buttons button,
-.admin-service-row .admin-buttons button {
-  border-radius: 5px;
-}
-
-.admin-list ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
+/* ── Event row ── */
 .admin-event-row,
 .admin-prayer-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 4px;
-  margin-bottom: 0.75rem;
+  padding: .9rem 1rem;
+  background: #f8f5ef;
+  border: 1px solid rgba(30,40,34,.09);
+  border-radius: 9px;
+  margin-bottom: .65rem;
   gap: 1rem;
+  transition: background .15s, box-shadow .15s;
 }
+.admin-event-row:hover,
+.admin-prayer-row:hover { background: #f2ede4; box-shadow: 0 3px 10px rgba(22,28,24,.05) }
 
 .admin-event-row > div:first-child,
-.admin-prayer-row .prayer-info {
-  flex: 1;
-  min-width: 0;
-}
+.admin-prayer-row .prayer-info { flex: 1; min-width: 0 }
 
 .admin-event-row strong,
 .admin-prayer-row strong {
   display: block;
-  color: #000000;
-  margin-bottom: 0.25rem;
+  color: #161c18;
+  font-weight: 600;
+  margin-bottom: .2rem;
 }
-
 .admin-event-row > div:first-child > div,
-.prayer-meta {
-  font-size: 0.85rem;
-  color: #6F4E37;
-  margin: 0.25rem 0;
-}
+.prayer-meta { font-size: .83rem; color: #7a8a80; margin: .2rem 0 }
 
+/* ── Action buttons ── */
 .admin-buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: .45rem;
   flex-wrap: wrap;
 }
-
 .admin-buttons button {
-  padding: 0.5rem 1rem;
+  padding: .42rem .85rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 7px;
   cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  font-size: .82rem;
+  font-weight: 600;
+  transition: background .15s, transform .12s, box-shadow .12s;
 }
-
 .admin-buttons .primary-btn {
-  background: #DA9100;
-  color: #000000;
+  background: #c9941f;
+  color: #ffffff;
 }
-
-.admin-buttons .primary-btn:hover {
-  background: #DA9100;
-}
+.admin-buttons .primary-btn:hover { background: #b8891e; transform: translateY(-1px) }
 
 .admin-buttons .secondary-btn {
-  background: #D3BC8D;
-  color: #000000;
+  background: #f2ede4;
+  color: #3d4840;
+  border: 1px solid rgba(30,40,34,.14);
 }
-
-.admin-buttons .secondary-btn:hover {
-  background: #D3BC8D;
-}
+.admin-buttons .secondary-btn:hover { background: #e8e2d8 }
 
 .admin-buttons .danger-btn {
-  background: #6F4E37;
-  color: #D3BC8D;
+  background: rgba(139,48,41,.1);
+  color: #7d2a25;
+  border: 1px solid rgba(139,48,41,.2);
 }
-
 .admin-buttons .danger-btn:hover {
-  background: #DA9100;
+  background: rgba(139,48,41,.18);
+  transform: translateY(-1px);
 }
+.admin-buttons button:disabled { opacity: .5; cursor: not-allowed; transform: none !important }
 
-.admin-buttons button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Prayer Approval Section */
+/* ── Prayer approval ── */
 .admin-prayers-list {
   grid-column: 1 / -1;
+  border: 1px solid rgba(30,40,34,.1);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04), 0 8px 24px rgba(22,28,24,.05);
+  padding: 1.5rem;
 }
+.admin-prayers-list h3 { color: #161c18 }
 
 .admin-prayers-scrollable {
   max-height: 500px;
@@ -602,89 +529,79 @@
   list-style: none;
   padding: 0 4px 0 0;
   margin: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #c9941f transparent;
 }
-
-.admin-prayers-scrollable::-webkit-scrollbar {
-  width: 8px;
-}
-
-.admin-prayers-scrollable::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 10px;
-}
-
-.admin-prayers-scrollable::-webkit-scrollbar-thumb {
-  background: #c58b32;
-  border-radius: 10px;
-}
-
-.admin-prayers-scrollable::-webkit-scrollbar-thumb:hover {
-  background: #b98a2f;
-}
+.admin-prayers-scrollable::-webkit-scrollbar { width: 6px }
+.admin-prayers-scrollable::-webkit-scrollbar-track { background: transparent }
+.admin-prayers-scrollable::-webkit-scrollbar-thumb { background: #c9941f; border-radius: 99px }
 
 .admin-prayer-row {
   flex-direction: column;
   align-items: flex-start;
+  border-left: 3px solid rgba(184,137,30,.3);
+  background: #fafaf8;
 }
+.admin-prayer-row.status-approved { border-left-color: #2d5d40 }
 
 .prayer-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  gap: .65rem;
+  margin-bottom: .45rem;
   flex-wrap: wrap;
 }
-
 .prayer-category {
   display: inline-block;
-  background: #DA9100;
-  color: #000000;
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  background: rgba(201,148,31,.14);
+  color: #8a5c0a;
+  padding: .2rem .6rem;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
   text-transform: capitalize;
+  border: 1px solid rgba(201,148,31,.3);
 }
 
 .badge {
   display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  padding: .2rem .65rem;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
 }
-
 .approved-badge {
-  background: #6F4E37;
-  color: #D3BC8D;
+  background: #e6f3ec;
+  color: #1d6b45;
+  border: 1px solid rgba(45,93,64,.25);
 }
-
 .pending-badge {
-  background: #D3BC8D;
-  color: #DA9100;
+  background: #fdf3e0;
+  color: #8a5c0a;
+  border: 1px solid rgba(201,148,31,.3);
 }
 
 .prayer-text {
-  color: #000000;
-  margin: 0.5rem 0;
-  line-height: 1.5;
+  color: #3d4840;
+  margin: .45rem 0;
+  line-height: 1.55;
   word-break: break-word;
+  font-size: .875rem;
 }
-
 .admin-prayer-row .admin-buttons {
   width: 100%;
   justify-content: flex-start;
-  margin-top: 0.75rem;
+  margin-top: .65rem;
 }
 
-/* Service request cards */
+/* ── Service request cards ── */
 .admin-service-list {
   grid-column: 1 / -1;
-  background: rgba(255, 255, 255, .82);
+  background: #ffffff;
   padding: 1.5rem;
-  border: 1px solid #e2ddd1;
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(42, 34, 19, .06);
+  border: 1px solid rgba(30,40,34,.1);
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04), 0 10px 28px rgba(22,28,24,.05);
 }
 
 .service-list-heading {
@@ -694,319 +611,252 @@
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
-
 .service-list-heading h3 {
-  margin: 0.15rem 0 0;
-  color: #17211d;
-  font-size: 1.35rem;
+  margin: .1rem 0 0;
+  color: #161c18;
+  font-size: 1.2rem;
+  font-weight: 700;
 }
 
 .section-kicker {
   margin: 0;
-  color: #DA9100;
-  font-size: 0.72rem;
+  color: #b8891e;
+  font-size: .68rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: .1em;
   text-transform: uppercase;
 }
 
 .request-count {
-  padding: 0.4rem 0.75rem;
-  border: 1px solid #e2ddd1;
-  border-radius: 999px;
-  color: #716e66;
-  background: #f4f1e9;
-  font-size: 0.82rem;
+  padding: .32rem .7rem;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 99px;
+  color: #7a8a80;
+  background: #f2ede4;
+  font-size: .8rem;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .service-request-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: .9rem;
   list-style: none;
   padding: 0 4px 0 0;
   margin: 0;
   max-height: 520px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c9941f transparent;
 }
-
-.service-request-cards::-webkit-scrollbar { width: 6px; }
-.service-request-cards::-webkit-scrollbar-track { background: #f4f1e9; border-radius: 3px; }
-.service-request-cards::-webkit-scrollbar-thumb { background: #d3bc8d; border-radius: 3px; }
-.service-request-cards::-webkit-scrollbar-thumb:hover { background: #c58b32; }
+.service-request-cards::-webkit-scrollbar { width: 5px }
+.service-request-cards::-webkit-scrollbar-track { background: transparent }
+.service-request-cards::-webkit-scrollbar-thumb { background: #c9941f; border-radius: 99px }
 
 .admin-service-row {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   align-items: stretch;
-  min-height: 156px;
-  padding: 1.15rem;
-  background: #fffdf8;
-  border: 1px solid #e2ddd1;
-  border-left: 4px solid #c58b32;
-  border-radius: 9px;
-  box-shadow: 0 6px 16px rgba(42, 34, 19, .05);
-  gap: 1rem;
+  min-height: 148px;
+  padding: 1.1rem 1.15rem;
+  background: #f8f5ef;
+  border: 1px solid rgba(30,40,34,.09);
+  border-left: 3px solid #c9941f;
+  border-radius: 10px;
+  gap: .85rem;
+  transition: background .15s, box-shadow .15s, transform .15s;
 }
-
-.admin-service-row.status-confirmed {
-  border-left-color: #6c8172;
+.admin-service-row:hover {
+  background: #f2ede4;
+  box-shadow: 0 4px 14px rgba(22,28,24,.07);
+  transform: translateY(-1px);
 }
+.admin-service-row.status-confirmed { border-left-color: #2d5d40 }
+.admin-service-row.status-rejected  { border-left-color: #7d2a25 }
 
-.admin-service-row.status-rejected {
-  border-left-color: #a65d55;
-}
-
-.service-info {
-  min-width: 0;
-}
-
+.service-info  { min-width: 0 }
 .service-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: .65rem;
 }
-
 .service-header strong {
   display: block;
-  color: #000000;
-  font-size: 1.05rem;
-  margin-bottom: 0.3rem;
+  color: #161c18;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: .2rem;
 }
-
 .service-type {
   display: block;
-  color: #6F4E37;
-  font-size: 0.86rem;
+  color: #7a8a80;
+  font-size: .83rem;
 }
+.service-details { display: grid; gap: .4rem; margin-top: .85rem }
+.service-details small { color: #7a8a80; font-size: .8rem; overflow-wrap: anywhere }
 
-.service-details {
-  display: grid;
-  gap: 0.45rem;
-  margin-top: 1rem;
-}
-
-.service-details small {
-  color: #6F4E37;
-  overflow-wrap: anywhere;
-}
-
+/* ── Status badge ── */
 .status-badge {
   display: inline-flex;
   align-items: center;
-  gap: .4rem;
+  gap: .35rem;
   flex-shrink: 0;
-  min-height: 30px;
-  padding: .35rem .65rem;
+  padding: .28rem .6rem;
   border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: .76rem;
-  font-weight: 800;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
   letter-spacing: .02em;
   text-transform: capitalize;
 }
-
 .status-badge::before {
-  width: 7px;
-  height: 7px;
+  content: '';
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
-  content: '';
 }
+.status-badge.confirmed { background: #e6f3ec; border-color: rgba(45,93,64,.25); color: #1d6b45 }
+.status-badge.pending   { background: #fdf3e0; border-color: rgba(201,148,31,.3);  color: #8a5c0a }
+.status-badge.rejected  { background: #fbe9e7; border-color: rgba(125,42,37,.2);  color: #7d2a25 }
 
-.status-badge.confirmed {
-  background: #e5f1e8;
-  border-color: #9fc3a8;
-  color: #245c38;
-}
+.admin-service-row .admin-buttons { justify-content: flex-start; width: 100%; margin-top: auto }
+.admin-service-row .admin-buttons button { flex: 1 }
 
-.status-badge.pending {
-  background: #fff2d8;
-  border-color: #e1bd70;
-  color: #704b08;
-}
-
-.status-badge.rejected {
-  background: #fbe7e4;
-  border-color: #d9a49e;
-  color: #8b3029;
-}
-
-.admin-service-row .admin-buttons {
-  justify-content: flex-start;
-  width: 100%;
-  margin-top: auto;
-}
-
-.admin-service-row .admin-buttons button {
-  flex: 1;
-}
-
+/* ── Service detail modal ── */
 .admin-service-detail {
   grid-column: 1 / -1;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 4px 16px #000000;
+  box-shadow: 0 12px 40px rgba(22,28,24,.14);
 }
-
-.admin-service-detail .detail-content {
-  background: #D3BC8D;
-}
-
+.admin-service-detail .detail-content { background: #ffffff }
 .admin-service-detail .danger-btn,
 .admin-service-row .danger-btn {
-  background: #6F4E37;
-  color: #D3BC8D;
+  background: rgba(139,48,41,.1);
+  color: #7d2a25;
+  border: 1px solid rgba(139,48,41,.2);
 }
-
 .admin-service-detail .danger-btn:hover,
-.admin-service-row .danger-btn:hover {
-  background: #6F4E37;
-}
+.admin-service-row .danger-btn:hover { background: rgba(139,48,41,.18) }
 
-/* Prayer Detail Panel */
+/* ── Prayer detail panel ── */
 .admin-prayer-detail {
   grid-column: 1 / -1;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 14px;
   overflow: hidden;
-  margin-top: 2rem;
+  margin-top: 1.5rem;
 }
-
 .detail-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem;
-  background: #D3BC8D;
-  border-bottom: 1px solid #D3BC8D;
+  padding: 1.25rem 1.4rem;
+  background: #f8f5ef;
+  border-bottom: 1px solid rgba(30,40,34,.09);
 }
-
-.detail-header h3 {
-  margin: 0;
-  color: #000000;
-}
+.detail-header h3 { margin: 0; color: #161c18; font-size: 1.1rem; font-weight: 700 }
 
 .close-btn {
   background: none;
-  border: none;
-  font-size: 1.5rem;
+  border: 1px solid rgba(30,40,34,.15);
+  border-radius: 7px;
+  font-size: 1.2rem;
   cursor: pointer;
-  color: #6F4E37;
-  padding: 0;
-  width: 32px;
-  height: 32px;
+  color: #7a8a80;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  transition: all 0.3s ease;
+  transition: background .15s, color .15s;
 }
-
-.close-btn:hover {
-  background: #D3BC8D;
-  color: #000000;
-}
+.close-btn:hover { background: rgba(30,40,34,.07); color: #161c18 }
 
 .detail-content {
-  padding: 1.5rem;
-  background: #D3BC8D;
+  padding: 1.4rem;
+  background: #ffffff;
 }
-
 .detail-row {
   display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns: 110px 1fr;
+  gap: .85rem;
+  margin-bottom: .85rem;
   align-items: start;
 }
+.detail-row label { font-weight: 700; color: #3d4840; font-size: .85rem }
+.detail-row span  { color: #161c18; word-break: break-word; font-size: .875rem }
 
-.detail-row label {
-  font-weight: 600;
-  color: #000000;
-}
-
-.detail-row span {
-  color: #6F4E37;
-  word-break: break-word;
-}
-
-.detail-request {
-  margin: 1.5rem 0;
-}
-
+.detail-request { margin: 1.25rem 0 }
 .detail-request label {
   display: block;
-  font-weight: 600;
-  color: #000000;
-  margin-bottom: 0.5rem;
+  font-weight: 700;
+  color: #3d4840;
+  font-size: .85rem;
+  margin-bottom: .45rem;
 }
-
 .detail-request p {
-  background: #D3BC8D;
-  padding: 1rem;
-  border-radius: 4px;
-  border-left: 4px solid #DA9100;
+  background: #f8f5ef;
+  padding: .9rem 1rem;
+  border-radius: 8px;
+  border-left: 3px solid #c9941f;
   margin: 0;
   line-height: 1.6;
-  color: #000000;
+  color: #3d4840;
   white-space: pre-wrap;
   word-break: break-word;
+  font-size: .875rem;
 }
 
 .detail-actions {
   display: flex;
-  gap: 1rem;
-  margin-top: 1.5rem;
+  gap: .75rem;
+  margin-top: 1.25rem;
   flex-wrap: wrap;
 }
-
 .detail-actions button {
   flex: 1;
-  min-width: 140px;
-  padding: 0.75rem 1.5rem;
+  min-width: 130px;
+  padding: .68rem 1.25rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 9px;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  font-size: .875rem;
+  transition: background .15s, transform .15s, box-shadow .15s;
 }
-
 .detail-actions .primary-btn {
-  background: #6F4E37;
-  color: #D3BC8D;
+  background: #c9941f;
+  color: #ffffff;
 }
-
-.detail-actions .primary-btn:hover {
-  background: #6F4E37;
-}
-
+.detail-actions .primary-btn:hover { background: #b8891e; transform: translateY(-1px) }
 .detail-actions .danger-btn {
-  background: #6F4E37;
-  color: #D3BC8D;
+  background: rgba(139,48,41,.1);
+  color: #7d2a25;
+  border: 1px solid rgba(139,48,41,.2);
 }
+.detail-actions .danger-btn:hover { background: rgba(139,48,41,.18) }
 
-.detail-actions .danger-btn:hover {
-  background: #DA9100;
-}
-
-/* Error Message */
+/* ── Error / success messages ── */
 .error-message {
-  background: #D3BC8D;
-  color: #6F4E37;
-  padding: 0.75rem 1rem;
-  border-radius: 4px;
-  margin: 1rem 0;
-  border-left: 4px solid #6F4E37;
+  background: #fbe9e7;
+  color: #7d2a25;
+  border: 1px solid rgba(125,42,37,.2);
+  border-left: 3px solid #7d2a25;
+  padding: .7rem 1rem;
+  border-radius: 8px;
+  margin: .75rem 0;
+  font-size: .875rem;
 }
 
-/* Admin Login Form */
+/* ── Login form ── */
 .admin-login-page {
   display: flex;
   flex-direction: column;
@@ -1015,698 +865,396 @@
   min-height: 65vh;
   text-align: center;
 }
-
-.admin-login-page .section-heading {
-  width: min(100%, 400px);
-  margin-bottom: 1.5rem;
-}
+.admin-login-page .section-heading { width: min(100%, 400px); margin-bottom: 1.35rem }
 
 .admin-login-form {
-  background: #D3BC8D;
+  background: #ffffff;
   padding: 2rem;
-  border-radius: 8px;
-  border: 1px solid #D3BC8D;
+  border-radius: 16px;
+  border: 1px solid rgba(30,40,34,.1);
   max-width: 400px;
   width: 100%;
   box-sizing: border-box;
-  margin: 0;
   text-align: left;
+  box-shadow: 0 4px 16px rgba(22,28,24,.08), 0 16px 40px rgba(22,28,24,.08);
 }
-
-.admin-login-page > p:last-child {
-  width: min(100%, 400px);
-  margin: 1.25rem 0 0;
-  font-size: 0.9rem;
-}
+.admin-login-page > p:last-child { width: min(100%, 400px); margin: 1.1rem 0 0; font-size: .875rem; color: #7a8a80 }
 
 .admin-login-form label {
   display: block;
-  margin-bottom: 1rem;
-  font-weight: 500;
-  color: #000000;
+  margin-bottom: .85rem;
+  font-weight: 700;
+  color: #3d4840;
+  font-size: .85rem;
 }
-
 .admin-login-form input {
+  display: block;
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #D3BC8D;
-  border-radius: 4px;
-  font-size: 1rem;
+  padding: .65rem .8rem;
+  border: 1px solid rgba(30,40,34,.2);
+  border-radius: 9px;
+  font-size: .9rem;
   box-sizing: border-box;
-  margin-bottom: 1rem;
+  margin-top: .3rem;
+  background: #f8f5ef;
+  color: #161c18;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
-
 .admin-login-form input:focus {
   outline: none;
-  border-color: #DA9100;
-  box-shadow: 0 0 0 3px #000000;
+  border-color: #b8891e;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.15);
 }
-
 .admin-login-form button {
   width: 100%;
-  padding: 0.75rem;
-  background: #DA9100;
-  color: #000000;
+  padding: .72rem;
+  background: #1b2e24;
+  color: #ffffff;
   border: none;
-  border-radius: 4px;
-  font-weight: 600;
+  border-radius: 10px;
+  font-weight: 700;
   cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.3s ease;
+  font-size: .9rem;
+  margin-top: 1rem;
+  transition: background .18s, transform .15s, box-shadow .15s;
 }
-
 .admin-login-form button:hover {
-  background: #DA9100;
+  background: #2d4e3c;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(27,46,36,.22);
 }
+.admin-login-form button:disabled { opacity: .55; cursor: not-allowed; transform: none }
 
-.admin-login-form button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Responsive Design */
-@media (max-width: 1024px) {
-  .dashboard-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .admin-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-form {
-    grid-column: 1 / -1;
-  }
-
-  .admin-list {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 768px) {
-  .dashboard-summary,
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-tabs {
-    gap: 0.5rem;
-  }
-
-  .admin-tab {
-    padding: 10px 16px;
-    font-size: 0.9rem;
-  }
-
-  .admin-event-row,
-  .admin-prayer-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .admin-buttons {
-    width: 100%;
-  }
-
-  .admin-buttons button {
-    flex: 1;
-    min-width: 100px;
-  }
-
-  .detail-row {
-    grid-template-columns: 1fr;
-  }
-
-  .detail-actions {
-    flex-direction: column;
-  }
-
-  .detail-actions button {
-    width: 100%;
-  }
-
-  .admin-service-list {
-    padding: 1rem;
-  }
-
-  .service-request-cards {
-    grid-template-columns: 1fr;
-    max-height: 420px;
-  }
-
-  .service-list-heading {
-    align-items: flex-start;
-  }
-}
-
-/* Service Request Modal */
-.service-request-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  animation: modal-backdrop-in .2s ease both;
-}
-
-@keyframes modal-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.service-request-modal-card {
-  grid-column: unset !important;
-  width: min(580px, 100%);
-  max-height: 90vh;
-  overflow-y: auto;
-  background: #fffdf8;
-  border: 1px solid #e3ded2;
-  border-radius: 12px;
-  box-shadow: 0 24px 60px rgba(42, 34, 19, .22);
-  margin-top: 0;
-  animation: modal-card-in .25s ease both;
-}
-
-@keyframes modal-card-in {
-  from { opacity: 0; transform: translateY(12px) scale(.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.service-request-modal-card .detail-header {
-  background: #fffdf8;
-  border-bottom: 1px solid #e3ded2;
-  border-radius: 12px 12px 0 0;
-}
-
-.service-request-modal-card .detail-header h3 {
-  color: #17211d;
-}
-
-.service-request-modal-card .detail-content {
-  background: #fffdf8;
-  border-radius: 0 0 12px 12px;
-}
-
-.service-request-modal-card .detail-row label {
-  color: #35453d;
-}
-
-.service-request-modal-card .detail-row span {
-  color: #26342d;
-}
-
-.service-request-modal-card .detail-request label {
-  color: #35453d;
-}
-
-.service-request-modal-card textarea {
-  width: 100%;
-  padding: 0.65rem 0.85rem;
-  border: 1px solid #d8d2c5;
-  border-radius: 6px;
-  font-size: 0.92rem;
-  font-family: inherit;
-  resize: vertical;
-  box-sizing: border-box;
-  background: #fff;
-  color: #151515;
-}
-
-.service-request-modal-card textarea:focus {
-  outline: none;
-  border-color: #b48628;
-  box-shadow: 0 0 0 3px rgba(214, 168, 63, .2);
-}
-
-.service-request-modal-card .detail-actions .primary-btn {
-  background: #DA9100;
-  color: #000;
-}
-
-.service-request-modal-card .detail-actions .primary-btn:hover {
-  background: #c07e00;
-}
-
-.service-request-modal-card .detail-actions .danger-btn {
-  background: #6F4E37;
-  color: #fff;
-}
-
-.service-request-modal-card .detail-actions .danger-btn:hover {
-  background: #5a3e2b;
-}
-
-.service-request-modal-card .detail-actions .secondary-btn {
-  background: #f4f1e9;
-  color: #3d3a34;
-  border: 1px solid #d8d2c5;
-}
-
-.service-request-modal-card .detail-actions .secondary-btn:hover {
-  background: #ece8df;
-}
-
-/* Sacramental Ledger Styles */
-.sacramental-ledger {
-  grid-column: 1 / -1;
-}
+/* ── Sacramental ledger ── */
+.sacramental-ledger { grid-column: 1 / -1 }
 
 .ledger-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.1rem;
+  padding-bottom: .9rem;
+  border-bottom: 1.5px solid rgba(184,137,30,.25);
 }
-
-.ledger-heading h3 {
-  margin: 0.15rem 0 0;
-  color: #17211d;
-  font-size: 1.35rem;
-}
-
-.sacramental-form-modal {
-  z-index: 12;
-}
-
-.sacramental-record-form {
-  width: min(900px, 100%);
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.sacramental-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  padding: 1rem 0;
-}
-
-.sacramental-form-grid label {
-  display: grid;
-  gap: .35rem;
-  font-weight: 600;
-}
-
-.sacramental-form-grid input,
-.sacramental-form-grid textarea {
-  box-sizing: border-box;
-  width: 100%;
-  padding: .65rem;
-  border: 1px solid #D3BC8D;
-  font: inherit;
-}
-
-.sacramental-form-grid textarea {
-  min-height: 5rem;
-  resize: vertical;
-}
-
-@media (max-width: 700px) {
-  .sacramental-form-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.ledger-heading h3 { margin: .1rem 0 0; color: #161c18; font-size: 1.2rem; font-weight: 700 }
 
 .sacramental-search {
-  background: rgba(255, 255, 255, .86);
-  padding: 1.25rem;
-  border: 1px solid #e2ddd1;
+  background: #ffffff;
+  padding: 1.15rem;
+  border: 1px solid rgba(30,40,34,.1);
   border-radius: 12px;
-  margin-bottom: 1.5rem;
-  box-shadow: 0 12px 30px rgba(42, 34, 19, .06);
+  margin-bottom: 1.25rem;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04);
 }
-
 .search-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: .65rem;
 }
 
 .search-select,
 .search-input,
 .search-date {
-  padding: 0.6rem 0.85rem;
-  border: 1px solid #d8d2c5;
+  padding: .55rem .8rem;
+  border: 1px solid rgba(30,40,34,.18);
   border-radius: 8px;
-  font-size: 0.9rem;
+  font-size: .875rem;
   font-family: inherit;
-  background: #ffffff;
-  color: #17211d;
-  min-width: 160px;
+  background: #f8f5ef;
+  color: #161c18;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
-
 .search-select:focus,
 .search-input:focus,
 .search-date:focus {
   outline: none;
-  border-color: #b48628;
-  box-shadow: 0 0 0 3px rgba(197, 139, 50, .18);
-}
-
-.search-select {
-  min-width: 170px;
-}
-
-.search-date {
-  min-width: 150px;
+  border-color: #b8891e;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.14);
 }
 
 .sacramental-table-container {
-  background: rgba(255, 255, 255, .86);
-  border: 1px solid #e2ddd1;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.1);
   border-radius: 12px;
   overflow-x: auto;
-  box-shadow: 0 12px 30px rgba(42, 34, 19, .06);
+  max-height: 65vh;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(22,28,24,.04);
 }
 
-.loading-overlay {
-  padding: 3rem;
-  text-align: center;
-  color: #4f5c54;
-}
-
-.empty-state {
-  padding: 3rem;
-  text-align: center;
-  color: #4f5c54;
-  font-size: .92rem;
-}
+.loading-overlay { padding: 3rem; text-align: center; color: #7a8a80 }
+.empty-state     { padding: 3rem; text-align: center; color: #7a8a80; font-size: .9rem }
 
 .sacramental-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: .875rem;
 }
-
-.sacramental-table thead {
-  background: #f4f1e9;
-}
-
-.sacramental-table th {
-  padding: 0.85rem 1rem;
+.sacramental-table thead { background: #f2ede4 }
+.sacramental-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f2ede4;
+  padding: .8rem 1rem;
   text-align: left;
-  font-weight: 600;
-  color: #35453d;
-  border-bottom: 2px solid #e2ddd1;
+  font-weight: 700;
+  font-size: .7rem;
+  color: #3d4840;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  border-bottom: 1.5px solid rgba(30,40,34,.12);
   white-space: nowrap;
 }
-
 .sacramental-table td {
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid #ece8df;
-  color: #26342d;
+  padding: .8rem 1rem;
+  border-bottom: 1px solid rgba(30,40,34,.07);
+  color: #3d4840;
   vertical-align: middle;
 }
-
-.sacramental-table tbody tr:hover {
-  background: #faf8f2;
-}
-
-.sacramental-table tbody tr:last-child td {
-  border-bottom: none;
-}
+.sacramental-table tbody tr:nth-child(even) { background: #faf8f3 }
+.sacramental-table tbody tr:hover { background: #f2ede4 }
+.sacramental-table tbody tr:last-child td { border-bottom: none }
+.sacramental-table td:nth-child(3) { font-weight: 600; color: #161c18 }
 
 .sacrament-badge {
   display: inline-block;
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
+  padding: .22rem .65rem;
+  border-radius: 99px;
+  font-size: .7rem;
   font-weight: 700;
   text-transform: capitalize;
 }
+.sacrament-badge.baptism      { background: #e3f0f5; color: #1d4d5c; border: 1px solid rgba(29,77,92,.2) }
+.sacrament-badge.confirmation { background: #f5eedb; color: #6b4a09; border: 1px solid rgba(107,74,9,.2) }
+.sacrament-badge.marriage     { background: #f5e4ec; color: #6e2340; border: 1px solid rgba(110,35,64,.2) }
+.sacrament-badge.death        { background: #ebebeb; color: #3e4842; border: 1px solid rgba(62,72,66,.2) }
 
-.sacrament-badge.baptism {
-  background: #e6f0f3;
-  color: #245666;
-}
+.has-scan { color: #2d5d40; font-size: 1.05rem }
+.no-scan  { color: rgba(30,40,34,.25) }
 
-.sacrament-badge.confirmation {
-  background: #f1ead8;
-  color: #72520b;
-}
-
-.sacrament-badge.marriage {
-  background: #f5e5eb;
-  color: #7a3048;
-}
-
-.sacrament-badge.death {
-  background: #e7e9e7;
-  color: #3e4842;
-}
-
-.has-scan {
-  color: #6F4E37;
-  font-size: 1.1rem;
-}
-
-.no-scan {
-  color: #D3BC8D;
-}
-
+/* ── Pagination ── */
 .pagination {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  padding: 1rem;
-  border-top: 1px solid #D3BC8D;
+  gap: .9rem;
+  padding: .85rem;
+  border-top: 1px solid rgba(30,40,34,.1);
 }
-
 .pagination-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid #DA9100;
-  background: #D3BC8D;
-  color: #DA9100;
-  border-radius: 4px;
+  padding: .45rem .95rem;
+  border: 1px solid rgba(184,137,30,.45);
+  background: #f8f5ef;
+  color: #b8891e;
+  border-radius: 8px;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s ease;
+  font-weight: 600;
+  font-size: .83rem;
+  transition: background .15s, border-color .15s;
+}
+.pagination-btn:hover:not(:disabled) { background: #f2ede4; border-color: #b8891e }
+.pagination-btn:disabled { opacity: .4; cursor: not-allowed }
+.pagination-info { color: #7a8a80; font-size: .83rem; font-variant-numeric: tabular-nums }
+
+/* ── Service request modal ── */
+.service-request-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(22,28,24,.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: modal-backdrop-in .18s ease both;
+}
+@keyframes modal-backdrop-in { from { opacity: 0 } to { opacity: 1 } }
+
+.service-request-modal-card {
+  grid-column: unset !important;
+  width: min(580px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(22,28,24,.25);
+  animation: modal-card-in .22s ease both;
+}
+@keyframes modal-card-in {
+  from { opacity: 0; transform: translateY(12px) scale(.98) }
+  to   { opacity: 1; transform: translateY(0)  scale(1) }
 }
 
-.pagination-btn:hover:not(:disabled) {
-  background: #D3BC8D;
+.service-request-modal-card .detail-header {
+  border-radius: 16px 16px 0 0;
 }
+.service-request-modal-card .detail-header h3 { color: #161c18 }
+.service-request-modal-card .detail-content   { border-radius: 0 0 16px 16px }
+.service-request-modal-card .detail-row label { color: #3d4840 }
+.service-request-modal-card .detail-row span  { color: #161c18 }
+.service-request-modal-card .detail-request label { color: #3d4840 }
 
-.pagination-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.service-request-modal-card textarea {
+  width: 100%;
+  padding: .6rem .8rem;
+  border: 1px solid rgba(30,40,34,.2);
+  border-radius: 8px;
+  font-size: .875rem;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  background: #f8f5ef;
+  color: #161c18;
+  transition: border-color .15s, box-shadow .15s;
 }
-
-.pagination-info {
-  color: #6F4E37;
-  font-size: 0.85rem;
+.service-request-modal-card textarea:focus {
+  outline: none;
+  border-color: #b8891e;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.15);
 }
+.service-request-modal-card .detail-actions .primary-btn {
+  background: #c9941f;
+  color: #ffffff;
+}
+.service-request-modal-card .detail-actions .primary-btn:hover { background: #b8891e }
+.service-request-modal-card .detail-actions .danger-btn {
+  background: rgba(139,48,41,.1);
+  color: #7d2a25;
+  border: 1px solid rgba(139,48,41,.2);
+}
+.service-request-modal-card .detail-actions .danger-btn:hover { background: rgba(139,48,41,.18) }
+.service-request-modal-card .detail-actions .secondary-btn {
+  background: #f2ede4;
+  color: #3d4840;
+  border: 1px solid rgba(30,40,34,.14);
+}
+.service-request-modal-card .detail-actions .secondary-btn:hover { background: #e8e2d8 }
 
-/* Sacramental Detail Modal */
+/* ── Sacramental detail modal ── */
 .sacramental-detail-modal {
   grid-column: 1 / -1;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 14px;
   overflow: hidden;
-  margin-top: 2rem;
-  box-shadow: 0 4px 16px #000000;
+  margin-top: 1.5rem;
+  box-shadow: 0 12px 36px rgba(22,28,24,.12);
 }
+.sacramental-detail-modal .detail-content { background: #ffffff }
 
-.sacramental-detail-modal .detail-content {
-  background: #D3BC8D;
-}
+.scanned-link { color: #b8891e; text-decoration: none; font-weight: 600 }
+.scanned-link:hover { text-decoration: underline }
 
-.scanned-link {
-  color: #DA9100;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.scanned-link:hover {
-  text-decoration: underline;
-}
-
-/* Archive Upload Modal */
+/* ── Archive upload modal ── */
 .archive-upload-modal {
   grid-column: 1 / -1;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 14px;
   overflow: hidden;
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   max-height: 80vh;
   overflow-y: auto;
 }
 
 .archive-upload-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .85rem;
+  margin-bottom: 1.35rem;
 }
-
 .archive-upload-form label {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  font-weight: 500;
-  color: #000000;
-  font-size: 0.9rem;
+  gap: .35rem;
+  font-weight: 700;
+  color: #3d4840;
+  font-size: .82rem;
 }
-
 .archive-upload-form input,
 .archive-upload-form select,
 .archive-upload-form textarea {
-  padding: 0.6rem 0.85rem;
-  border: 1px solid #D3BC8D;
-  border-radius: 4px;
-  font-size: 0.9rem;
+  padding: .55rem .8rem;
+  border: 1px solid rgba(30,40,34,.18);
+  border-radius: 8px;
+  font-size: .875rem;
   font-family: inherit;
+  background: #f8f5ef;
+  color: #161c18;
+  transition: border-color .15s, box-shadow .15s;
 }
-
 .archive-upload-form input:focus,
 .archive-upload-form select:focus,
 .archive-upload-form textarea:focus {
   outline: none;
-  border-color: #DA9100;
-  box-shadow: 0 0 0 3px #000000;
+  border-color: #b8891e;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.14);
 }
+.archive-select:disabled { opacity: .55 }
 
-.archive-select:disabled {
-  background: #D3BC8D;
-  color: #6F4E37;
-}
-
-.archives-list {
-  border-top: 1px solid #D3BC8D;
-  padding-top: 1.5rem;
-}
-
-.archives-list h4 {
-  margin: 0 0 1rem;
-  color: #000000;
-  font-size: 1rem;
-}
-
-.archives-list ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
+.archives-list { border-top: 1px solid rgba(30,40,34,.09); padding-top: 1.35rem }
+.archives-list h4 { margin: 0 0 .85rem; color: #161c18; font-size: .95rem; font-weight: 700 }
+.archives-list ul { list-style: none; padding: 0; margin: 0 }
 
 .archive-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.85rem 1rem;
-  background: #D3BC8D;
-  border: 1px solid #D3BC8D;
-  border-radius: 6px;
-  margin-bottom: 0.75rem;
+  padding: .8rem .95rem;
+  background: #f8f5ef;
+  border: 1px solid rgba(30,40,34,.09);
+  border-radius: 9px;
+  margin-bottom: .6rem;
+  transition: background .15s;
 }
+.archive-item:hover { background: #f2ede4 }
 
-.archive-info {
-  flex: 1;
-}
-
-.archive-info strong {
-  display: block;
-  color: #000000;
-  margin-bottom: 0.25rem;
-}
-
-.archive-info small {
-  display: block;
-  color: #6F4E37;
-  font-size: 0.8rem;
-}
-
-.archive-info p {
-  margin: 0.5rem 0 0;
-  color: #000000;
-  font-size: 0.85rem;
-}
+.archive-info strong { display: block; color: #161c18; font-weight: 600; margin-bottom: .18rem; font-size: .875rem }
+.archive-info small  { display: block; color: #7a8a80; font-size: .78rem }
+.archive-info p      { margin: .35rem 0 0; color: #3d4840; font-size: .83rem }
 
 .archive-link {
-  padding: 0.5rem 1rem;
-  background: #DA9100;
-  color: #000000;
+  padding: .42rem .85rem;
+  background: #c9941f;
+  color: #ffffff;
   text-decoration: none;
-  border-radius: 4px;
-  font-weight: 500;
-  font-size: 0.85rem;
-  transition: all 0.2s ease;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: .8rem;
+  transition: background .15s, transform .12s;
 }
+.archive-link:hover { background: #b8891e; transform: translateY(-1px) }
 
-.archive-link:hover {
-  background: #DA9100;
+/* ══ Responsive ══════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .dashboard-summary { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .admin-panel { grid-template-columns: 1fr }
 }
-
-@media (max-width: 768px) {
-  .search-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .search-select,
-  .search-input,
-  .search-date {
-    min-width: 100%;
-  }
-
-  .sacramental-table {
-    min-width: 700px;
-  }
-
-  .archive-upload-form {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 760px) {
+  .dashboard-summary, .dashboard-grid { grid-template-columns: 1fr }
+  .admin-tabs { gap: .25rem }
+  .admin-tab  { padding: .65rem .75rem; font-size: .85rem }
+  .admin-event-row,
+  .admin-prayer-row { flex-direction: column; align-items: flex-start }
+  .admin-buttons { width: 100% }
+  .admin-buttons button { flex: 1; min-width: 80px }
+  .detail-row { grid-template-columns: 1fr }
+  .detail-actions { flex-direction: column }
+  .detail-actions button { width: 100% }
+  .admin-service-list { padding: 1rem }
+  .service-request-cards { grid-template-columns: 1fr; max-height: 420px }
+  .search-row { grid-template-columns: 1fr }
+  .sacramental-table { min-width: 700px }
+  .archive-upload-form { grid-template-columns: 1fr }
 }
-
-/* Sacramental Ledger polish */
-.sacramental-ledger .ledger-heading {
-  padding-bottom: 1rem;
-  border-bottom: 2px solid #d3bc8d;
-}
-
-.sacramental-search .search-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 0.75rem;
-}
-
-.sacramental-search .search-input,
-.sacramental-search .search-select,
-.sacramental-search .search-date {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.sacramental-table-container {
-  max-height: 65vh;
-  overflow: auto;
-}
-
-.sacramental-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #f4f1e9;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-}
-
-.sacramental-table tbody tr:nth-child(even) {
-  background: #fbf9f4;
-}
-
-.sacramental-table tbody tr:hover {
-  background: #f3ecda;
-}
-
-.sacramental-table td:nth-child(3) {
-  font-weight: 600;
+@media (max-width: 480px) {
+  .dashboard-summary { grid-template-columns: 1fr }
 }

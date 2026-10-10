@@ -138,6 +138,17 @@ export function isValidGalleryContent(content) {
     && value.length <= 2000
     && (/^https?:\/\//i.test(value) || value.startsWith('/assets/') || value.startsWith('/uploads/'));
 
+  // A photo entry is either a plain URL string or an object with url + optional descriptions.
+  const isOptionalText = (value, max) => value === undefined || (typeof value === 'string' && value.length <= max);
+  const isPhotoEntry = entry => {
+    if (typeof entry === 'string') return isPhotoUrl(entry);
+    return entry && typeof entry === 'object' && !Array.isArray(entry)
+      && isPhotoUrl(entry.url)
+      && isOptionalText(entry.description, 1000)
+      && isOptionalText(entry.descriptionTl, 1000);
+  };
+  const photoEntryUrl = entry => (typeof entry === 'string' ? entry : entry?.url);
+
   return Boolean(content) && typeof content === 'object' && !Array.isArray(content)
     && typeof content.heading === 'string'
     && content.heading.length <= 300
@@ -153,9 +164,9 @@ export function isValidGalleryContent(content) {
         Array.isArray(item.photos)
         && item.photos.length > 0
         && item.photos.length <= 100
-        && item.photos.every(isPhotoUrl)
-        && item.photos.includes(item.image)
-        && new Set(item.photos).size === item.photos.length
+        && item.photos.every(isPhotoEntry)
+        && item.photos.map(photoEntryUrl).includes(item.image)
+        && new Set(item.photos.map(photoEntryUrl)).size === item.photos.length
       )));
 }
 

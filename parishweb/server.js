@@ -637,17 +637,56 @@ app.post('/api/certificate-requests', async (req, res) => {
 
     // Send confirmation email if configured
     const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Certificate Request Received</h2>
-        <p>Dear ${escapeHtml(firstName)},</p>
-        <p>We have received your request for a <strong>${escapeHtml(certificateType)}</strong> certificate.
-           The parish office will review it and confirm your appointment.</p>
-        <div style="background:#f5f5f5;padding:20px;border-radius:8px;margin:20px 0;">
-          <p><strong>Reference code:</strong> <span style="font-family:monospace;font-size:1.2em;letter-spacing:.1em">${escapeHtml(referenceCode)}</span></p>
-          <p><strong>Preferred date:</strong> ${escapeHtml(preferredDate)} at ${escapeHtml(preferredTime)}</p>
+      <div style="font-family: Georgia, 'Times New Roman', serif; background-color: #f9f6f0; margin: 0; padding: 0;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-top: 4px solid #8b1a1a;">
+
+          <!-- Header -->
+          <div style="background-color: #8b1a1a; padding: 32px 40px 28px; text-align: center;">
+            <p style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #f0c96e;">Saint John Parish</p>
+            <h1 style="margin: 0; font-family: Georgia, serif; font-size: 24px; font-weight: normal; color: #ffffff; letter-spacing: 0.5px;">Certificate Request Received</h1>
+          </div>
+
+          <!-- Body -->
+          <div style="padding: 36px 40px 28px;">
+            <p style="margin: 0 0 20px; font-size: 16px; color: #2c2c2c; line-height: 1.6;">Dear ${escapeHtml(firstName)},</p>
+            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
+              We have received your request for a <strong style="color: #1a1a1a;">${escapeHtml(certificateType)}</strong> certificate.
+              The parish office will review your request and confirm your appointment shortly.
+            </p>
+
+            <!-- Details card -->
+            <div style="background-color: #faf8f4; border-left: 3px solid #8b1a1a; border-radius: 0 6px 6px 0; padding: 24px 28px; margin: 0 0 28px;">
+              <p style="margin: 0 0 6px; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #888888;">Your Reference Code</p>
+              <p style="margin: 0 0 20px; font-family: 'Courier New', monospace; font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #8b1a1a;">${escapeHtml(referenceCode)}</p>
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px; border-top: 1px solid #ede8df;">
+                <tr>
+                  <td style="padding: 10px 0 7px; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px;">Preferred Date</td>
+                  <td style="padding: 10px 0 7px; color: #1a1a1a; font-size: 15px;">${escapeHtml(preferredDate)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Preferred Time</td>
+                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(preferredTime)}</td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
+              Keep your reference code safe — you can use it to check the status of your request anytime on the Services page.
+            </p>
+
+            <p style="margin: 0; font-size: 13px; color: #888888; line-height: 1.6; font-family: Arial, sans-serif;">
+              If you did not submit this request, you can safely ignore this email. For any concerns, please contact the parish office directly.
+            </p>
+          </div>
+
+          <!-- Footer -->
+          <div style="background-color: #f2ede4; border-top: 1px solid #e0d8cc; padding: 20px 40px; text-align: center;">
+            <p style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #888888; line-height: 1.6;">
+              Saint John Parish &nbsp;·&nbsp; This is an automated message, please do not reply directly to this email.
+            </p>
+          </div>
+
         </div>
-        <p>Keep your reference code ï¿½ you can use it to check your request status on the Services page.</p>
-        <p>Best regards,<br>Saint John Parish</p>
       </div>
     `;
     await sendEmail(String(email).trim().toLowerCase(), 'Certificate Request Received', emailHtml);
@@ -774,7 +813,7 @@ app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
   res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
 });
 
-// Public access is limited to files referenced by an event's PhotoUrl; other uploads stay private.
+// Public access is limited to files referenced by an event or published site content.
 app.get('/uploads/:filename', async (req, res) => {
   const filename = String(req.params.filename || '');
   if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
@@ -789,7 +828,7 @@ app.get('/uploads/:filename', async (req, res) => {
         WHERE EXISTS (SELECT 1 FROM dbo.Events WHERE PhotoUrl = @url)
            OR EXISTS (
              SELECT 1 FROM dbo.SiteContent
-             WHERE ContentKey = 'gallery' AND ContentJson LIKE '%' + @url + '%'
+             WHERE ContentKey IN ('about', 'gallery') AND ContentJson LIKE '%' + @url + '%'
            )
       `);
     const filePath = path.join(uploadDirectory, filename);
@@ -1200,23 +1239,66 @@ app.post('/api/service-requests', async (req, res) => {
 
     // Send confirmation email
     const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Service Booking Confirmation</h2>
-        <p>Dear ${escapeHtml(firstName)},</p>
-        <p>Thank you for booking a service with us! Here are your booking details:</p>
+      <div style="font-family: Georgia, 'Times New Roman', serif; background-color: #f9f6f0; margin: 0; padding: 0;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-top: 4px solid #8b1a1a;">
 
-        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <p><strong>Service ID:</strong> ${escapeHtml(String(serviceId))}</p>
-          <p><strong>Scheduled Date:</strong> ${escapeHtml(scheduledDate)}</p>
-          <p><strong>Scheduled Time:</strong> ${escapeHtml(scheduledTime)}</p>
-          ${notes ? `<p><strong>Notes:</strong> ${escapeHtml(notes)}</p>` : ''}
+          <!-- Header -->
+          <div style="background-color: #8b1a1a; padding: 32px 40px 28px; text-align: center;">
+            <p style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #f0c96e;">Saint John Parish</p>
+            <h1 style="margin: 0; font-family: Georgia, serif; font-size: 24px; font-weight: normal; color: #ffffff; letter-spacing: 0.5px;">Service Booking Confirmation</h1>
+          </div>
+
+          <!-- Body -->
+          <div style="padding: 36px 40px 28px;">
+            <p style="margin: 0 0 20px; font-size: 16px; color: #2c2c2c; line-height: 1.6;">Dear ${escapeHtml(firstName)},</p>
+            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
+              Thank you for reaching out to Saint John Parish. We have received your service booking and it is now pending verification. Please find your booking details below.
+            </p>
+
+            <!-- Details card -->
+            <div style="background-color: #faf8f4; border-left: 3px solid #8b1a1a; border-radius: 0 6px 6px 0; padding: 24px 28px; margin: 0 0 28px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <tr>
+                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px;">Booking&nbsp;ID</td>
+                  <td style="padding: 7px 0; color: #1a1a1a; font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold;">${escapeHtml(String(requestId))}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Date</td>
+                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(scheduledDate)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Time</td>
+                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(scheduledTime)}</td>
+                </tr>
+                ${notes ? `
+                <tr>
+                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Notes</td>
+                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 14px; line-height: 1.5; border-top: 1px solid #ede8df;">${escapeHtml(notes)}</td>
+                </tr>` : ''}
+              </table>
+            </div>
+
+            <!-- Verify CTA -->
+            <p style="margin: 0 0 16px; font-size: 15px; color: #444444; line-height: 1.7;">
+              To confirm your booking, please click the button below. Your booking will not be finalized until it has been verified.
+            </p>
+            <div style="text-align: center; margin: 28px 0 32px;">
+              <a href="${verificationLink}" style="display: inline-block; background-color: #8b1a1a; color: #ffffff; text-decoration: none; font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; padding: 14px 36px; border-radius: 3px;">Verify My Booking</a>
+            </div>
+
+            <p style="margin: 0; font-size: 13px; color: #888888; line-height: 1.6; font-family: Arial, sans-serif;">
+              If you did not make this booking, you can safely ignore this email. For any changes or concerns, please contact the parish office directly.
+            </p>
+          </div>
+
+          <!-- Footer -->
+          <div style="background-color: #f2ede4; border-top: 1px solid #e0d8cc; padding: 20px 40px; text-align: center;">
+            <p style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #888888; line-height: 1.6;">
+              Saint John Parish &nbsp;·&nbsp; This is an automated message, please do not reply directly to this email.
+            </p>
+          </div>
+
         </div>
-
-        <p>Please click the link below to verify your booking:</p>
-        <p><a href="${verificationLink}" style="background-color: #d4af37; color: #1a1a1a; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Booking</a></p>
-
-        <p>If you did not make this booking or need to make changes, please contact us.</p>
-        <p>Best regards,<br>Saint John Parish</p>
       </div>
     `;
 

@@ -42,10 +42,24 @@ export type ContactContent = {
   formDescriptionTl?: string
 }
 
+export type GalleryPhoto = string | { url: string; description?: string; descriptionTl?: string }
+
+export function galleryPhotoUrl(photo: GalleryPhoto): string {
+  return typeof photo === 'string' ? photo : photo.url
+}
+
+export function galleryPhotoDescription(photo: GalleryPhoto): string {
+  return typeof photo === 'string' ? '' : (photo.description ?? '')
+}
+
+export function galleryPhotoDescriptionTl(photo: GalleryPhoto): string {
+  return typeof photo === 'string' ? '' : (photo.descriptionTl ?? '')
+}
+
 export type GalleryContent = {
   heading: string
   headingTl?: string
-  items: Array<{ id: string; title: string; titleTl?: string; image: string; photos?: string[] }>
+  items: Array<{ id: string; title: string; titleTl?: string; image: string; photos?: GalleryPhoto[] }>
 }
 
 export type FooterContent = {

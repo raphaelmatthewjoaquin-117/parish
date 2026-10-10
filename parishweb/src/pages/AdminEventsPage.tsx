@@ -1105,15 +1105,26 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   onChange={e => setForm({ ...form, locationTl: e.target.value })}
                 />
               </label>
-              <label>
-                Event photo
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
-                />
-                {photoFile && <small>Selected: {photoFile.name}</small>}
-              </label>
+              <div className="upload-field">
+                <span className="upload-field-label">Event photo</span>
+                <label className={`upload-tile${photoFile ? ' upload-tile--ready' : ''}`} aria-label="Upload event photo">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
+                  />
+                  <span className="upload-tile-icon" aria-hidden="true">{photoFile ? '✓' : '+'}</span>
+                  <span className="upload-tile-name">{photoFile ? photoFile.name : 'Choose photo'}</span>
+                  {photoFile && (
+                    <button
+                      type="button"
+                      className="upload-tile-clear"
+                      aria-label="Clear selected photo"
+                      onClick={e => { e.preventDefault(); setPhotoFile(null) }}
+                    >✕</button>
+                  )}
+                </label>
+              </div>
               {error && <p className="error-message">{error}</p>}
               <div className="button-row">
                 <button type="submit" disabled={saving}>
@@ -1874,10 +1885,22 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 Notes
                 <textarea rows={3} placeholder="Optional notes about this archival page..." value={archiveNotes} onChange={event => setArchiveNotes(event.target.value)} />
               </label>
-              <label>
-                Scan File (PDF, PNG, JPG, TIFF - max 20MB)
-                <input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={event => setArchiveFile(event.target.files?.[0] || null)} />
-              </label>
+              <div className="upload-field">
+                <span className="upload-field-label">Scan File <span style={{ fontWeight: 400, color: '#7a8a80' }}>(PDF, PNG, JPG, TIFF · max 20 MB)</span></span>
+                <label className={`upload-tile${archiveFile ? ' upload-tile--ready' : ''}`} aria-label="Upload scan file">
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={event => setArchiveFile(event.target.files?.[0] || null)} />
+                  <span className="upload-tile-icon" aria-hidden="true">{archiveFile ? '✓' : '+'}</span>
+                  <span className="upload-tile-name">{archiveFile ? archiveFile.name : 'Choose file'}</span>
+                  {archiveFile && (
+                    <button
+                      type="button"
+                      className="upload-tile-clear"
+                      aria-label="Clear selected file"
+                      onClick={e => { e.preventDefault(); setArchiveFile(null) }}
+                    >✕</button>
+                  )}
+                </label>
+              </div>
               <div className="button-row">
                 <button type="button" className="primary-btn" disabled={saving} onClick={() => void uploadSacramentalArchive()}>
                   {editingArchiveId ? 'Save archive changes' : 'Upload Archive'}

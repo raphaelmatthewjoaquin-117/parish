@@ -9,7 +9,7 @@ import '../PagesCSS/AdminOperationsPage.css'
 export type AdminOperationsTab = 'schedule' | 'intentions' | 'finance' | 'applications' | 'stats' | 'service-fields'
 
 type Schedule = { id: number; title: string; date: string; time: string; location: string; priestUsername: string; notes?: string; status: string }
-type Application = { id: number; firstName: string; lastName: string; email: string; mobileNumber?: string; address?: string; serviceName: string; scheduledDate: string; scheduledTime: string; status: string; notes?: string; attendanceStatus?: string }
+// type Application = { id: number; firstName: string; lastName: string; email: string; mobileNumber?: string; address?: string; serviceName: string; scheduledDate: string; scheduledTime: string; status: string; notes?: string; attendanceStatus?: string }
 type MassIntention = { MassIntentionId: number; IntentionDate: string; IntentionTime: string; IntentionText: string; RequestedBy: string; Offering: number }
 type FinanceEntry = { FinancialEntryId: number; EntryDate: string; EntryType: string; Description: string; Amount: number; EnteredBy: string; Status?: string }
 type FinanceAudit = { AuditId: number; FinancialEntryId: number; ActionName: string; EntryType: string; Description: string; ChangedBy: string; ChangedAt: string; Details?: string }
@@ -21,7 +21,7 @@ type StatisticalReport = {
   demographics?: { baptisms?: { InfantsUnder1Yr?: number; ChildrenOver1Yr?: number }; marriages?: { AvgGroomAge?: number; AvgBrideAge?: number; Under25?: number; Age25To35?: number; Over35?: number }; deaths?: { AvgDeceasedAge?: number; Under18?: number; Age18To59?: number; Senior60Plus?: number } }
   monthlyBreakdown?: Array<Record<string, number | string>>
 }
-type ApplicationHistory = { ApplicationEditLogId: number; ChangedAt: string; ChangedBy: string }
+// type ApplicationHistory = { ApplicationEditLogId: number; ChangedAt: string; ChangedBy: string }
 type ServiceOption = { id: number; name: string }
 type ServiceField = { id: number; serviceId: number; serviceName: string; key: string; label: string; type: string; options?: string[]; required: boolean; sortOrder: number; active: boolean }
 
@@ -54,9 +54,9 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
   const [reportType, setReportType] = useState('')
   const [statsReport, setStatsReport] = useState<StatisticalReport | null>(null)
   const [statsYear, setStatsYear] = useState<number>(new Date().getFullYear())
-  const [applications, setApplications] = useState<Application[]>([])
-  const [selectedApplication, setSelectedApplication] = useState<Application | null>(null)
-  const [history, setHistory] = useState<ApplicationHistory[]>([])
+  // const [_applications, setApplications] = useState<Application[]>([])
+  // const [selectedApplication, setSelectedApplication] = useState<Application | null>(null)
+  // const [_history, setHistory] = useState<ApplicationHistory[]>([])
   const [serviceOptions, setServiceOptions] = useState<ServiceOption[]>([])
   const [serviceFields, setServiceFields] = useState<ServiceField[]>([])
   const [serviceFieldForm, setServiceFieldForm] = useState(emptyServiceField)
@@ -237,12 +237,13 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
     setReport(await apiClient.admin.financeReport(token))
   })
 
-  const selectApplication = (application: Application) => run(async () => {
+  /*
+  const _selectApplication = (application: Application) => run(async () => {
     setSelectedApplication(application)
     setHistory(await apiClient.admin.applicationHistory(application.id, token))
   })
 
-  const updateApplication = (event: React.FormEvent) => {
+  const _updateApplication = (event: React.FormEvent) => {
     event.preventDefault()
     if (!selectedApplication) return
     run(async () => {
@@ -252,6 +253,7 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
       setHistory(await apiClient.admin.applicationHistory(selectedApplication.id, token))
     })
   }
+  */
 
   const saveServiceField = (event: React.FormEvent) => {
     event.preventDefault()

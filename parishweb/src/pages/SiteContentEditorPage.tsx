@@ -5,10 +5,14 @@ import {
   defaultContactContent,
   defaultFooterContent,
   defaultGalleryContent,
+  galleryPhotoUrl,
+  galleryPhotoDescription,
+  galleryPhotoDescriptionTl,
   type AboutContent,
   type ContactContent,
   type FooterContent,
   type GalleryContent,
+  type GalleryPhoto,
 } from '../content/siteContent'
 import '../PagesCSS/SiteContentEditorPage.css'
 
@@ -48,6 +52,111 @@ const getImageUrl = (image: string) => (
   image.startsWith('/uploads/') ? `${API_BASE_URL}${image}` : image
 )
 
+/* ── Photo description modal ────────────────────────────── */
+function PhotoDescModal({
+  photoUrl,
+  imagePreviewUrl,
+  description,
+  descriptionTl,
+  onDescriptionChange,
+  onDescriptionTlChange,
+  onSave,
+  onClose,
+}: {
+  photoUrl: string
+  imagePreviewUrl?: string
+  description: string
+  descriptionTl: string
+  onDescriptionChange: (val: string) => void
+  onDescriptionTlChange: (val: string) => void
+  onSave: () => void
+  onClose: () => void
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  const displayUrl = imagePreviewUrl ?? getImageUrl(photoUrl)
+
+  return (
+    <div
+      className="photo-desc-modal-backdrop"
+      role="presentation"
+      onClick={onClose}
+    >
+      <dialog
+        className="photo-desc-modal"
+        open
+        aria-label="Edit photo description"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="photo-desc-modal-header">
+          <h3>Edit photo description</h3>
+          <button
+            ref={closeRef}
+            type="button"
+            className="photo-desc-modal-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="photo-desc-modal-body">
+          <img
+            src={displayUrl}
+            alt="Selected photo"
+            className="photo-desc-modal-preview"
+          />
+
+          <div className="photo-desc-modal-fields">
+            <label>
+              Description (English)
+              <textarea
+                rows={4}
+                maxLength={1000}
+                placeholder="Describe this photo (optional)"
+                value={description}
+                onChange={e => onDescriptionChange(e.target.value)}
+              />
+            </label>
+            <label>
+              Description (Tagalog, optional)
+              <textarea
+                rows={4}
+                maxLength={1000}
+                placeholder="Paglalarawan (opsyonal)"
+                value={descriptionTl}
+                onChange={e => onDescriptionTlChange(e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="photo-desc-modal-footer">
+          <button type="button" className="btn btn-outline-dark" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-dark" onClick={onSave}>
+            Save description
+          </button>
+        </div>
+      </dialog>
+    </div>
+  )
+}
+
 export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
   const [about, setAbout] = useState<AboutContent>(defaultAboutContent)
   const [gallery, setGallery] = useState<GalleryContent>(defaultGalleryContent)
@@ -57,13 +166,33 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
   const [newPhotoTitleTl, setNewPhotoTitleTl] = useState('')
   const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null)
   const [albumPhotoFiles, setAlbumPhotoFiles] = useState<Record<string, File | null>>({})
+  const [photoEditModal, setPhotoEditModal] = useState<{
+    albumId: string
+    photoUrl: string
+    description: string
+    descriptionTl: string
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const closePreviewButtonRef = useRef<HTMLButtonElement>(null)
+  const imagePreviewUrlsRef = useRef<Record<string, string>>({})
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({})
   const [previewRevision, setPreviewRevision] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState('')
+
+  useEffect(() => () => {
+    Object.values(imagePreviewUrlsRef.current).forEach(URL.revokeObjectURL)
+  }, [])
+
+  const addImagePreview = (imageUrl: string, file: File) => {
+    const previewUrl = URL.createObjectURL(file)
+    const previousPreviewUrl = imagePreviewUrlsRef.current[imageUrl]
+    if (previousPreviewUrl) URL.revokeObjectURL(previousPreviewUrl)
+    imagePreviewUrlsRef.current = { ...imagePreviewUrlsRef.current, [imageUrl]: previewUrl }
+    setImagePreviewUrls(imagePreviewUrlsRef.current)
+  }
 
   useEffect(() => {
     if (!previewOpen) return
@@ -107,6 +236,9 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
       else if (page === 'contact') await apiClient.siteContent.save(page, contact, adminToken)
       else if (page === 'footer') await apiClient.siteContent.save(page, footer, adminToken)
       else await apiClient.siteContent.save(page, gallery, adminToken)
+      Object.values(imagePreviewUrlsRef.current).forEach(URL.revokeObjectURL)
+      imagePreviewUrlsRef.current = {}
+      setImagePreviewUrls({})
       setPreviewRevision(Date.now())
       setSuccess('Changes saved and published.')
     } catch (saveError) {
@@ -128,6 +260,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     try {
       const adminToken = window.localStorage.getItem('adminToken') || ''
       const { photoUrl } = await apiClient.siteContent.uploadImage(newPhotoFile, adminToken)
+      addImagePreview(photoUrl, newPhotoFile)
       setGallery(current => ({
         ...current,
         items: [...current.items, {
@@ -170,7 +303,10 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     try {
       const adminToken = window.localStorage.getItem('adminToken') || ''
       const { photoUrl } = await apiClient.siteContent.uploadImage(file, adminToken)
-      updateGalleryItem(albumId, { photos: [...photos, photoUrl] })
+      addImagePreview(photoUrl, file)
+      // New photos start as objects so descriptions can be added later
+      const newEntry: GalleryPhoto = { url: photoUrl }
+      updateGalleryItem(albumId, { photos: [...photos, newEntry] })
       setAlbumPhotoFiles(current => ({ ...current, [albumId]: null }))
       const input = document.getElementById(`gallery-photo-${albumId}`) as HTMLInputElement | null
       if (input) input.value = ''
@@ -187,13 +323,27 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
       ...current,
       items: current.items.map(item => {
         if (item.id !== albumId) return item
-        const photos = (item.photos ?? [item.image]).filter(photo => photo !== photoUrl)
+        const photos = (item.photos ?? [item.image]).filter(photo => galleryPhotoUrl(photo) !== photoUrl)
         if (photos.length === 0) return item
         return {
           ...item,
           photos,
-          image: item.image === photoUrl ? photos[0] : item.image,
+          image: item.image === photoUrl ? galleryPhotoUrl(photos[0]) : item.image,
         }
+      }),
+    }))
+  }
+
+  const updatePhotoDescription = (albumId: string, photoUrl: string, description: string, descriptionTl: string) => {
+    setGallery(current => ({
+      ...current,
+      items: current.items.map(item => {
+        if (item.id !== albumId) return item
+        const photos = (item.photos ?? [item.image]).map(photo => {
+          if (galleryPhotoUrl(photo) !== photoUrl) return photo
+          return { url: photoUrl, description: description || undefined, descriptionTl: descriptionTl || undefined }
+        })
+        return { ...item, photos }
       }),
     }))
   }
@@ -206,6 +356,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     try {
       const adminToken = window.localStorage.getItem('adminToken') || ''
       const { photoUrl } = await apiClient.siteContent.uploadImage(file, adminToken)
+      addImagePreview(photoUrl, file)
       setAbout(current => ({ ...current, heroImage: photoUrl }))
       setSuccess('Banner image uploaded. Save changes to publish it.')
     } catch (uploadError) {
@@ -275,13 +426,17 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
               Intro line (Tagalog)
               <input value={about.introTl ?? ''} maxLength={1000} onChange={event => setAbout(current => ({ ...current, introTl: event.target.value }))} />
             </label>
-            <label>
-              Banner image (optional)
-              <input type="file" accept="image/*" disabled={saving} onChange={event => { void uploadHeroImage(event.target.files?.[0]); event.target.value = '' }} />
-            </label>
+            <div className="upload-field">
+              <span className="upload-field-label">Banner image <span style={{ fontWeight: 400, color: '#6b746d' }}>(optional)</span></span>
+              <label className={`upload-tile${saving ? ' upload-tile--uploading' : ''}`} aria-label="Upload banner image">
+                <input type="file" accept="image/*" disabled={saving} onChange={event => { void uploadHeroImage(event.target.files?.[0]); event.target.value = '' }} />
+                <span className="upload-tile-icon" aria-hidden="true">{saving ? '…' : '+'}</span>
+                <span className="upload-tile-name">{saving ? 'Uploading…' : 'Choose image'}</span>
+              </label>
+            </div>
             {about.heroImage && (
               <div className="site-content-row">
-                <img src={getImageUrl(about.heroImage)} alt="Banner preview" style={{ maxWidth: 240, borderRadius: 6 }} />
+                <img src={imagePreviewUrls[about.heroImage] ?? getImageUrl(about.heroImage)} alt="Banner preview" style={{ maxWidth: 240, borderRadius: 6 }} />
                 <button type="button" className="btn btn-outline-danger" onClick={() => setAbout(current => ({ ...current, heroImage: undefined }))}>Remove banner image</button>
               </div>
             )}
@@ -594,74 +749,6 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
             Page heading (Tagalog)
             <input value={gallery.headingTl ?? ''} maxLength={300} onChange={event => setGallery(current => ({ ...current, headingTl: event.target.value }))} />
           </label>
-          <div className="site-content-list-heading">
-            <h3>Gallery albums</h3>
-            <span>{gallery.items.length} albums</span>
-          </div>
-          {gallery.items.map(item => (
-            <div className="site-content-row site-content-gallery-item" key={item.id}>
-              <img
-                src={`${getImageUrl(item.image)}${item.image.startsWith('/uploads/') ? `?preview=${previewRevision}` : ''}`}
-                alt={`${item.title} cover`}
-              />
-              <label>
-                Album title
-                <input value={item.title} maxLength={200} onChange={event => updateGalleryItem(item.id, { title: event.target.value })} />
-              </label>
-              <label>
-                Album title (Tagalog)
-                <input value={item.titleTl ?? ''} maxLength={200} onChange={event => updateGalleryItem(item.id, { titleTl: event.target.value })} />
-              </label>
-              <button type="button" className="btn btn-outline-danger" disabled={saving} onClick={() => setGallery(current => ({
-                ...current,
-                items: current.items.filter(album => album.id !== item.id),
-              }))}>Remove album</button>
-              <div className="site-content-album-photos">
-                <label>
-                  Cover photo for {item.title}
-                  <select value={item.image} onChange={event => updateGalleryItem(item.id, { image: event.target.value })}>
-                    {(item.photos ?? [item.image]).map((photo, index) => (
-                      <option key={photo} value={photo}>Photo {index + 1}</option>
-                    ))}
-                  </select>
-                </label>
-                {(item.photos ?? [item.image]).map((photo, index, photos) => (
-                  <div className="site-content-album-photo" key={photo}>
-                    <img
-                      src={`${getImageUrl(photo)}${photo.startsWith('/uploads/') ? `?preview=${previewRevision}` : ''}`}
-                      alt={`${item.title} photo ${index + 1}`}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline-danger"
-                      disabled={saving || photos.length <= 1}
-                      onClick={() => removeAlbumPhoto(item.id, photo)}
-                    >
-                      Remove photo {index + 1} from {item.title}
-                    </button>
-                  </div>
-                ))}
-                <label>
-                  Add photo to {item.title}
-                  <input
-                    id={`gallery-photo-${item.id}`}
-                    type="file"
-                    accept="image/*"
-                    disabled={saving || (item.photos?.length ?? 1) >= 100}
-                    onChange={event => setAlbumPhotoFiles(current => ({ ...current, [item.id]: event.target.files?.[0] ?? null }))}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-outline-dark"
-                  disabled={saving || !albumPhotoFiles[item.id]}
-                  onClick={() => void addPhotoToAlbum(item.id)}
-                >
-                  Upload photo to {item.title}
-                </button>
-              </div>
-            </div>
-          ))}
 
           <div className="site-content-add-photo">
             <h3>Create an album</h3>
@@ -673,15 +760,158 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
               New album title (Tagalog, optional)
               <input value={newPhotoTitleTl} maxLength={200} onChange={event => setNewPhotoTitleTl(event.target.value)} />
             </label>
-            <label>
-              New album photo
-              <input id="gallery-photo-file" type="file" accept="image/*" onChange={event => setNewPhotoFile(event.target.files?.[0] || null)} />
-            </label>
+            <div className="upload-field">
+              <span className="upload-field-label">New album photo</span>
+              <label className={`upload-tile${newPhotoFile ? ' upload-tile--ready' : ''}`} aria-label="Choose cover photo for new album">
+                <input id="gallery-photo-file" type="file" accept="image/*" onChange={event => setNewPhotoFile(event.target.files?.[0] || null)} />
+                <span className="upload-tile-icon" aria-hidden="true">{newPhotoFile ? '✓' : '+'}</span>
+                <span className="upload-tile-name">{newPhotoFile ? newPhotoFile.name : 'Choose photo'}</span>
+                {newPhotoFile && (
+                  <button
+                    type="button"
+                    className="upload-tile-clear"
+                    aria-label="Clear selected photo"
+                    onClick={e => { e.preventDefault(); setNewPhotoFile(null) }}
+                  >✕</button>
+                )}
+              </label>
+            </div>
             <button type="button" className="btn btn-outline-dark" disabled={saving || gallery.items.length >= 100} onClick={() => void addGalleryPhoto()}>
               Create album
             </button>
             <small>Images must be under 5 MB. You can add up to 100 albums; new albums and photos appear publicly after saving changes.</small>
           </div>
+
+          <div className="site-content-list-heading">
+            <h3>Gallery albums</h3>
+            <span>{gallery.items.length} album{gallery.items.length !== 1 ? 's' : ''}</span>
+          </div>
+          {gallery.items.map(item => {
+            const albumPhotos = item.photos ?? [item.image]
+            return (
+              <CollapsibleSection
+                key={item.id}
+                title={item.title || 'Untitled album'}
+                subtitle={`${albumPhotos.length} photo${albumPhotos.length !== 1 ? 's' : ''}`}
+              >
+                <div className="album-editor">
+                  {/* ── Meta row: title fields + danger action ── */}
+                  <div className="album-editor-meta">
+                    <label className="album-editor-field">
+                      Album title
+                      <input value={item.title} maxLength={200} onChange={event => updateGalleryItem(item.id, { title: event.target.value })} />
+                    </label>
+                    <label className="album-editor-field">
+                      Album title (Tagalog)
+                      <input value={item.titleTl ?? ''} maxLength={200} onChange={event => updateGalleryItem(item.id, { titleTl: event.target.value })} />
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger album-editor-remove"
+                      disabled={saving}
+                      onClick={() => setGallery(current => ({
+                        ...current,
+                        items: current.items.filter(album => album.id !== item.id),
+                      }))}
+                    >
+                      Delete album
+                    </button>
+                  </div>
+
+                  {/* ── Photo grid ── */}
+                  <p className="album-editor-section-label">
+                    Photos · click a photo to edit its description
+                  </p>
+                  <div className="album-photo-grid">
+                    {albumPhotos.map((photo, index, photos) => {
+                      const url = galleryPhotoUrl(photo)
+                      const description = galleryPhotoDescription(photo)
+                      const descriptionTl = galleryPhotoDescriptionTl(photo)
+                      const isCover = url === item.image
+                      const hasDesc = !!(description || descriptionTl)
+                      return (
+                        <div
+                          key={url}
+                          className={`album-photo-tile${isCover ? ' album-photo-tile--cover' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="album-photo-tile-img-btn"
+                            aria-label={`Edit description for photo ${index + 1}`}
+                            onClick={() => setPhotoEditModal({
+                              albumId: item.id,
+                              photoUrl: url,
+                              description,
+                              descriptionTl,
+                            })}
+                          >
+                            <img
+                              src={imagePreviewUrls[url] ?? `${getImageUrl(url)}${url.startsWith('/uploads/') ? `?preview=${previewRevision}` : ''}`}
+                              alt={`${item.title} photo ${index + 1}`}
+                            />
+                            {isCover && <span className="album-photo-cover-badge" aria-hidden="true">Cover</span>}
+                            {hasDesc && <span className="album-photo-desc-badge" aria-hidden="true">✎</span>}
+                          </button>
+                          {!isCover && (
+                            <button
+                              type="button"
+                              className="album-photo-set-cover-btn"
+                              aria-label={`Set photo ${index + 1} as album cover`}
+                              onClick={() => updateGalleryItem(item.id, { image: url })}
+                            >
+                              Set cover
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="album-photo-remove-btn"
+                            aria-label={`Remove photo ${index + 1} from ${item.title}`}
+                            disabled={saving || photos.length <= 1}
+                            onClick={() => removeAlbumPhoto(item.id, url)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })}
+
+                    {/* ── Upload tile ── */}
+                    <label
+                      className={`album-photo-upload-tile${albumPhotoFiles[item.id] ? ' album-photo-upload-tile--ready' : ''}`}
+                      aria-label={`Add a photo to ${item.title}`}
+                    >
+                      <input
+                        id={`gallery-photo-${item.id}`}
+                        type="file"
+                        accept="image/*"
+                        disabled={saving || albumPhotos.length >= 100}
+                        onChange={event => setAlbumPhotoFiles(current => ({ ...current, [item.id]: event.target.files?.[0] ?? null }))}
+                      />
+                      {albumPhotoFiles[item.id] ? (
+                        <>
+                          <span className="album-upload-icon" aria-hidden="true">✓</span>
+                          <span className="album-upload-label">{albumPhotoFiles[item.id]!.name}</span>
+                          <button
+                            type="button"
+                            className="album-upload-confirm-btn"
+                            disabled={saving}
+                            onClick={event => { event.preventDefault(); void addPhotoToAlbum(item.id) }}
+                          >
+                            {saving ? 'Uploading…' : 'Upload'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="album-upload-icon" aria-hidden="true">+</span>
+                          <span className="album-upload-label">Add photo</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                </div>
+              </CollapsibleSection>
+            )
+          })}
         </div>
       )}
 
@@ -693,6 +923,27 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
           {saving ? 'Saving…' : 'Save and publish'}
         </button>
       </div>
+
+      {photoEditModal && (
+        <PhotoDescModal
+          photoUrl={photoEditModal.photoUrl}
+          imagePreviewUrl={imagePreviewUrls[photoEditModal.photoUrl]}
+          description={photoEditModal.description}
+          descriptionTl={photoEditModal.descriptionTl}
+          onDescriptionChange={val => setPhotoEditModal(m => m ? { ...m, description: val } : m)}
+          onDescriptionTlChange={val => setPhotoEditModal(m => m ? { ...m, descriptionTl: val } : m)}
+          onSave={() => {
+            updatePhotoDescription(
+              photoEditModal.albumId,
+              photoEditModal.photoUrl,
+              photoEditModal.description,
+              photoEditModal.descriptionTl,
+            )
+            setPhotoEditModal(null)
+          }}
+          onClose={() => setPhotoEditModal(null)}
+        />
+      )}
 
       {previewOpen && (
         <div className="site-content-preview-backdrop" role="presentation" onMouseDown={() => setPreviewOpen(false)}>

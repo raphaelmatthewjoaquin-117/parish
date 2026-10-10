@@ -64,6 +64,15 @@ export function UnifiedAdminPage() {
   const overrides = profile?.overrides
   const hasOverride = (module?: ModuleName) => Boolean(module && staffRole !== 'Admin' && overrides?.[module])
 
+  // Reset collapsed state when entering mobile breakpoint — the drawer is always full-width
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 760px)')
+    const handler = (e: MediaQueryListEvent) => { if (e.matches) setSidebarCollapsed(false) }
+    if (mq.matches) setSidebarCollapsed(false)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
   const refreshRole = useCallback(() => {
     const token = window.localStorage.getItem('adminToken') || ''
     if (!token) return
@@ -79,6 +88,11 @@ export function UnifiedAdminPage() {
     (hasOverride(section.module) || !section.roles || section.roles.includes(staffRole)),
   )
   const visibleSection = allowedSections.includes(activeSection) ? activeSection : allowedSections[0]
+  const visibleSectionKey = 'tab' in visibleSection
+    ? `${visibleSection.kind}-${visibleSection.tab}`
+    : 'page' in visibleSection
+      ? `${visibleSection.kind}-${visibleSection.page}`
+      : visibleSection.kind
 
   const navigate = (section: AdminSection) => {
     setActiveSection(section)
@@ -110,6 +124,14 @@ export function UnifiedAdminPage() {
         <span />
         <span />
       </button>
+      {/* Tap-outside backdrop — mobile only */}
+      {mobileOpen && (
+        <div
+          className="admin-mobile-backdrop"
+          aria-hidden="true"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
       <aside className={`admin-sidebar d-flex flex-column ${mobileOpen ? 'mobile-open' : ''}`}>
         <div className="admin-sidebar-brand">
           <div className="admin-mark">SJ</div>
@@ -153,21 +175,26 @@ export function UnifiedAdminPage() {
         <div className="admin-workspace-heading d-flex align-items-center justify-content-between gap-3">
           <div><p className="eyebrow">Staff workspace</p><h1>{visibleSection.label}</h1></div>
         </div>
-        {visibleSection.kind === 'events'
-          ? <AdminEventsPage key={`events-${visibleSection.tab}-${staffRole}`}           initialTab={visibleSection.tab} embedded overrides={overrides} />
-          : visibleSection.kind === 'operations'
-                      ? <AdminOperationsPage key={`operations-${visibleSection.tab}-${staffRole}`} initialTab={visibleSection.tab} embedded staffRole={staffRole} overrides={overrides} />
-            : visibleSection.kind === 'availability'
-              ? <AdminBookingAvailabilityPage canEdit={hasOverride('ServiceRequest') ? Boolean(overrides?.ServiceRequest?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
-            : visibleSection.kind === 'certificates'
-              ? <AdminCertificateRequestsPage />
-              : visibleSection.kind === 'content'
-                ? <SiteContentEditorPage key={`content-${visibleSection.page}`} page={visibleSection.page} />
-                : visibleSection.kind === 'messages'
-                  ? <AdminContactMessagesPage                   canDelete={hasOverride('ContactMessages') ? Boolean(overrides?.ContactMessages?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
-                                    : visibleSection.kind === 'profile'
-                                      ? <AdminProfilePage key={`profile-${profile.userName}-${profile.email}`} profile={profile} onProfileChanged={refreshRole} />
-                                      : <AdminUsersPage embedded currentRole={staffRole} onUsersChanged={refreshRole} />}
+        <div
+          key={visibleSectionKey}
+          className="admin-section-content"
+        >
+          {visibleSection.kind === 'events'
+            ? <AdminEventsPage key={`events-${visibleSection.tab}-${staffRole}`} initialTab={visibleSection.tab} embedded overrides={overrides} />
+            : visibleSection.kind === 'operations'
+              ? <AdminOperationsPage key={`operations-${visibleSection.tab}-${staffRole}`} initialTab={visibleSection.tab} embedded staffRole={staffRole} overrides={overrides} />
+              : visibleSection.kind === 'availability'
+                ? <AdminBookingAvailabilityPage canEdit={hasOverride('ServiceRequest') ? Boolean(overrides?.ServiceRequest?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
+                : visibleSection.kind === 'certificates'
+                  ? <AdminCertificateRequestsPage />
+                  : visibleSection.kind === 'content'
+                    ? <SiteContentEditorPage key={`content-${visibleSection.page}`} page={visibleSection.page} />
+                    : visibleSection.kind === 'messages'
+                      ? <AdminContactMessagesPage canDelete={hasOverride('ContactMessages') ? Boolean(overrides?.ContactMessages?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
+                      : visibleSection.kind === 'profile'
+                        ? <AdminProfilePage key={`profile-${profile.userName}-${profile.email}`} profile={profile} onProfileChanged={refreshRole} />
+                        : <AdminUsersPage embedded currentRole={staffRole} onUsersChanged={refreshRole} />}
+        </div>
       </main>
     </section>
   )

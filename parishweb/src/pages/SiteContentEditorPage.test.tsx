@@ -53,6 +53,49 @@ describe('SiteContentEditorPage', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('previews an uploaded banner locally before it is published', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:banner-preview')
+    render(<SiteContentEditorPage page="about" />)
+    const uploadLabel = await screen.findByLabelText('Upload banner image')
+    const fileInput = uploadLabel.querySelector('input[type="file"]')
+    if (!fileInput) throw new Error('Banner image input was not rendered.')
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['photo'], 'banner.jpg', { type: 'image/jpeg' })] },
+    })
+
+    expect((await screen.findByRole('img', { name: 'Banner preview' })).getAttribute('src')).toBe('blob:banner-preview')
+    expect(mockUploadImage).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save and publish' }))
+    await screen.findByText('Changes saved and published.')
+    expect(screen.getByRole('img', { name: 'Banner preview' }).getAttribute('src')).toBe('/uploads/new-photo.jpg')
+    vi.restoreAllMocks()
+  })
+
+  it('previews an uploaded album photo locally before it is published', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:album-preview')
+    mockGet.mockResolvedValue({
+      content: {
+        heading: 'Gallery',
+        items: [{ id: 'faith', title: 'Faith', image: '/assets/faith.jpg' }],
+      },
+    })
+    render(<SiteContentEditorPage page="gallery" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Faith/ }))
+    const uploadLabel = screen.getByLabelText('Add a photo to Faith')
+    const fileInput = uploadLabel.querySelector('input[type="file"]')
+    if (!fileInput) throw new Error('Album photo input was not rendered.')
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['photo'], 'second.jpg', { type: 'image/jpeg' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add a photo to Faith' }))
+
+    expect((await screen.findByRole('img', { name: 'Faith photo 2' })).getAttribute('src')).toBe('blob:album-preview')
+    expect(mockUploadImage).toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
   it('creates an album with its first uploaded photo as the cover', async () => {
     mockGet.mockResolvedValue({
       content: { heading: 'Gallery', items: [] },

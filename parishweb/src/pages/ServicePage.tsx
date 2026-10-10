@@ -497,14 +497,31 @@ export default function ServicePage(): React.JSX.Element {
                   </div>
                   <label>
                     <span className="label-text">Supporting documents <span className="cert-optional">(optional)</span></span>
-                    <div className="field-wrap">
-                      <input
-                        className="form-control"
-                        type="file"
-                        accept="application/pdf,image/*"
-                        multiple
-                        onChange={e => setCertFiles(Array.from(e.target.files || []).slice(0, 5))}
-                      />
+                    <div className="upload-field">
+                      <label className={`upload-tile${certFiles.length > 0 ? ' upload-tile--ready' : ''}`} aria-label="Upload supporting documents">
+                        <input
+                          type="file"
+                          accept="application/pdf,image/*"
+                          multiple
+                          onChange={e => setCertFiles(Array.from(e.target.files || []).slice(0, 5))}
+                        />
+                        <span className="upload-tile-icon" aria-hidden="true">{certFiles.length > 0 ? '✓' : '+'}</span>
+                        <span className="upload-tile-name">
+                          {certFiles.length > 0
+                            ? certFiles.length === 1
+                              ? certFiles[0].name
+                              : `${certFiles.length} files selected`
+                            : 'Choose files'}
+                        </span>
+                        {certFiles.length > 0 && (
+                          <button
+                            type="button"
+                            className="upload-tile-clear"
+                            aria-label="Clear selected files"
+                            onClick={e => { e.preventDefault(); setCertFiles([]) }}
+                          >✕</button>
+                        )}
+                      </label>
                     </div>
                     <small className="cert-file-hint">Up to 5 files — PDF or image, 10 MB each.</small>
                   </label>
