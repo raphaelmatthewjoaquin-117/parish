@@ -62,6 +62,18 @@ export type GalleryContent = {
   items: Array<{ id: string; title: string; titleTl?: string; image: string; photos?: GalleryPhoto[] }>
 }
 
+export type NewsContent = {
+  articles: Array<{
+    id: string
+    title: string
+    titleTl?: string
+    body: string
+    bodyTl?: string
+    date?: string
+    image?: string
+  }>
+}
+
 export type FooterContent = {
   parishTitle: string
   addressLines: string[]

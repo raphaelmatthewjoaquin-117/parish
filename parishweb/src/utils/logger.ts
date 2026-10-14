@@ -18,26 +18,22 @@ const createLogger = () => {
     timestamp: pino.stdTimeFunctions.isoTime,
   };
 
-  if (isDevelopment) {
-    // Development: pretty-print logs to console
-    return pino(
-      {
-        ...baseConfig,
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'SYS:standard',
-            ignore: 'pid,hostname',
-            singleLine: false,
-          },
-        },
-      }
-    );
-  } else {
-    // Production: structured JSON logs
+  if (!isDevelopment) {
     return pino(baseConfig);
   }
+
+  return pino({
+    ...baseConfig,
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+        singleLine: false,
+      },
+    },
+  });
 };
 
 export const logger = createLogger();
@@ -110,7 +106,11 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
  * Generate unique request ID for tracing
  */
 function generateRequestId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 /**

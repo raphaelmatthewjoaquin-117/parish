@@ -1,4 +1,5 @@
 import { getPool } from './pool.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Create a verification token for a service request
@@ -24,7 +25,7 @@ export async function createVerificationToken(serviceRequestId: number, expirati
     `;
     return token;
   } catch (error) {
-    console.error('Error creating verification token:', error);
+    logger.error({ type: 'database', action: 'verification_token_create', serviceRequestId, error }, 'Error creating verification token');
     throw error;
   }
 }
@@ -64,7 +65,7 @@ export async function verifyToken(token: string): Promise<number | null> {
 
     return serviceRequestId;
   } catch (error) {
-    console.error('Error verifying token:', error);
+    logger.error({ type: 'database', action: 'verification_token_verify', token: token.slice(0, 12), error }, 'Error verifying token');
     throw error;
   }
 }
@@ -85,11 +86,11 @@ export async function cleanupExpiredTokens(): Promise<number> {
     `;
     const deletedCount = result.rowsAffected[0] || 0;
     if (deletedCount > 0) {
-      console.log(`Cleaned up ${deletedCount} expired verification tokens`);
+      logger.info({ type: 'database', action: 'verification_tokens_cleanup', deletedCount }, 'Cleaned up expired verification tokens');
     }
     return deletedCount;
   } catch (error) {
-    console.error('Error cleaning up expired tokens:', error);
+    logger.error({ type: 'database', action: 'verification_tokens_cleanup', error }, 'Error cleaning up expired tokens');
     throw error;
   }
 }
@@ -111,7 +112,7 @@ export async function getTokenInfo(token: string): Promise<object | null> {
     `;
     return result.recordset?.[0] || null;
   } catch (error) {
-    console.error('Error getting token info:', error);
+    logger.error({ type: 'database', action: 'verification_token_lookup', token: token.slice(0, 12), error }, 'Error getting token info');
     throw error;
   }
 }
@@ -142,9 +143,9 @@ export function startTokenCleanupSchedule(intervalMinutes: number = 60): void {
     try {
       await cleanupExpiredTokens();
     } catch (error) {
-      console.error('Scheduled token cleanup failed:', error);
+      logger.error({ type: 'database', action: 'verification_tokens_cleanup_schedule', intervalMinutes, error }, 'Scheduled token cleanup failed');
     }
   }, intervalMs);
 
-  console.log(`Token cleanup scheduled every ${intervalMinutes} minutes`);
+  logger.info({ type: 'database', action: 'verification_tokens_cleanup_schedule', intervalMinutes }, `Token cleanup scheduled every ${intervalMinutes} minutes`);
 }

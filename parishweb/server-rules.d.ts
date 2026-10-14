@@ -49,11 +49,15 @@ export function servicePolicy(serviceName: string, scheduledDate: string, now?: 
 export function findScheduleConflict(candidate: ScheduleLike, existing: ScheduleLike[]): ConflictResult;
 export function findIntentionConflict(candidate: IntentionLike, existing: IntentionLike[]): { conflict: boolean; message: string | null };
 export function financeTransition(currentStatus: string, action: string): string | null;
+export function financeActionForStatus(status: string): string;
 export function isNoShowEligible(request: ServiceRequestLike, now?: Date, graceHours?: number): boolean;
 export function isUnverifiedExpired(request: ServiceRequestLike, now?: Date, expireHours?: number): boolean;
 export const ALLOWED_REQUEST_STATUSES: string[];
 export function isAllowedArchiveUpload(originalName: string, mimeType: string, size: number): boolean;
+export function isAllowedImageUpload(originalName: string, mimeType: string, size: number): boolean;
+export function hasValidImageSignature(mimeType: string, bytes: Uint8Array): boolean;
 export function isValidGalleryContent(content: unknown): boolean;
+export function isValidNewsContent(content: unknown): boolean;
 export function toCsv(rows: Array<Record<string, unknown>>, columns: CsvColumn[]): string;
 
 export const OVERRIDABLE_MODULES: string[];

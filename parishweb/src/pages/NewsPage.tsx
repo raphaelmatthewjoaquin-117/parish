@@ -4,8 +4,8 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { EventDetailsModal } from '../components/EventDetailsModal'
-import { API_BASE_URL as API_URL } from '../api/client'
-import { localize } from '../content/siteContent'
+import { API_BASE_URL as API_URL, apiClient } from '../api/client'
+import { localize, type NewsContent } from '../content/siteContent'
 import type { Language } from '../i18n'
 import '../PagesCSS/NewsPage.css'
 
@@ -24,6 +24,8 @@ type EventItem = {
   photoUrl: string
 }
 
+type NewsArticle = NewsContent['articles'][number]
+
 const getPhotoUrl = (photoUrl: string) => (
   photoUrl.startsWith('/') ? `${API_URL}${photoUrl}` : photoUrl
 )
@@ -33,6 +35,9 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
+  const [news, setNews] = useState<NewsArticle[]>([])
+  const [newsLoading, setNewsLoading] = useState(true)
+  const [newsError, setNewsError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`${API_URL}/api/events`)
@@ -73,6 +78,21 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
         setError(err instanceof Error ? err.message : 'Unable to load events')
       })
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    apiClient.siteContent.get<NewsContent>('news')
+      .then(({ content }) => {
+        if (active) setNews(content?.articles ?? [])
+      })
+      .catch((err: unknown) => {
+        if (active) setNewsError(err instanceof Error ? err.message : 'Unable to load church news.')
+      })
+      .finally(() => {
+        if (active) setNewsLoading(false)
+      })
+    return () => { active = false }
   }, [])
 
   const calendarEvents = events.map(event => ({
@@ -127,6 +147,45 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
           </article>
         ))}
       </div>
+
+      <section className="church-news-section" aria-labelledby="church-news-heading">
+        <div className="section-heading">
+          <p className="eyebrow">{localize('News', 'Balita', language)}</p>
+          <h2 id="church-news-heading">{localize('Church news and updates', 'Balita at mga anunsyo ng parokya', language)}</h2>
+        </div>
+        {newsLoading && <p role="status">{localize('Loading news…', 'Naglo-load ng balita…', language)}</p>}
+        {newsError && <p className="error-message" role="alert">{newsError}</p>}
+        {!newsLoading && !newsError && news.length === 0 && (
+          <p>{localize('No church news is published yet.', 'Wala pang nailalathalang balita ng parokya.', language)}</p>
+        )}
+        {!newsLoading && !newsError && news.length > 0 && (
+          <div className="church-news-list">
+            {news.map(article => (
+              <article className="church-news-item" key={article.id}>
+                {article.image && (
+                  <img
+                    className="church-news-image"
+                    src={getPhotoUrl(article.image)}
+                    alt={localize(article.title, article.titleTl, language)}
+                    loading="lazy"
+                  />
+                )}
+                {article.date && (
+                  <time dateTime={article.date}>
+                    {new Date(`${article.date}T00:00:00`).toLocaleDateString(language === 'tl' ? 'tl-PH' : 'en-US', {
+                      month: 'long',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </time>
+                )}
+                <h3 data-no-translate>{localize(article.title, article.titleTl, language)}</h3>
+                <p data-no-translate>{localize(article.body, article.bodyTl, language)}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       {selectedEvent && (
         <EventDetailsModal

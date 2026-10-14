@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import '../PagesCSS/SiteContentEditorPage.css'
 
 type ContactMessage = Awaited<ReturnType<typeof apiClient.contactMessages.list>>[number]
@@ -23,7 +24,10 @@ export function AdminContactMessagesPage({ canDelete }: { canDelete: boolean }) 
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const toggleRead = async (message: ContactMessage) => {
     try {
@@ -57,7 +61,7 @@ export function AdminContactMessagesPage({ canDelete }: { canDelete: boolean }) 
         </span>
       </div>
 
-      {error && <p className="site-content-message error-message" role="alert">{error}</p>}
+      <AdminFeedback error={error} onDismiss={() => setError('')} />
       <div className="contact-messages-toolbar">
         <div className="contact-messages-filters" role="group" aria-label="Filter contact messages">
           <button type="button" className={`btn ${filter === 'all' ? 'btn-dark' : 'btn-outline-dark'}`} aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>

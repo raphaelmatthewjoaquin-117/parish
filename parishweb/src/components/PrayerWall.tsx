@@ -11,12 +11,12 @@ interface Prayer {
 
 const CATEGORIES = [
   { value: 'all', label: 'All Prayers' },
-  { value: 'healing', label: '🙏 Healing' },
-  { value: 'thanksgiving', label: '🙌 Thanksgiving' },
-  { value: 'guidance', label: '🕊️ Guidance' },
-  { value: 'family', label: '👨👩👧👦 Family' },
-  { value: 'deceased', label: '✝️ Deceased' },
-  { value: 'other', label: '📝 Other' },
+  { value: 'healing', label: 'Healing' },
+  { value: 'thanksgiving', label: 'Thanksgiving' },
+  { value: 'guidance', label: 'Guidance' },
+  { value: 'family', label: 'Family' },
+  { value: 'deceased', label: 'Deceased' },
+  { value: 'other', label: 'Other' },
 ]
 
 const getCategoryColor = (category: string): string => {
@@ -109,7 +109,7 @@ export function PrayerWall() {
 
           {error && (
             <div className="prayer-wall-state error">
-              <p>⚠️ {error}</p>
+              <p>{error}</p>
             </div>
           )}
 

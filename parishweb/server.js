@@ -13,18 +13,23 @@ import {
   servicePolicy,
   findScheduleConflict,
   findIntentionConflict,
+  financeActionForStatus,
   financeTransition,
   isNoShowEligible,
   isUnverifiedExpired,
   ALLOWED_REQUEST_STATUSES,
   isAllowedArchiveUpload,
+  isAllowedImageUpload,
+  hasValidImageSignature,
   isValidGalleryContent,
+  isValidNewsContent,
   toCsv,
   OVERRIDABLE_MODULES,
   moduleForPath,
   overrideDecision,
 } from './server-rules.js';
 import { hashAspNetPassword } from './password-hash.js';
+import { deleteServiceRequest } from './src/service-request-deletion.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -296,7 +301,10 @@ const upload = multer({
   }),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    callback(null, file.mimetype.startsWith('image/'));
+    if (!isAllowedImageUpload(file.originalname, file.mimetype, 5 * 1024 * 1024)) {
+      return callback(new Error('Only JPEG, PNG, and WebP images up to 5 MB are allowed.'));
+    }
+    callback(null, true);
   },
 });
 
@@ -308,15 +316,20 @@ const archiveUpload = multer({
   },
 });
 
-// CORS configuration - restrict to frontend origin for security
-const frontendOrigin = process.env.FRONTEND_URL || (
-  process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173'
-);
-if (!frontendOrigin) {
-  throw new Error('FRONTEND_URL must be configured in production.');
-}
+// CORS configuration - allow localhost and dynamic FRONTEND_URL
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 const corsOptions = {
-  origin: frontendOrigin,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token'],
@@ -794,23 +807,38 @@ app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
   upload.single('photo')(req, res, (error) => {
     if (error instanceof multer.MulterError) {
       const message = error.code === 'LIMIT_FILE_SIZE'
-        ? 'Photo must be smaller than 5 MB.'
+        ? 'Photo must be 5 MB or smaller.'
         : 'Unable to upload the selected photo.';
       return res.status(400).json({ message });
     }
 
     if (error) {
-      return res.status(400).json({ message: 'Only image files can be uploaded.' });
+      return res.status(400).json({ message: error.message });
     }
 
     next();
   });
-}, (req, res) => {
+}, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'Please select an image file.' });
   }
 
-  res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
+  try {
+    const contents = await fs.promises.readFile(req.file.path);
+    if (!hasValidImageSignature(req.file.mimetype, contents)) {
+      try {
+        await fs.promises.unlink(req.file.path);
+      } catch (error) {
+        logError(error, { context: 'removeInvalidImageUpload' });
+        return res.status(500).json({ message: 'Unable to validate the uploaded image.' });
+      }
+      return res.status(400).json({ message: 'The selected file is not a valid JPEG, PNG, or WebP image.' });
+    }
+    return res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
+  } catch (error) {
+    logError(error, { context: 'validateImageUpload' });
+    return res.status(500).json({ message: 'Unable to validate the uploaded image.' });
+  }
 });
 
 // Public access is limited to files referenced by an event or published site content.
@@ -828,7 +856,7 @@ app.get('/uploads/:filename', async (req, res) => {
         WHERE EXISTS (SELECT 1 FROM dbo.Events WHERE PhotoUrl = @url)
            OR EXISTS (
              SELECT 1 FROM dbo.SiteContent
-             WHERE ContentKey IN ('about', 'gallery') AND ContentJson LIKE '%' + @url + '%'
+             WHERE ContentKey IN ('about', 'gallery', 'news') AND ContentJson LIKE '%' + @url + '%'
            )
       `);
     const filePath = path.join(uploadDirectory, filename);
@@ -1575,7 +1603,7 @@ app.delete('/api/events/:eventId', requireAdmin, async (req, res) => {
   }
 });
 
-const siteContentPages = new Set(['about', 'gallery', 'contact', 'footer']);
+const siteContentPages = new Set(['about', 'gallery', 'contact', 'footer', 'news']);
 
 const isOptionalText = (value, max) => value === undefined || (typeof value === 'string' && value.length <= max);
 
@@ -1661,6 +1689,7 @@ function isSiteContentDocument(page, content) {
       && typeof content.copyright === 'string' && content.copyright.length <= 300;
   }
 
+  if (page === 'news') return isValidNewsContent(content);
   return page === 'gallery' && isValidGalleryContent(content);
 }
 
@@ -2629,14 +2658,7 @@ app.delete('/api/admin/service-requests/:requestId', requireAdmin, requireRole([
   }
 
   try {
-    const pool = getPool();
-    const request = pool.request().input('requestId', sql.Int, requestId);
-
-    await request.query(`
-      DELETE FROM dbo.ServiceRequest
-      WHERE ServiceRequestId = @requestId
-    `);
-
+    await deleteServiceRequest(new sql.Transaction(getPool()), requestId);
     res.json({ success: true });
   } catch (error) {
     console.error('Delete service request error:', error);
@@ -2775,7 +2797,7 @@ app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Pari
 async function changeFinanceStatus(req, res, status) {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ message: 'Invalid financial entry.' });
-  const action = status === 'Approved' ? 'approve' : status === 'Reconciled' ? 'reconcile' : String(status).toLowerCase();
+  const action = financeActionForStatus(status);
   try {
     const pool = getPool();
     const current = await pool.request().input('id', sql.Int, id).query('SELECT Status FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
@@ -3412,5 +3434,63 @@ app.put('/api/admin/certificate-requests/:requestId', requireAdmin, requireRole(
     if (error?.number === 2601 || error?.number === 2627) return res.status(409).json({ message: 'That certificate appointment slot is already confirmed.' });
     logError(error, { context: 'updateAdminCertificateRequest' });
     res.status(500).json({ message: 'Unable to update certificate request.' });
+  }
+});
+
+app.delete('/api/admin/certificate-requests/:requestId', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ message: 'Invalid certificate request ID.' });
+  }
+
+  const transaction = new sql.Transaction(getPool());
+  let transactionStarted = false;
+  try {
+    await transaction.begin();
+    transactionStarted = true;
+    const request = await transaction.request().input('requestId', sql.Int, requestId).query(`
+      SELECT CertificateRequestId
+      FROM dbo.CertificateRequests WITH (UPDLOCK, HOLDLOCK)
+      WHERE CertificateRequestId = @requestId
+    `);
+    if (!request.recordset[0]) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ message: 'Certificate request not found.' });
+    }
+
+    const documents = await transaction.request().input('requestId', sql.Int, requestId).query(`
+      SELECT StoredFileName
+      FROM dbo.CertificateRequestDocuments
+      WHERE CertificateRequestId = @requestId
+    `);
+    await transaction.request().input('requestId', sql.Int, requestId).query(`
+      DELETE FROM dbo.CertificateRequestDocuments WHERE CertificateRequestId = @requestId;
+      DELETE FROM dbo.CertificateRequests WHERE CertificateRequestId = @requestId;
+    `);
+    await transaction.commit();
+    transactionStarted = false;
+
+    const fileCleanup = await Promise.allSettled(documents.recordset.map(document =>
+      fs.promises.unlink(path.join(uploadDirectory, path.basename(String(document.StoredFileName)))),
+    ));
+    const cleanupErrors = fileCleanup
+      .filter(result => result.status === 'rejected' && result.reason?.code !== 'ENOENT');
+    if (cleanupErrors.length > 0) {
+      cleanupErrors.forEach(result => logError(result.reason, { context: 'deleteAdminCertificateRequestFile' }));
+      return res.json({ message: 'Certificate request deleted, but some supporting files could not be removed.' });
+    }
+
+    return res.json({ message: 'Certificate request deleted.' });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        logError(rollbackError, { context: 'deleteAdminCertificateRequestRollback' });
+      }
+    }
+    logError(error, { context: 'deleteAdminCertificateRequest' });
+    return res.status(500).json({ message: 'Unable to delete certificate request.' });
   }
 });

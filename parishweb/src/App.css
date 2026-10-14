@@ -290,26 +290,35 @@ body {
 
 .hamburger {
   display: none;
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 44px;
   margin-left: auto;
-  padding: .65rem;
-  border: 1px solid var(--black);
-  border-radius: 6px;
-  background: transparent;
+  padding: .65rem .75rem;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 8px;
+  background: var(--parish-green, #1f4337);
   cursor: pointer;
-  transition: background .2s ease;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .2);
+  transition: background .2s ease, transform .2s ease, box-shadow .2s ease;
 }
 
 .hamburger:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: #17372d;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .25);
+}
+
+.hamburger:focus-visible {
+  outline: 3px solid #fffdf7;
+  outline-offset: 3px;
 }
 
 .hamburger span {
   display: block;
-  height: 2px;
+  height: 2.5px;
   margin: 4px 0;
-  background: var(--black);
+  border-radius: 2px;
+  background: #fff3cf;
   transition: transform .25s cubic-bezier(0.16, 1, 0.3, 1), opacity .25s ease;
 }
 

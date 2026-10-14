@@ -44,10 +44,21 @@ function initialValues(type: RecordType, record?: Record<string, unknown> | null
 }
 
 export function SacramentalRecordForm({ type, record, adminToken, onSaved, onCancel }: Props) {
-  const [values, setValues] = useState<Record<string, FormValue>>(() => initialValues(type, record))
+  const [selectedType, setSelectedType] = useState(type)
+  const [valuesByType, setValuesByType] = useState<Partial<Record<RecordType, Record<string, FormValue>>>>(() => ({
+    [type]: initialValues(type, record),
+  }))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const isEditing = Boolean(record)
+  const values = valuesByType[selectedType] ?? initialValues(selectedType)
+  const recordTypeLabel = selectedType.charAt(0).toUpperCase() + selectedType.slice(1)
+  const updateValue = (key: string, value: FormValue) => {
+    setValuesByType(previous => ({
+      ...previous,
+      [selectedType]: { ...values, [key]: value },
+    }))
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -57,9 +68,9 @@ export function SacramentalRecordForm({ type, record, adminToken, onSaved, onCan
       const payload = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === '' ? null : value]))
       if (isEditing && record) {
         const updatePayload = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key.charAt(0).toUpperCase() + key.slice(1), value]))
-        await apiClient.sacramental.update(type, Number(record.Id ?? record[`${type.charAt(0).toUpperCase() + type.slice(1)}Id`]), updatePayload, adminToken)
+        await apiClient.sacramental.update(selectedType, Number(record.Id ?? record[`${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)}Id`]), updatePayload, adminToken)
       } else {
-        await apiClient.sacramental.create(type, payload, adminToken)
+        await apiClient.sacramental.create(selectedType, payload, adminToken)
       }
       onSaved()
     } catch (reason) {
@@ -69,10 +80,62 @@ export function SacramentalRecordForm({ type, record, adminToken, onSaved, onCan
     }
   }
 
-  return <form className="sacramental-record-form card border-0 shadow-sm p-4" onSubmit={submit}>
-    <div className="detail-header"><h3>{isEditing ? 'Edit' : 'New'} {type} record</h3><button type="button" className="close-btn" onClick={onCancel}>X</button></div>
-    <div className="sacramental-form-grid">{fields[type].map(field => <label key={field.key}>{field.label}{field.type === 'textarea' ? <textarea required={!field.key.includes('Middle') && !['remarks', 'sponsors', 'witnesses', 'notes'].includes(field.key)} value={String(values[field.key] ?? '')} onChange={event => setValues({ ...values, [field.key]: event.target.value })} /> : <input required={!field.key.toLowerCase().includes('middle') && !['placeOfBirth', 'fatherFullName', 'motherFullName', 'placeOfBurial', 'causeOfDeath', 'dateOfBurial', 'groomParents', 'brideParents', 'parishOfBaptism', 'sponsorName'].includes(field.key)} type={field.type || 'text'} min={field.type === 'number' ? 0 : undefined} value={String(values[field.key] ?? '')} onChange={event => setValues({ ...values, [field.key]: event.target.value })} />}</label>)}</div>
-    {error && <p className="error-message">{error}</p>}
-    <div className="button-row d-flex gap-2"><button className="primary-btn btn btn-dark" disabled={saving}>{saving ? 'Saving...' : 'Save record'}</button><button type="button" className="secondary-btn btn btn-outline-dark" onClick={onCancel} disabled={saving}>Cancel</button></div>
+  return <form className="sacramental-record-form" aria-label="Sacramental record form" onSubmit={submit}>
+    <div className="detail-header sacramental-form-header">
+      <div>
+        <p className="sacramental-form-kicker">{isEditing ? 'Update parish register' : 'New parish register entry'}</p>
+        <h3 id="sacramental-form-title">{isEditing ? `Edit ${recordTypeLabel} record` : 'Add sacramental record'}</h3>
+      </div>
+      <button type="button" className="close-btn" aria-label="Close form" onClick={onCancel}>×</button>
+    </div>
+    {!isEditing && (
+      <div className="sacramental-form-type">
+        <label htmlFor="new-record-sacrament">Sacrament type</label>
+        <select
+          id="new-record-sacrament"
+          value={selectedType}
+          disabled={saving}
+          onChange={event => {
+            const nextType = event.target.value as RecordType
+            setSelectedType(nextType)
+          }}
+        >
+          <option value="baptism">Baptism</option>
+          <option value="confirmation">Confirmation</option>
+          <option value="marriage">Marriage</option>
+          <option value="death">Death</option>
+        </select>
+        <p>Choose the sacrament to see the fields for that record.</p>
+      </div>
+    )}
+    <div className="sacramental-form-grid">
+      {fields[selectedType].map(field => (
+        <label key={field.key}>
+          {field.label}
+          {field.type === 'textarea' ? (
+            <textarea
+              required={!field.key.includes('Middle') && !['remarks', 'sponsors', 'witnesses', 'notes'].includes(field.key)}
+              value={String(values[field.key] ?? '')}
+              onChange={event => updateValue(field.key, event.target.value)}
+            />
+          ) : (
+            <input
+              required={!field.key.toLowerCase().includes('middle') && !['placeOfBirth', 'fatherFullName', 'motherFullName', 'placeOfBurial', 'causeOfDeath', 'dateOfBurial', 'groomParents', 'brideParents', 'parishOfBaptism', 'sponsorName'].includes(field.key)}
+              type={field.type || 'text'}
+              min={field.type === 'number' ? 0 : undefined}
+              value={String(values[field.key] ?? '')}
+              onChange={event => updateValue(field.key, event.target.value)}
+            />
+          )}
+        </label>
+      ))}
+    </div>
+    {error && <p className="error-message" role="alert">{error}</p>}
+    <div className="sacramental-form-actions">
+      <button type="submit" className="sacramental-save-button" disabled={saving}>
+        {saving ? 'Saving...' : isEditing ? 'Save changes' : 'Save record'}
+      </button>
+      <button type="button" className="sacramental-cancel-button" onClick={onCancel} disabled={saving}>Cancel</button>
+    </div>
   </form>
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { API_BASE_URL as API_URL } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import { ChangePasswordForm } from '../components/ChangePasswordForm'
 import { PERMISSION_MODULES, effectiveModuleAccess, type ModuleOverrides } from '../utils/rbac'
 
@@ -49,8 +50,7 @@ export function AdminProfilePage({ profile, onProfileChanged }: AdminProfilePage
       <div className="col-lg-6">
         <form className="card border-0 shadow-sm p-4 d-grid gap-3" onSubmit={event => void saveProfile(event)}>
           <h3 className="h5 mb-0">My profile</h3>
-          {error && <p className="alert alert-danger mb-0" role="alert">{error}</p>}
-          {message && <p className="alert alert-success mb-0" role="status">{message}</p>}
+          <AdminFeedback message={message} error={error} onDismiss={() => { setMessage(''); setError('') }} />
           <label>Username<input className="form-control" required maxLength={256} value={userName} onChange={event => setUserName(event.target.value)} /></label>
           <label>Email<input className="form-control" required type="email" value={email} onChange={event => setEmail(event.target.value)} /></label>
           <label>Role<input className="form-control" value={profile.role} readOnly disabled /></label>

@@ -82,7 +82,6 @@ export default function ServicePage(): React.JSX.Element {
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [bookingMessage, setBookingMessage] = useState<string | null>(null);
-  const [restrictionMessage, setRestrictionMessage] = useState<string | null>(null);
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
   // The booking widget picks its own sacrament via a dropdown; the tabs above are info-only previews.
@@ -156,18 +155,16 @@ export default function ServicePage(): React.JSX.Element {
       return;
     }
     setSlotsLoading(true);
-    setRestrictionMessage(null);
     const service = services.find(s => s.id === serviceSlug);
     const dbId = service?.dbId;
     if (!dbId) { setSlots([]); setSlotsLoading(false); return; }
     fetch(`${API_URL}/api/services/${dbId}/slots`)
       .then(response => response.ok ? response.json() : Promise.reject())
       .then((data: unknown) => {
-        const raw = data as { slots?: unknown; restrictionMessage?: string } | null;
+        const raw = data as { slots?: unknown } | null;
         if (!raw || !Array.isArray(raw.slots)) { setSlots([]); setSelectedDate(''); return; }
         const nextSlots = raw.slots as Slot[];
         setSlots(nextSlots);
-        if (raw.restrictionMessage) setRestrictionMessage(raw.restrictionMessage);
         const uniqueDates = Array.from(new Set(nextSlots.map(s => s.date)));
         if (uniqueDates.length > 0) {
           setSelectedDate(prev => {
@@ -336,6 +333,10 @@ export default function ServicePage(): React.JSX.Element {
     existing.push(slot);
     slotsByDate.set(slot.date, existing);
   });
+  const selectedDateSlots = slotsByDate.get(selectedDate) ?? [];
+  const selectedDateRestriction = selectedDateSlots.length > 0 && !selectedDateSlots.some(slot => slot.available)
+    ? selectedDateSlots.find(slot => slot.message)?.message
+    : undefined;
 
   return (
     <div className="services-tabs container py-5">
@@ -368,8 +369,8 @@ export default function ServicePage(): React.JSX.Element {
         </p>
       </div>
 
-      {restrictionMessage && !isCertificateTab && (
-        <div className="restriction-message alert alert-warning" role="alert">{restrictionMessage}</div>
+      {selectedDateRestriction && !isCertificateTab && (
+        <div className="restriction-message alert alert-warning" role="alert">{selectedDateRestriction}</div>
       )}
 
       {/* ── Certificate Tab ── */}

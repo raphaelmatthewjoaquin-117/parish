@@ -84,6 +84,15 @@ export function financeTransition(currentStatus, action) {
   return Object.prototype.hasOwnProperty.call(row, action) ? row[action] : null;
 }
 
+export function financeActionForStatus(status) {
+  return {
+    Submitted: 'submit',
+    Rejected: 'reject',
+    Approved: 'approve',
+    Reconciled: 'reconcile',
+  }[status] || String(status).toLowerCase();
+}
+
 /**
  * No-show rule: a Confirmed appointment whose scheduled date+time has passed
  * by `graceHours` without attendance being marked is automatically voided.
@@ -132,6 +141,39 @@ export function isAllowedArchiveUpload(originalName, mimeType, size) {
     && allowedTypes[extension] === String(mimeType || '').toLowerCase();
 }
 
+/** Allow only bounded raster image formats that the public site can safely display. */
+export function isAllowedImageUpload(originalName, mimeType, size) {
+  const extension = String(originalName || '').toLowerCase().split('.').pop();
+  const allowedTypes = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+  };
+  return Number.isFinite(Number(size))
+    && Number(size) > 0
+    && Number(size) <= 5 * 1024 * 1024
+    && allowedTypes[extension] === String(mimeType || '').toLowerCase();
+}
+
+/** Check file signatures after upload; filename extensions and MIME headers are client supplied. */
+export function hasValidImageSignature(mimeType, bytes) {
+  if (!(bytes instanceof Uint8Array)) return false;
+  const type = String(mimeType || '').toLowerCase();
+  if (type === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (type === 'image/png') {
+    return bytes.length >= 8
+      && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+      && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  }
+  if (type === 'image/webp') {
+    const header = String.fromCharCode(...bytes.subarray(0, 4));
+    const format = String.fromCharCode(...bytes.subarray(8, 12));
+    return bytes.length >= 12 && header === 'RIFF' && format === 'WEBP';
+  }
+  return false;
+}
+
 /** Validate the saved gallery shape while accepting legacy single-photo items. */
 export function isValidGalleryContent(content) {
   const isPhotoUrl = value => typeof value === 'string'
@@ -168,6 +210,31 @@ export function isValidGalleryContent(content) {
         && item.photos.map(photoEntryUrl).includes(item.image)
         && new Set(item.photos.map(photoEntryUrl)).size === item.photos.length
       )));
+}
+
+/** Validate church news stored through the site-content API. */
+export function isValidNewsContent(content) {
+  const isText = (value, max) => typeof value === 'string' && value.length <= max;
+  const isOptionalText = (value, max) => value === undefined || isText(value, max);
+  const isOptionalPhoto = value => value === undefined
+    || (typeof value === 'string' && value.length <= 2000
+      && (/^https?:\/\//i.test(value) || value.startsWith('/assets/') || value.startsWith('/uploads/')));
+  const isDate = value => value === undefined || value === ''
+    || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime())
+      && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value);
+
+  return Boolean(content) && typeof content === 'object' && !Array.isArray(content)
+    && Array.isArray(content.articles)
+    && content.articles.length <= 100
+    && content.articles.every(article => article && typeof article === 'object' && !Array.isArray(article)
+      && isText(article.id, 100) && article.id.length > 0
+      && isText(article.title, 300) && article.title.trim().length > 0
+      && isOptionalText(article.titleTl, 300)
+      && isText(article.body, 10000) && article.body.trim().length > 0
+      && isOptionalText(article.bodyTl, 10000)
+      && isOptionalPhoto(article.image)
+      && isDate(article.date));
 }
 
 /** Build a CSV document from an array of flat objects. */

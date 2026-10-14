@@ -3,7 +3,6 @@ import { AdminEventsPage, type AdminEventsTab } from './AdminEventsPage'
 import { AdminOperationsPage, type AdminOperationsTab } from './AdminOperationsPage'
 import { AdminUsersPage } from './AdminUsersPage'
 import { AdminCertificateRequestsPage } from './AdminCertificateRequestsPage'
-import { AdminBookingAvailabilityPage } from './AdminBookingAvailabilityPage'
 import { SiteContentEditorPage } from './SiteContentEditorPage'
 import { AdminContactMessagesPage } from './AdminContactMessagesPage'
 import { API_BASE_URL as API_URL } from '../api/client'
@@ -17,8 +16,7 @@ type AdminSection = (
   | { kind: 'operations'; tab: AdminOperationsTab; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'users'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'certificates'; label: string; icon: string; group: string; module?: ModuleName }
-  | { kind: 'availability'; label: string; icon: string; group: string; module?: ModuleName }
-  | { kind: 'content'; page: 'about' | 'gallery' | 'contact' | 'footer'; label: string; icon: string; group: string; module?: ModuleName }
+  | { kind: 'content'; page: 'about' | 'gallery' | 'contact' | 'footer' | 'news'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'messages'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'profile'; label: string; icon: string; group: string; module?: ModuleName }
 ) & { roles?: string[] }
@@ -31,12 +29,13 @@ const sections: AdminSection[] = [
   { kind: 'content', page: 'gallery', label: 'Photo Gallery', icon: '▧', group: 'Website Content', module: 'Gallery' },
   { kind: 'content', page: 'contact', label: 'Contact Page', icon: '☎', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'content', page: 'footer', label: 'Footer', icon: '▤', group: 'Website Content', module: 'WebsiteContent' },
+  { kind: 'content', page: 'news', label: 'Church News', icon: '▤', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'operations', tab: 'schedule', label: 'Schedule', icon: '◷', group: 'Operations', module: 'MassSchedule' },
   { kind: 'events', tab: 'mass-schedule', label: 'Mass Schedule', icon: '☩', group: 'Operations', module: 'MassSchedule' },
   { kind: 'operations', tab: 'intentions', label: 'Mass Intentions', icon: '✦', group: 'Operations', module: 'MassSchedule', roles: ['Admin', 'ParishPriest', 'Secretary', 'Staff'] },
   { kind: 'events', tab: 'service-requests', label: 'Service Requests', icon: '✉', group: 'Operations', module: 'ServiceRequest' },
+  { kind: 'operations', tab: 'availability', label: 'Booking Availability', icon: '⊘', group: 'Operations', module: 'ServiceRequest' },
   { kind: 'certificates', label: 'Certificate Appointments', icon: '▣', group: 'Records', module: 'ServiceRequest' },
-  { kind: 'availability', label: 'Booking Availability', icon: '⊘', group: 'Operations', module: 'ServiceRequest' },
   { kind: 'events', tab: 'sacramental-ledger', label: 'Sacramental Ledger', icon: '✟', group: 'Records', module: 'SacramentalRecords' },
   { kind: 'operations', tab: 'finance', label: 'Finance & Reports', icon: '¤', group: 'Records', module: 'Finance' },
   { kind: 'operations', tab: 'stats', label: 'Stats & Demographics', icon: '⌁', group: 'Records', module: 'SacramentalRecords' },
@@ -68,7 +67,6 @@ export function UnifiedAdminPage() {
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 760px)')
     const handler = (e: MediaQueryListEvent) => { if (e.matches) setSidebarCollapsed(false) }
-    if (mq.matches) setSidebarCollapsed(false)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [])
@@ -144,7 +142,7 @@ export function UnifiedAdminPage() {
             aria-expanded={!sidebarCollapsed}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <span className="admin-sidebar-collapse-icon" aria-hidden="true">‹</span>
+            <span className="admin-sidebar-collapse-icon" aria-hidden="true" />
           </button>
         </div>
         <nav aria-label="Admin navigation" className="admin-sidebar-nav nav flex-column gap-1">
@@ -172,7 +170,7 @@ export function UnifiedAdminPage() {
         </div>
       </aside>
       <main className="admin-workspace">
-        <div className="admin-workspace-heading d-flex align-items-center justify-content-between gap-3">
+        <div key={`heading-${visibleSectionKey}`} className="admin-workspace-heading d-flex align-items-center justify-content-between gap-3">
           <div><p className="eyebrow">Staff workspace</p><h1>{visibleSection.label}</h1></div>
         </div>
         <div
@@ -183,10 +181,8 @@ export function UnifiedAdminPage() {
             ? <AdminEventsPage key={`events-${visibleSection.tab}-${staffRole}`} initialTab={visibleSection.tab} embedded overrides={overrides} />
             : visibleSection.kind === 'operations'
               ? <AdminOperationsPage key={`operations-${visibleSection.tab}-${staffRole}`} initialTab={visibleSection.tab} embedded staffRole={staffRole} overrides={overrides} />
-              : visibleSection.kind === 'availability'
-                ? <AdminBookingAvailabilityPage canEdit={hasOverride('ServiceRequest') ? Boolean(overrides?.ServiceRequest?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
-                : visibleSection.kind === 'certificates'
-                  ? <AdminCertificateRequestsPage />
+              : visibleSection.kind === 'certificates'
+                    ? <AdminCertificateRequestsPage />
                   : visibleSection.kind === 'content'
                     ? <SiteContentEditorPage key={`content-${visibleSection.page}`} page={visibleSection.page} />
                     : visibleSection.kind === 'messages'

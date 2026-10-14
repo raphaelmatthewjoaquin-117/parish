@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { API_BASE_URL as API_URL } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import { UserPermissionsModal } from '../components/UserPermissionsModal'
 import '../PagesCSS/AdminUsersPage.css'
 
@@ -179,8 +180,7 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
         <button type="button" className="secondary-btn" onClick={() => void loadData()} disabled={loading || saving}>Refresh</button>
       </div>
 
-      {error && <p className="error-message" role="alert">{error}</p>}
-      {message && <p className="success-message" role="status">{message}</p>}
+      <AdminFeedback message={message} error={error} onDismiss={() => { setMessage(''); setError('') }} />
 
       <div className={`users-grid ${canManageAccounts ? '' : 'users-grid-roles-only'}`}>
         {canManageAccounts && <form className="user-create-panel card border-0 shadow-sm" onSubmit={createUser}>

@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logger } from '../utils/logger.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -10,21 +11,20 @@ let pool: sql.ConnectionPool | null = null;
  */
 export async function initializePool(config: sql.config): Promise<sql.ConnectionPool> {
   if (pool) {
-    console.log('Database pool already initialized, reusing existing pool');
+    logger.info({ type: 'database', action: 'pool_reuse' }, 'Database pool already initialized; reusing connection pool');
     return pool;
   }
 
   pool = new sql.ConnectionPool(config);
 
-  // Handle pool errors
   pool.on('error', (err: Error) => {
-    console.error('Database pool error:', err);
-    pool = null; // Reset on error to allow reconnection
+    logger.error({ type: 'database', action: 'pool_error', message: err.message, stack: err.stack }, 'Database pool error');
+    pool = null;
   });
 
   try {
     await pool.connect();
-    console.log('Database connection pool initialized successfully');
+    logger.info({ type: 'database', action: 'pool_initialized' }, 'Database connection pool initialized successfully');
     return pool;
   } catch (error) {
     pool = null;
@@ -55,9 +55,9 @@ export async function closePool(): Promise<void> {
   if (pool) {
     try {
       await pool.close();
-      console.log('Database connection pool closed');
+      logger.info({ type: 'database', action: 'pool_closed' }, 'Database connection pool closed');
     } catch (error) {
-      console.error('Error closing database pool:', error);
+      logger.error({ type: 'database', action: 'pool_close_failed', cause: error }, 'Error closing database pool');
     } finally {
       pool = null;
     }

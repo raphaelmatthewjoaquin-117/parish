@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { apiClient, API_BASE_URL } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import {
   defaultAboutContent,
   defaultContactContent,
@@ -13,16 +14,18 @@ import {
   type FooterContent,
   type GalleryContent,
   type GalleryPhoto,
+  type NewsContent,
 } from '../content/siteContent'
 import '../PagesCSS/SiteContentEditorPage.css'
 
-type SiteContentPage = 'about' | 'gallery' | 'contact' | 'footer'
+type SiteContentPage = 'about' | 'gallery' | 'contact' | 'footer' | 'news'
 
 const publicPagePaths: Record<SiteContentPage, string> = {
   about: '/about',
   gallery: '/gallery',
   contact: '/contact',
   footer: '/',
+  news: '/news',
 }
 
 /* ── Collapsible section wrapper ────────────────────────── */
@@ -162,6 +165,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
   const [gallery, setGallery] = useState<GalleryContent>(defaultGalleryContent)
   const [contact, setContact] = useState<ContactContent>(defaultContactContent)
   const [footer, setFooter] = useState<FooterContent>(defaultFooterContent)
+  const [news, setNews] = useState<NewsContent>({ articles: [] })
   const [newPhotoTitle, setNewPhotoTitle] = useState('')
   const [newPhotoTitleTl, setNewPhotoTitleTl] = useState('')
   const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null)
@@ -206,7 +210,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
 
   useEffect(() => {
     let active = true
-    apiClient.siteContent.get<AboutContent | GalleryContent | ContactContent | FooterContent>(page)
+    apiClient.siteContent.get<AboutContent | GalleryContent | ContactContent | FooterContent | NewsContent>(page)
       .then(({ content }) => {
         if (!active || !content) return
         if (page === 'about') {
@@ -215,6 +219,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
         }
         else if (page === 'contact') setContact(content as ContactContent)
         else if (page === 'footer') setFooter(content as FooterContent)
+        else if (page === 'news') setNews(content as NewsContent)
         else setGallery(content as GalleryContent)
       })
       .catch((loadError: unknown) => {
@@ -235,6 +240,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
       if (page === 'about') await apiClient.siteContent.save(page, about, adminToken)
       else if (page === 'contact') await apiClient.siteContent.save(page, contact, adminToken)
       else if (page === 'footer') await apiClient.siteContent.save(page, footer, adminToken)
+      else if (page === 'news') await apiClient.siteContent.save(page, news, adminToken)
       else await apiClient.siteContent.save(page, gallery, adminToken)
       Object.values(imagePreviewUrlsRef.current).forEach(URL.revokeObjectURL)
       imagePreviewUrlsRef.current = {}
@@ -366,6 +372,26 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     }
   }
 
+  const uploadNewsImage = async (articleId: string, file: File | undefined) => {
+    if (!file) return
+    setSaving(true)
+    setError(null)
+    setSuccess('')
+    try {
+      const adminToken = window.localStorage.getItem('adminToken') || ''
+      const { photoUrl } = await apiClient.siteContent.uploadImage(file, adminToken)
+      addImagePreview(photoUrl, file)
+      setNews(current => ({
+        articles: current.articles.map(article => article.id === articleId ? { ...article, image: photoUrl } : article),
+      }))
+      setSuccess('Photo uploaded. Save changes to publish it.')
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Unable to upload photo.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const updateTimeline = (index: number, changes: Partial<NonNullable<AboutContent['timeline']>[number]>) => {
     setAbout(current => ({
       ...current,
@@ -398,15 +424,156 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     <section className={`site-content-editor site-content-editor--${page}`}>
       <div className="site-content-intro">
         <p>Website content</p>
-        <h2>{page === 'about' ? 'Edit About Us page' : page === 'contact' ? 'Edit Contact page' : page === 'footer' ? 'Edit website footer' : 'Edit photo gallery'}</h2>
+        <h2>{page === 'about' ? 'Edit About Us page' : page === 'contact' ? 'Edit Contact page' : page === 'footer' ? 'Edit website footer' : page === 'news' ? 'Edit church news' : 'Edit photo gallery'}</h2>
         <span>Changes are published on the public website when you save.</span>
       </div>
 
-      {error && <p className="site-content-message error-message" role="alert">{error}</p>}
-      {success && <p className="site-content-message success-message" role="status">{success}</p>}
+      <AdminFeedback message={success} error={error} onDismiss={() => { setSuccess(''); setError(null) }} />
       {loading && <p>Loading saved content…</p>}
 
-      {page === 'about' ? (
+      {page === 'news' ? (
+        <div className="site-content-form news-editor">
+          <div className="news-editor-heading">
+            <div className="news-editor-intro">
+              <h3>Church news</h3>
+              <p>Write each story in English and optionally add its Tagalog version.</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-dark news-editor-add"
+              disabled={saving || news.articles.length >= 100}
+              onClick={() => setNews(current => ({
+                articles: [{
+                  id: crypto.randomUUID(),
+                  title: '',
+                  titleTl: '',
+                  body: '',
+                  bodyTl: '',
+                  date: '',
+                }, ...current.articles],
+              }))}
+            >
+              Add news story
+            </button>
+          </div>
+          {news.articles.length === 0
+            ? (
+              <div className="news-editor-empty">
+                <span className="news-editor-empty-mark" aria-hidden="true">✦</span>
+                <h4>No stories yet</h4>
+                <p>Your parish updates will appear here. Add a story to get started.</p>
+              </div>
+            )
+            : news.articles.map((article, index) => (
+              <article className="news-editor-story" key={article.id}>
+                <header className="news-editor-story-header">
+                  <div>
+                    <span className="news-editor-story-number">Story {String(index + 1).padStart(2, '0')}</span>
+                    <h4>{article.title || 'Untitled story'}</h4>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger news-editor-remove"
+                    disabled={saving}
+                    onClick={() => setNews(current => ({
+                      articles: current.articles.filter(item => item.id !== article.id),
+                    }))}
+                  >
+                    Remove
+                  </button>
+                </header>
+                <div className="news-editor-title-fields">
+                  <label>
+                    News title (English)
+                    <input
+                      value={article.title}
+                      maxLength={300}
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, title: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                  <label>
+                    News title (Tagalog)
+                    <input
+                      value={article.titleTl ?? ''}
+                      maxLength={300}
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, titleTl: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                  <label className="news-editor-date">
+                    Publication date <span>(optional)</span>
+                    <input
+                      type="date"
+                      value={article.date ?? ''}
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, date: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                </div>
+                <div className="news-editor-photo">
+                  <label>
+                    Story photo (optional)
+                    <input
+                      aria-label="News photo (optional)"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={saving}
+                      onChange={event => { void uploadNewsImage(article.id, event.target.files?.[0]); event.target.value = '' }}
+                    />
+                  </label>
+                  <small>JPEG, PNG, or WebP; 5 MB maximum. Save changes to publish the photo.</small>
+                  {article.image && (
+                    <div className="news-editor-photo-preview">
+                      <img
+                        src={imagePreviewUrls[article.image] ?? getImageUrl(article.image)}
+                        alt={`${article.title || 'News story'} photo`}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger"
+                        aria-label={`Remove photo for ${article.title || `story ${index + 1}`}`}
+                        disabled={saving}
+                        onClick={() => setNews(current => ({
+                          articles: current.articles.map(item => item.id === article.id ? { ...item, image: undefined } : item),
+                        }))}
+                      >
+                        Remove photo
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="news-editor-body-fields">
+                  <label>
+                    News story (English)
+                    <textarea
+                      rows={5}
+                      maxLength={10000}
+                      value={article.body}
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, body: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                  <label>
+                    News story (Tagalog)
+                    <textarea
+                      rows={5}
+                      maxLength={10000}
+                      value={article.bodyTl ?? ''}
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, bodyTl: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                </div>
+              </article>
+            ))}
+        </div>
+      ) : page === 'about' ? (
         <div className="site-content-form">
           {/* ── Heading & Banner ── */}
           <CollapsibleSection title="Heading & Banner" subtitle="Page title, intro, and banner image" defaultOpen>
@@ -429,7 +596,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
             <div className="upload-field">
               <span className="upload-field-label">Banner image <span style={{ fontWeight: 400, color: '#6b746d' }}>(optional)</span></span>
               <label className={`upload-tile${saving ? ' upload-tile--uploading' : ''}`} aria-label="Upload banner image">
-                <input type="file" accept="image/*" disabled={saving} onChange={event => { void uploadHeroImage(event.target.files?.[0]); event.target.value = '' }} />
+                <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} onChange={event => { void uploadHeroImage(event.target.files?.[0]); event.target.value = '' }} />
                 <span className="upload-tile-icon" aria-hidden="true">{saving ? '…' : '+'}</span>
                 <span className="upload-tile-name">{saving ? 'Uploading…' : 'Choose image'}</span>
               </label>
@@ -763,7 +930,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
             <div className="upload-field">
               <span className="upload-field-label">New album photo</span>
               <label className={`upload-tile${newPhotoFile ? ' upload-tile--ready' : ''}`} aria-label="Choose cover photo for new album">
-                <input id="gallery-photo-file" type="file" accept="image/*" onChange={event => setNewPhotoFile(event.target.files?.[0] || null)} />
+                <input id="gallery-photo-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={event => setNewPhotoFile(event.target.files?.[0] || null)} />
                 <span className="upload-tile-icon" aria-hidden="true">{newPhotoFile ? '✓' : '+'}</span>
                 <span className="upload-tile-name">{newPhotoFile ? newPhotoFile.name : 'Choose photo'}</span>
                 {newPhotoFile && (
@@ -883,7 +1050,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
                       <input
                         id={`gallery-photo-${item.id}`}
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp"
                         disabled={saving || albumPhotos.length >= 100}
                         onChange={event => setAlbumPhotoFiles(current => ({ ...current, [item.id]: event.target.files?.[0] ?? null }))}
                       />
@@ -962,7 +1129,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
             </header>
             <iframe
               src={publicPagePaths[page]}
-              title={`Preview of ${page === 'about' ? 'the About Us page' : page === 'contact' ? 'the Contact page' : page === 'gallery' ? 'the photo gallery' : 'the website home page'}`}
+              title={`Preview of ${page === 'about' ? 'the About Us page' : page === 'contact' ? 'the Contact page' : page === 'gallery' ? 'the photo gallery' : page === 'news' ? 'the News page' : 'the website home page'}`}
             />
           </section>
         </div>

@@ -1,0 +1,60 @@
+.admin-feedback-layer {
+  position: fixed;
+  z-index: 2100;
+  top: calc(var(--topbar-h, 0px) + .75rem);
+  right: clamp(1rem, 3vw, 2rem);
+  display: flex;
+  justify-content: flex-end;
+  width: min(28rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.admin-feedback-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .8rem;
+  width: 100%;
+  padding: .9rem 1rem;
+  border: 1px solid #dedbd1;
+  border-left: 4px solid;
+  border-radius: .55rem;
+  background: #fff;
+  box-shadow: 0 .5rem 1.5rem rgba(22, 28, 24, .18);
+  color: #26352d;
+  font-size: .92rem;
+  line-height: 1.5;
+  pointer-events: auto;
+}
+
+.admin-feedback-card--success {
+  border-left-color: #1d6b45;
+}
+
+.admin-feedback-card--error {
+  border-left-color: #a8322a;
+}
+
+.admin-feedback-card button {
+  flex: 0 0 auto;
+  margin: -.2rem -.3rem 0 auto;
+  padding: 0 .25rem;
+  border: 0;
+  background: transparent;
+  color: #5f6962;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.admin-feedback-card button:focus-visible {
+  outline: 2px solid #986c2d;
+  outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+  .admin-feedback-layer {
+    top: .75rem;
+    right: 1rem;
+    width: calc(100vw - 2rem);
+  }
+}

@@ -73,9 +73,7 @@
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--a-gold) transparent;
-  transition: flex-basis .28s cubic-bezier(.4,0,.2,1),
-              width       .28s cubic-bezier(.4,0,.2,1);
-  will-change: width;
+  transition: flex-basis .34s cubic-bezier(.22,1,.36,1);
 }
 
 .sidebar-collapsed .admin-sidebar {
@@ -91,11 +89,15 @@
 
 /* ── Brand header ── */
 .admin-sidebar-brand {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: .75rem;
   min-height: 88px;
   padding: 1.25rem 1.2rem;
+  background: var(--a-green-rich);
   border-bottom: 1px solid var(--a-green-line);
   flex-shrink: 0;
   overflow: hidden;
@@ -129,7 +131,7 @@
 .admin-brand-copy small  { color: var(--a-gold-light); opacity: .7; font-size: .68rem;
                            text-transform: uppercase; letter-spacing: .14em; white-space: nowrap; }
 
-.sidebar-collapsed .admin-brand-copy { opacity: 0; max-width: 0 }
+.sidebar-collapsed .admin-brand-copy { position: absolute; opacity: 0; max-width: 0 }
 
 /* ── Collapse toggle ── */
 .admin-sidebar-collapse {
@@ -157,9 +159,14 @@
 
 .admin-sidebar-collapse-icon {
   display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(135deg);
   transition: transform .28s cubic-bezier(.4,0,.2,1);
 }
-.sidebar-collapsed .admin-sidebar-collapse-icon { transform: rotate(180deg) }
+.sidebar-collapsed .admin-sidebar-collapse-icon { transform: rotate(315deg) }
 
 .sidebar-collapsed .admin-sidebar-brand {
   flex-direction: column;
@@ -384,7 +391,16 @@
   to   { opacity: 1; transform: translateY(0) }
 }
 @media (prefers-reduced-motion: no-preference) {
+  .admin-workspace-heading,
   .admin-section-content { animation: admin-fade-up .32s ease both }
+}
+@keyframes admin-reduced-fade {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-workspace-heading,
+  .admin-section-content { animation: admin-reduced-fade .32s ease both }
 }
 
 /* ── Mobile toggle ── */
@@ -481,14 +497,15 @@
 
 /* ══ Reduced motion ══════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
-  .admin-sidebar,
-  .admin-sidebar-collapse-icon,
-  .admin-brand-copy,
   .admin-nav-label,
   .admin-nav-text,
-  .admin-sidebar-footer small,
   .admin-sidebar-nav,
   .admin-sidebar-nav button,
   .admin-sidebar-footer,
   .admin-sidebar-search { transition: none !important }
+
+  .admin-sidebar { transition: flex-basis .22s ease-out, transform .22s ease-out }
+  .admin-sidebar-collapse-icon { transition: transform .18s ease }
+  .admin-brand-copy { transition: opacity .14s ease, max-width .18s ease }
+  .admin-sidebar-footer small { transition: opacity .14s ease, max-width .18s ease }
 }

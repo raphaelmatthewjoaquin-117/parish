@@ -2,11 +2,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from 'react'
 import { API_BASE_URL, apiClient, useApiError as formatApiError } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import type { ModuleOverrides } from '../utils/rbac'
+import { AdminBookingAvailabilityPage } from './AdminBookingAvailabilityPage'
 import '../PagesCSS/AdminOperationsPage.css'
 
 
-export type AdminOperationsTab = 'schedule' | 'intentions' | 'finance' | 'applications' | 'stats' | 'service-fields'
+export type AdminOperationsTab = 'schedule' | 'intentions' | 'availability' | 'finance' | 'applications' | 'stats' | 'service-fields'
 
 type Schedule = { id: number; title: string; date: string; time: string; location: string; priestUsername: string; notes?: string; status: string }
 // type Application = { id: number; firstName: string; lastName: string; email: string; mobileNumber?: string; address?: string; serviceName: string; scheduledDate: string; scheduledTime: string; status: string; notes?: string; attendanceStatus?: string }
@@ -27,6 +29,7 @@ type ServiceField = { id: number; serviceId: number; serviceName: string; key: s
 
 const emptySchedule = { title: '', date: '', time: '', location: '', priestUsername: '', notes: '', status: 'Scheduled' }
 const emptyServiceField = { serviceId: '', key: '', label: '', type: 'text', required: false, sortOrder: 0 }
+const formatFinanceAmount = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount)
 
 type AdminOperationsPageProps = {
   initialTab?: AdminOperationsTab
@@ -73,6 +76,7 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
   const canManageFinance = financeOverride ? financeOverride.edit : canViewFinanceRecords
   const canReviewFinance = financeOverride ? financeOverride.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
   const canReconcileFinance = financeOverride ? financeOverride.edit : ['Admin', 'Bookkeeper'].includes(staffRole)
+  const canManageBookingAvailability = overrides?.ServiceRequest ? overrides.ServiceRequest.edit : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)
 
   const showError = (reason: unknown) => setError(formatApiError(reason))
   const run = async (operation: () => Promise<void>) => {
@@ -323,10 +327,9 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
   return <section className={`operations-page container-fluid py-4 ${embedded ? 'admin-embedded-page' : ''}`}>
     {!embedded && <div className="operations-heading"><div><p className="eyebrow">Staff workspace</p><h1>Administrative Operations</h1></div></div>}
     {!embedded && <nav className="operations-tabs nav nav-tabs mb-4" aria-label="Administrative operations">
-      {([['schedule', 'Service schedule'], ['intentions', 'Mass intentions'], ['finance', 'Finance and reports'], ['stats', 'Statistical & Demographic Reports'], ['service-fields', 'Booking form fields']] as const).map(([value, label]) => <button key={value} className={`nav-link ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)}>{label}</button>)}
+      {([['schedule', 'Service schedule'], ['intentions', 'Mass intentions'], ['availability', 'Booking availability'], ['finance', 'Finance and reports'], ['stats', 'Statistical & Demographic Reports'], ['service-fields', 'Booking form fields']] as const).map(([value, label]) => <button key={value} className={`nav-link ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)}>{label}</button>)}
     </nav>}
-    {message && <p className="success-message">{message}</p>}
-    {error && <p className="error-message">{error}</p>}
+    <AdminFeedback message={message} error={error} onDismiss={() => { setMessage(''); setError('') }} />
 
     {tab === 'schedule' && <div className="operations-grid">
       {(canCreateSchedule || editingSchedule !== null) && <form className="operations-form" onSubmit={saveSchedule}>
@@ -340,44 +343,72 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
         <button type="submit">{editingSchedule ? 'Save changes' : 'Add schedule'}</button>
         {editingSchedule !== null && <button type="button" onClick={() => { setEditingSchedule(null); setScheduleForm(emptySchedule) }}>Cancel edit</button>}
       </form>}
-      <div className="operations-list">
+      <div className="operations-list schedule-list">
         <h2>{canManageSchedule ? 'Service schedules' : 'Schedule overview'}</h2>
         {schedules.map(item => <article key={item.id}>
           <div><strong>{item.title}</strong><span>{item.date} at {item.time} · {item.location}</span><small>{item.priestUsername} · {item.status}</small></div>
-          {canManageSchedule && <button type="button" onClick={() => { setEditingSchedule(item.id); setScheduleForm({ title: item.title, date: String(item.date).slice(0, 10), time: item.time, location: item.location, priestUsername: item.priestUsername, notes: item.notes || '', status: item.status }) }}>Edit</button>}
-          {canDeleteSchedule && <button type="button" onClick={() => deleteSchedule(item.id)}>Delete</button>}
+          <div className="schedule-actions">
+            {canManageSchedule && <button type="button" onClick={() => { setEditingSchedule(item.id); setScheduleForm({ title: item.title, date: String(item.date).slice(0, 10), time: item.time, location: item.location, priestUsername: item.priestUsername, notes: item.notes || '', status: item.status }) }}>Edit</button>}
+            {canDeleteSchedule && <button type="button" onClick={() => deleteSchedule(item.id)}>Delete</button>}
+          </div>
         </article>)}
       </div>
     </div>}
 
     {tab === 'intentions' && <div className="operations-grid"><form className="operations-form" onSubmit={saveIntention}><h2>Record Mass intention</h2><label>Date<input required type="date" value={intentionForm.date} onChange={event => setIntentionForm({ ...intentionForm, date: event.target.value })} /></label><label>Time<input required type="time" value={intentionForm.time} onChange={event => setIntentionForm({ ...intentionForm, time: event.target.value })} /></label><label>Offering<input type="number" min="0" step="0.01" value={intentionForm.offering} onChange={event => setIntentionForm({ ...intentionForm, offering: event.target.value })} /></label><label>Requested by<input required value={intentionForm.requestedBy} onChange={event => setIntentionForm({ ...intentionForm, requestedBy: event.target.value })} /></label><label>Intention<textarea required value={intentionForm.intentionText} onChange={event => setIntentionForm({ ...intentionForm, intentionText: event.target.value })} /></label><button type="submit">Save intention</button></form><div className="operations-list"><h2>Mass intentions</h2>{intentions.map(item => <article key={item.MassIntentionId}><div><strong>{item.IntentionDate} at {item.IntentionTime}</strong><span>{item.IntentionText}</span><small>{item.RequestedBy} · Offering {item.Offering}</small></div><button type="button" onClick={() => cancelIntention(item.MassIntentionId)}>Cancel</button></article>)}</div></div>}
 
+    {tab === 'availability' && <AdminBookingAvailabilityPage canEdit={canManageBookingAvailability} />}
+
     {tab === 'finance' && <>
       <div className="operations-grid">
         {canManageFinance && <form className="operations-form" onSubmit={saveFinance}>
+          <p className="finance-eyebrow">{editingFinanceId ? 'Update record' : 'New record'}</p>
           <h2>{editingFinanceId ? 'Edit financial entry' : 'Record financial entry'}</h2>
+          <p className="finance-card-description">Add parish income or expenses. New entries are saved as drafts until submitted.</p>
           <label>Date<input required type="date" value={financeForm.date} onChange={event => setFinanceForm({ ...financeForm, date: event.target.value })} /></label>
           <label>Type<select value={financeForm.entryType} onChange={event => setFinanceForm({ ...financeForm, entryType: event.target.value })}><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label>
           <label>Description<input required value={financeForm.description} onChange={event => setFinanceForm({ ...financeForm, description: event.target.value })} /></label>
           <label>Amount<input required type="number" min="0.01" step="0.01" value={financeForm.amount} onChange={event => setFinanceForm({ ...financeForm, amount: event.target.value })} /></label>
-          <button type="submit">{editingFinanceId ? 'Save changes' : 'Save draft'}</button>
+          <button className="accent" type="submit">{editingFinanceId ? 'Save changes' : 'Save draft'}</button>
           {editingFinanceId && <button type="button" onClick={() => { setEditingFinanceId(null); setFinanceForm({ date: '', entryType: 'StoleFee', description: '', amount: '' }) }}>Cancel edit</button>}
         </form>}
-        <div className="operations-list">
-          <div className="list-heading">
-            <h2>Finance summary</h2>
+        <div className="operations-list finance-summary-panel">
+          <div className="finance-summary-heading">
+            <div>
+              <p className="finance-eyebrow">Reports</p>
+              <h2>Finance summary</h2>
+              <p className="finance-card-description">Review approved and reconciled entries, then export the filtered results.</p>
+            </div>
+            <button type="button" className="secondary" onClick={exportFinanceCsv}>Export CSV</button>
+          </div>
+          <div className="finance-report-filters">
             <label>From<input type="date" value={reportStart} onChange={event => setReportStart(event.target.value)} /></label>
             <label>To<input type="date" value={reportEnd} onChange={event => setReportEnd(event.target.value)} /></label>
             <label>Category<select value={reportType} onChange={event => setReportType(event.target.value)}><option value="">All</option><option value="StoleFee">Stole fee</option><option value="MassOffering">Mass offering</option><option value="Donation">Donation</option><option value="Rental">Rental</option><option value="OtherIncome">Other income</option><option value="Expense">Expense</option></select></label>
-            <button type="button" onClick={() => run(async () => setReport(await apiClient.admin.financeReport(token, reportFilters())))}>Refresh report</button>
-            <button type="button" onClick={exportFinanceCsv}>Export CSV</button>
+            <button type="button" onClick={() => run(async () => setReport(await apiClient.admin.financeReport(token, reportFilters())))}>Apply filters</button>
           </div>
-          {report?.totals?.map((item: any) => <article key={item.EntryType}><div><strong>{item.EntryType}</strong><span>{item.EntryCount} approved/reconciled entries</span><small>Total: {item.Total}</small></div></article>)}
-          {canViewFinanceRecords && <>
-            <h2>Recent entries</h2>
+          <div className="finance-category-grid" aria-live="polite">
+            {report?.totals?.map(item => <article className="finance-category-card" key={item.EntryType}>
+              <span>{item.EntryType.replace(/([A-Z])/g, ' $1').trim()}</span>
+              <strong>{formatFinanceAmount(Number(item.Total))}</strong>
+              <small>{item.EntryCount} approved or reconciled {item.EntryCount === 1 ? 'entry' : 'entries'}</small>
+            </article>)}
+            {report && report.totals?.length === 0 && <p className="finance-empty-state">No approved or reconciled entries match these filters.</p>}
+          </div>
+          {canViewFinanceRecords && <div className="finance-records">
+            <div className="finance-section-heading">
+              <div><h2>Recent entries</h2><p>Review each item and take the next available workflow action.</p></div>
+              <span>{finance.length} {finance.length === 1 ? 'entry' : 'entries'}</span>
+            </div>
+            {finance.length === 0 && <p className="finance-empty-state">No financial entries have been recorded yet.</p>}
             {finance.map(item => <article key={item.FinancialEntryId}>
-              <div><strong>{item.EntryDate} · {item.EntryType}</strong><span>{item.Description}</span><small>{item.Amount} · {item.EnteredBy} · {item.Status || 'Legacy'}</small></div>
-              <div className="button-row">
+              <div className="finance-entry-details">
+                <strong>{item.Description}</strong>
+                <span>{String(item.EntryDate).slice(0, 10)} · {item.EntryType.replace(/([A-Z])/g, ' $1').trim()} · {item.EnteredBy}</span>
+                <span className="finance-entry-status" data-status={item.Status || 'Legacy'}>{item.Status || 'Legacy'}</span>
+              </div>
+              <div className="finance-entry-actions">
+                <strong className="finance-entry-amount">{formatFinanceAmount(Number(item.Amount))}</strong>
                 {['Draft', 'Rejected'].includes(item.Status || 'Draft') && <button type="button" onClick={() => editFinance(item)}>Edit</button>}
                 {['Draft', 'Rejected'].includes(item.Status || 'Draft') && canReconcileFinance && <button type="button" onClick={() => submitFinance(item.FinancialEntryId)}>Submit</button>}
                 {item.Status === 'Draft' && <button type="button" onClick={() => deleteFinance(item.FinancialEntryId)}>Delete</button>}
@@ -386,22 +417,28 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
                 {item.Status === 'Approved' && canReconcileFinance && <button type="button" onClick={() => reconcileFinance(item.FinancialEntryId)}>Reconcile</button>}
               </div>
             </article>)}
-          </>}
+          </div>}
         </div>
       </div>
+      <div className="finance-history-grid">
       {canViewFinanceRecords && <div className="operations-list finance-audit-panel">
-        <div className="list-heading"><h2>Finance audit history</h2><button type="button" onClick={loadFinanceAudit}>Refresh history</button></div>
-        {financeAudit.length === 0 ? <p>No finance audit entries found.</p> : financeAudit.map(item => <article key={item.AuditId}><div><strong>{item.ActionName} · Entry #{item.FinancialEntryId}</strong><span>{item.EntryType} · {item.Description}</span><small>{item.ChangedBy} · {new Date(item.ChangedAt).toLocaleString()} · {item.Details}</small></div></article>)}
+        <div className="finance-section-heading">
+          <div><h2>Finance audit history</h2><p>A record of changes made to financial entries.</p></div>
+          <button type="button" className="secondary" onClick={loadFinanceAudit}>Refresh</button>
+        </div>
+        {financeAudit.length === 0 ? <p className="finance-empty-state">No finance audit entries found.</p> : financeAudit.map(item => <article key={item.AuditId}><div><strong>{item.ActionName} · Entry #{item.FinancialEntryId}</strong><span>{item.EntryType.replace(/([A-Z])/g, ' $1').trim()} · {item.Description}</span><small>{item.ChangedBy} · {new Date(item.ChangedAt).toLocaleString()} · {item.Details}</small></div></article>)}
       </div>}
       <div className="operations-list finance-audit-panel">
-        <div className="list-heading"><h2>Generated finance reports</h2><button type="button" onClick={loadFinanceAudit}>Refresh reports</button></div>
-        {financeReportHistory.length === 0 ? <p>No scheduled reports have been generated yet.</p> : financeReportHistory.map(item => <article key={item.FinanceReportSnapshotId}><div><strong>{item.ReportType} report · {String(item.PeriodStart).slice(0, 10)} to {String(item.PeriodEnd).slice(0, 10)}</strong><span>Income {item.TotalIncome} · Expenses {item.TotalExpenses} · Net {item.NetTotal}</span><small>Generated {new Date(item.GeneratedAt).toLocaleString()} by {item.GeneratedBy}</small></div></article>)}
+        <div className="finance-section-heading">
+          <div><h2>Generated finance reports</h2><p>Previously generated report snapshots.</p></div>
+          <button type="button" className="secondary" onClick={loadFinanceAudit}>Refresh</button>
+        </div>
+        {financeReportHistory.length === 0 ? <p className="finance-empty-state">No scheduled reports have been generated yet.</p> : financeReportHistory.map(item => <article key={item.FinanceReportSnapshotId}><div><strong>{item.ReportType} report · {String(item.PeriodStart).slice(0, 10)} to {String(item.PeriodEnd).slice(0, 10)}</strong><span>Income {formatFinanceAmount(Number(item.TotalIncome))} · Expenses {formatFinanceAmount(Number(item.TotalExpenses))} · Net {formatFinanceAmount(Number(item.NetTotal))}</span><small>Generated {new Date(item.GeneratedAt).toLocaleString()} by {item.GeneratedBy}</small></div></article>)}
+      </div>
       </div>
     </>}
 
-    {tab === 'finance' && <div className="operations-list finance-audit-panel"><div className="list-heading"><h2>Finance audit history</h2><button type="button" onClick={loadFinanceAudit}>Refresh history</button></div>{financeAudit.length === 0 ? <p>No finance audit entries found.</p> : financeAudit.map(item => <article key={item.AuditId}><div><strong>{item.ActionName} · Entry #{item.FinancialEntryId}</strong><span>{item.EntryType} · {item.Description}</span><small>{item.ChangedBy} · {new Date(item.ChangedAt).toLocaleString()} · {item.Details}</small></div></article>)}</div>}
 
-    {tab === 'finance' && <div className="operations-list finance-audit-panel"><div className="list-heading"><h2>Generated finance reports</h2><button type="button" onClick={loadFinanceAudit}>Refresh reports</button></div>{financeReportHistory.length === 0 ? <p>No scheduled reports have been generated yet.</p> : financeReportHistory.map(item => <article key={item.FinanceReportSnapshotId}><div><strong>{item.ReportType} report · {String(item.PeriodStart).slice(0, 10)} to {String(item.PeriodEnd).slice(0, 10)}</strong><span>Income {item.TotalIncome} · Expenses {item.TotalExpenses} · Net {item.NetTotal}</span><small>Generated {new Date(item.GeneratedAt).toLocaleString()} by {item.GeneratedBy}</small></div></article>)}</div>}
 
     {tab === 'stats' && (
       <div className="stats-container">

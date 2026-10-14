@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import interactionPlugin from '@fullcalendar/interaction'
 import { SacramentalRecordForm } from '../components/SacramentalRecordForm'
+import { AdminFeedback } from '../components/AdminFeedback'
 import { API_BASE_URL as API_URL } from '../api/client'
 import { ForgotPasswordForm } from '../components/ForgotPasswordForm'
 import type { ModuleOverrides } from '../utils/rbac'
@@ -138,6 +144,12 @@ const initialForm: EventForm = {
   photoUrl: '',
 }
 
+const formatServiceRequestStatus = (status: string) => ({
+  PendingVerification: 'Pending verification',
+  VoidedNoShow: 'No-show',
+  ConflictVoided: 'Schedule conflict',
+}[status] || status.replace(/([a-z])([A-Z])/g, '$1 $2'))
+
 export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated, overrides }: AdminEventsPageProps) {
   // Tab state
   const [activeTab, setActiveTab] = useState<AdminEventsTab>(initialTab)
@@ -157,6 +169,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const [serviceRequests, setServiceRequests] = useState<ServiceRequestItem[]>([])
   const [selectedServiceRequest, setSelectedServiceRequest] = useState<ServiceRequestItem | null>(null)
   const [serviceRequestsLoading, setServiceRequestsLoading] = useState(false)
+  const [serviceRequestStatusFilter, setServiceRequestStatusFilter] = useState('All')
   const [adminNotes, setAdminNotes] = useState('')
   const [masses, setMasses] = useState<MassScheduleItem[]>([])
   const [massesLoading, setMassesLoading] = useState(false)
@@ -169,6 +182,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const [sacramentalSearch, setSacramentalSearch] = useState<SacramentalSearchParams>({
     type: '', q: '', startDate: '', endDate: '', priest: '', page: 1, limit: 50
   })
+  const [showAdvancedSacramentalFilters, setShowAdvancedSacramentalFilters] = useState(false)
   const [sacramentalArchives, setSacramentalArchives] = useState<SacramentalArchiveItem[]>([])
   const [archivesLoading, setArchivesLoading] = useState(false)
   const [showArchiveModal, setShowArchiveModal] = useState(false)
@@ -188,7 +202,12 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   // Common states
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [errorState, setErrorState] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const setError = (nextError: string | null) => {
+    setErrorState(nextError)
+    setMessage(null)
+  }
   const [adminToken, setAdminToken] = useState<string>(() => {
     if (typeof window === 'undefined') return ''
     return window.localStorage.getItem('adminToken') ?? ''
@@ -395,6 +414,26 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       .finally(() => setMassesLoading(false))
   }
 
+  const massCalendarEvents = masses
+    .filter(mass => mass.date)
+    .map(mass => {
+      const dateOnly = mass.date.includes('T') ? new Date(mass.date).toISOString().slice(0, 10) : mass.date
+      return {
+        id: String(mass.id),
+        title: mass.title || 'Mass',
+        start: mass.time ? `${dateOnly}T${mass.time}` : dateOnly,
+        allDay: !mass.time,
+        backgroundColor: '#c9941f',
+        borderColor: '#c9941f',
+        textColor: '#ffffff',
+        extendedProps: {
+          location: mass.location,
+          priestUsername: mass.priestUsername,
+          notes: mass.notes,
+        },
+      }
+    })
+
   const loadSacramentalRecords = (search = sacramentalSearch) => {
     setSacramentalLoading(true)
     setError(null)
@@ -438,6 +477,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const clearSacramentalSearch = () => {
     const clearedSearch = { ...sacramentalSearch, type: '', q: '', startDate: '', endDate: '', priest: '', page: 1 }
     setSacramentalSearch(clearedSearch)
+    setShowAdvancedSacramentalFilters(false)
     loadSacramentalRecords(clearedSearch)
   }
 
@@ -501,7 +541,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         setArchiveBookNumber('')
         setArchivePageNumber('')
         setArchiveNotes('')
-        setError('Archive entry updated.')
+        setMessage('Archive entry updated.')
         loadSacramentalArchives()
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'Unable to update archive')
@@ -527,7 +567,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       setArchivePageNumber('')
       setArchiveNotes('')
       setArchiveFile(null)
-      setError('Archive uploaded and linked to the ledger.')
+      setMessage('Archive uploaded and linked to the ledger.')
       loadSacramentalArchives()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to upload archive')
@@ -542,7 +582,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     setError(null)
     try {
       await fetch(`${API_URL}/api/admin/sacramental/archives/${archiveId}`, { method: 'DELETE', headers: { 'x-admin-token': adminToken } }).then(response => response.ok ? response.json() : response.json().then(body => Promise.reject(new Error(body.message || 'Unable to delete archive entry'))))
-      setError('Archive entry removed.')
+      setMessage('Archive entry removed.')
       loadSacramentalArchives()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to delete archive')
@@ -560,7 +600,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       await fetch(`${API_URL}/api/admin/sacramental/${selectedSacramentalRecord.RecordType.toLowerCase()}/${selectedSacramentalRecord.Id}`, { method: 'DELETE', headers: { 'x-admin-token': adminToken } }).then(response => response.ok ? response.json() : response.json().then(body => Promise.reject(new Error(body.message || 'Unable to delete record'))))
       setSelectedSacramentalRecord(null)
       setShowArchiveModal(false)
-      setError('Record removed and archived in the audit log.')
+      setMessage('Record removed and archived in the audit log.')
       loadSacramentalRecords()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to delete record')
@@ -802,6 +842,11 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const dashboardPending = serviceRequests.filter(request => request.status !== 'Confirmed' && request.status !== 'Rejected').length
   const dashboardApproved = serviceRequests.filter(request => request.status === 'Confirmed').length
   const dashboardRejected = serviceRequests.filter(request => request.status === 'Rejected').length
+  const serviceRequestStatuses = [...new Set(serviceRequests.map(request => request.status))]
+    .sort((a, b) => formatServiceRequestStatus(a).localeCompare(formatServiceRequestStatus(b)))
+  const visibleServiceRequests = serviceRequestStatusFilter === 'All'
+    ? serviceRequests
+    : serviceRequests.filter(request => request.status === serviceRequestStatusFilter)
 
   const serviceTypeBreakdown = Object.entries(
     serviceRequests.reduce<Record<string, number>>((totals, request) => {
@@ -812,6 +857,16 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   )
     .sort(([, totalA], [, totalB]) => totalB - totalA)
     .slice(0, 5)
+
+  const hasSacramentalSearch = Boolean(
+    sacramentalSearch.type || sacramentalSearch.q.trim() || sacramentalSearch.startDate ||
+    sacramentalSearch.endDate || sacramentalSearch.priest.trim(),
+  )
+  const advancedSacramentalFilterCount = [
+    sacramentalSearch.startDate,
+    sacramentalSearch.endDate,
+    sacramentalSearch.priest.trim(),
+  ].filter(Boolean).length
 
   const recentActivity = [
     ...serviceRequests.map(request => ({
@@ -1110,7 +1165,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 <label className={`upload-tile${photoFile ? ' upload-tile--ready' : ''}`} aria-label="Upload event photo">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                     onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
                   />
                   <span className="upload-tile-icon" aria-hidden="true">{photoFile ? '✓' : '+'}</span>
@@ -1125,7 +1180,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   )}
                 </label>
               </div>
-              {error && <p className="error-message">{error}</p>}
+              <AdminFeedback message={message} error={errorState} onDismiss={() => setError(null)} />
               <div className="button-row">
                 <button type="submit" disabled={saving}>
                   {editingId ? 'Save changes' : 'Add event'}
@@ -1182,7 +1237,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         <div className="admin-panel">
           <div className="admin-prayers-list">
             <h3>Prayer Requests</h3>
-            {error && <p className="error-message">{error}</p>}
+            <AdminFeedback message={message} error={errorState} onDismiss={() => setError(null)} />
             {prayersLoading && <p>Loading prayers…</p>}
             {!prayersLoading && prayers.length === 0 && <p>No prayer requests found.</p>}
             {!prayersLoading && prayers.length > 0 && (
@@ -1363,20 +1418,59 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
 
       {activeTab === 'service-requests' && (
         <div className="admin-panel">
-          <div className="admin-service-list">
+          <div className="admin-service-list service-requests-list">
             <div className="service-list-heading">
               <div>
-                <p className="section-kicker">Bookings</p>
-                <h3>Service Requests</h3>
+                <p className="section-kicker">Parish office</p>
+                <h3>Service requests</h3>
+                <p className="service-list-description">Review booking details and confirm upcoming parish services.</p>
               </div>
-              {!serviceRequestsLoading && <span className="request-count">{serviceRequests.length} total</span>}
+              <button
+                type="button"
+                className="service-request-refresh"
+                onClick={loadServiceRequests}
+                disabled={serviceRequestsLoading}
+              >
+                {serviceRequestsLoading ? 'Refreshing…' : 'Refresh requests'}
+              </button>
             </div>
-            {error && <p className="error-message">{error}</p>}
-            {serviceRequestsLoading && <p>Loading service requests…</p>}
-            {!serviceRequestsLoading && serviceRequests.length === 0 && <p>No service requests found.</p>}
-            {!serviceRequestsLoading && serviceRequests.length > 0 && (
+            <AdminFeedback message={message} error={errorState} onDismiss={() => setError(null)} />
+            <div className="service-request-toolbar">
+              <label>
+                Filter by status
+                <select
+                  aria-label="Filter service requests by status"
+                  value={serviceRequestStatusFilter}
+                  onChange={event => setServiceRequestStatusFilter(event.target.value)}
+                >
+                  <option value="All">All statuses</option>
+                  {serviceRequestStatuses.map(status => (
+                    <option key={status} value={status}>{formatServiceRequestStatus(status)}</option>
+                  ))}
+                </select>
+              </label>
+              {!serviceRequestsLoading && (
+                <span className="request-count" aria-live="polite">
+                  Showing {visibleServiceRequests.length} of {serviceRequests.length} {serviceRequests.length === 1 ? 'request' : 'requests'}
+                </span>
+              )}
+            </div>
+            {serviceRequestsLoading && <p className="service-request-state">Loading service requests…</p>}
+            {!serviceRequestsLoading && serviceRequests.length === 0 && (
+              <div className="service-request-state">
+                <strong>No service requests yet</strong>
+                <span>New parish bookings will appear here.</span>
+              </div>
+            )}
+            {!serviceRequestsLoading && serviceRequests.length > 0 && visibleServiceRequests.length === 0 && (
+              <div className="service-request-state">
+                <strong>No requests with this status</strong>
+                <span>Choose another status to see more bookings.</span>
+              </div>
+            )}
+            {!serviceRequestsLoading && visibleServiceRequests.length > 0 && (
               <ul className="service-request-cards">
-                {serviceRequests.map(request => (
+                {visibleServiceRequests.map(request => (
                   <li
                     key={request.id}
                     className={`admin-service-row status-${request.status.toLowerCase()}`}
@@ -1388,7 +1482,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                           <span className="service-type">{request.serviceName}</span>
                         </div>
                         <span className={`badge status-badge ${request.status === 'Confirmed' ? 'confirmed' : request.status === 'Rejected' ? 'rejected' : 'pending'}`}>
-                          {request.status}
+                          {formatServiceRequestStatus(request.status)}
                         </span>
                       </div>
                       <div className="service-details">
@@ -1552,7 +1646,31 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               </div>
               {!massesLoading && <span className="request-count">{masses.length} upcoming</span>}
             </div>
-            {error && <p className="error-message">{error}</p>}
+
+            <div className="mass-calendar-wrapper">
+              <FullCalendar
+                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+                initialView="dayGridMonth"
+                headerToolbar={{
+                  left: 'prev,next today',
+                  center: 'title',
+                  right: 'dayGridMonth,timeGridWeek,timeGridDay',
+                }}
+                events={massCalendarEvents}
+                eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: true }}
+                contentHeight="auto"
+                eventDisplay="block"
+                dayMaxEvents={3}
+                eventContent={arg => (
+                  <div className="mass-calendar-event">
+                    {arg.timeText && <span className="mass-calendar-event-time">{arg.timeText}</span>}
+                    <span className="mass-calendar-event-title">{arg.event.title}</span>
+                  </div>
+                )}
+              />
+            </div>
+
+            <AdminFeedback message={message} error={errorState} onDismiss={() => setError(null)} />
             {massesLoading && <p>Loading Mass schedule...</p>}
             {!massesLoading && masses.length === 0 && <p>No upcoming Masses are assigned.</p>}
             {!massesLoading && masses.length > 0 && (
@@ -1586,72 +1704,99 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           <div className="sacramental-ledger">
             <div className="ledger-heading">
               <div>
-                <p className="section-kicker">Digital Ledger</p>
                 <h3>Sacramental Records</h3>
+                <p className="ledger-description">Search the parish register or add a new entry.</p>
               </div>
-              {canManageSacramentalRecords && <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>New record</button>}
+              {canManageSacramentalRecords && <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>Add a record</button>}
             </div>
 
-            {/* Search & Filter Bar */}
-            <div className="sacramental-search">
-              <div className="search-row">
-                <select
-                  value={sacramentalSearch.type}
-                  onChange={e => setSacramentalSearch(prev => ({ ...prev, type: e.target.value, page: 1 }))}
-                  className="search-select"
-                >
-                  <option value="">All Sacraments</option>
-                  <option value="baptism">Baptism</option>
-                  <option value="confirmation">Confirmation</option>
-                  <option value="marriage">Marriage</option>
-                  <option value="death">Death</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="Search by name or registry number..."
-                  value={sacramentalSearch.q}
-                  onChange={e => setSacramentalSearch(prev => ({ ...prev, q: e.target.value, page: 1 }))}
-                  className="search-input"
-                />
-                <input
-                  type="date"
-                  value={sacramentalSearch.startDate}
-                  onChange={e => setSacramentalSearch(prev => ({ ...prev, startDate: e.target.value, page: 1 }))}
-                  className="search-date"
-                  title="Start date"
-                />
-                <input
-                  type="date"
-                  value={sacramentalSearch.endDate}
-                  onChange={e => setSacramentalSearch(prev => ({ ...prev, endDate: e.target.value, page: 1 }))}
-                  className="search-date"
-                  title="End date"
-                />
-                <input
-                  type="text"
-                  placeholder="Minister/Priest name..."
-                  value={sacramentalSearch.priest}
-                  onChange={e => setSacramentalSearch(prev => ({ ...prev, priest: e.target.value, page: 1 }))}
-                  className="search-input"
-                />
-                <button
-                  type="button"
-                  onClick={() => loadSacramentalRecords({ ...sacramentalSearch, page: 1 })}
-                  className="primary-btn"
-                >
-                  Search
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSacramentalSearch}
-                  className="secondary-btn"
-                >
-                  Clear
-                </button>
+            <form
+              className="sacramental-search"
+              aria-label="Search sacramental records"
+              onSubmit={event => {
+                event.preventDefault()
+                loadSacramentalRecords({ ...sacramentalSearch, page: 1 })
+              }}
+            >
+              <div className="sacramental-search-row">
+                <label className="sacramental-search-field sacramental-name-field">
+                  <span>Name or registry number</span>
+                  <input
+                    type="text"
+                    value={sacramentalSearch.q}
+                    onChange={e => setSacramentalSearch(prev => ({ ...prev, q: e.target.value, page: 1 }))}
+                    className="search-input"
+                    placeholder="e.g. Maria Santos or B-1024"
+                  />
+                </label>
+                <label className="sacramental-search-field sacramental-type-field">
+                  <span>Sacrament</span>
+                  <select
+                    value={sacramentalSearch.type}
+                    onChange={e => setSacramentalSearch(prev => ({ ...prev, type: e.target.value, page: 1 }))}
+                    className="search-select"
+                  >
+                    <option value="">All types</option>
+                    <option value="baptism">Baptism</option>
+                    <option value="confirmation">Confirmation</option>
+                    <option value="marriage">Marriage</option>
+                    <option value="death">Death</option>
+                  </select>
+                </label>
+                <div className="sacramental-search-actions">
+                  <button type="submit" className="primary-btn">Search records</button>
+                  <button
+                    type="button"
+                    className="filter-toggle"
+                    aria-expanded={showAdvancedSacramentalFilters}
+                    aria-controls="sacramental-advanced-filters"
+                    onClick={() => setShowAdvancedSacramentalFilters(open => !open)}
+                  >
+                    {showAdvancedSacramentalFilters ? 'Fewer filters' : 'More filters'}
+                    {advancedSacramentalFilterCount > 0 && <span> ({advancedSacramentalFilterCount} active)</span>}
+                  </button>
+                  {hasSacramentalSearch && (
+                    <button type="button" onClick={clearSacramentalSearch} className="secondary-btn">Clear</button>
+                  )}
+                </div>
               </div>
-            </div>
+              <div
+                id="sacramental-advanced-filters"
+                className="sacramental-advanced-filters"
+                hidden={!showAdvancedSacramentalFilters}
+              >
+                <label className="sacramental-search-field">
+                  <span>From date</span>
+                  <input
+                    type="date"
+                    value={sacramentalSearch.startDate}
+                    onChange={e => setSacramentalSearch(prev => ({ ...prev, startDate: e.target.value, page: 1 }))}
+                    className="search-date"
+                  />
+                </label>
+                <label className="sacramental-search-field">
+                  <span>To date</span>
+                  <input
+                    type="date"
+                    value={sacramentalSearch.endDate}
+                    onChange={e => setSacramentalSearch(prev => ({ ...prev, endDate: e.target.value, page: 1 }))}
+                    className="search-date"
+                  />
+                </label>
+                <label className="sacramental-search-field">
+                  <span>Minister or priest</span>
+                  <input
+                    type="text"
+                    value={sacramentalSearch.priest}
+                    onChange={e => setSacramentalSearch(prev => ({ ...prev, priest: e.target.value, page: 1 }))}
+                    className="search-input"
+                    placeholder="Name of minister"
+                  />
+                </label>
+              </div>
+            </form>
 
-            {error && <p className="error-message">{error}</p>}
+            <AdminFeedback message={message} error={errorState} onDismiss={() => setError(null)} />
 
             {/* Records Table */}
             <div className="sacramental-table-container">
@@ -1836,8 +1981,15 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         </div>
       )}
 
-      {showRecordForm && (
-        <div className="admin-prayer-detail sacramental-form-modal">
+      {showRecordForm && createPortal(
+        <div
+          className="service-request-modal-overlay sacramental-form-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sacramental-form-title"
+          onClick={event => { if (event.target === event.currentTarget) setShowRecordForm(false) }}
+          onKeyDown={event => { if (event.key === 'Escape') setShowRecordForm(false) }}
+        >
           <SacramentalRecordForm
             key={`${recordFormType}-${recordFormRecord?.Id ?? 'new'}`}
             type={recordFormType}
@@ -1846,7 +1998,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             onCancel={() => setShowRecordForm(false)}
             onSaved={() => { setShowRecordForm(false); setSelectedSacramentalRecord(null); loadSacramentalRecords() }}
           />
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Archive Upload Modal */}

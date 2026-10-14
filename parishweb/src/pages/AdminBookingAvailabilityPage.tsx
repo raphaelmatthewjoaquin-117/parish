@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { API_BASE_URL as API_URL, apiClient, useApiError as formatApiError } from '../api/client'
+import { AdminFeedback } from '../components/AdminFeedback'
 import '../PagesCSS/AdminOperationsPage.css'
 
 type BlockedSlot = { id: number; date: string; time: string | null; scope: 'All' | 'Service' | 'Certificate'; serviceId: number | null; serviceName: string | null; reason: string | null }
@@ -63,8 +64,7 @@ export function AdminBookingAvailabilityPage({ canEdit = true }: { canEdit?: boo
   if (!token) return <section className="operations-page container py-5"><p className="alert alert-warning">Staff sign-in is required.</p></section>
 
   return <section className="operations-page admin-embedded-page container-fluid py-4">
-    {message && <p className="success-message alert alert-success">{message}</p>}
-    {error && <p className="error-message alert alert-danger">{error}</p>}
+    <AdminFeedback message={message} error={error} onDismiss={() => { setMessage(''); setError('') }} />
     {canEdit && <form className="card border-0 shadow-sm p-3 mb-4 row g-3" onSubmit={event => void submit(event)}>
       <div className="col-md-3"><label className="form-label" htmlFor="block-date">Date</label><input id="block-date" className="form-control" type="date" required min={today} value={date} onChange={event => setDate(event.target.value)} /></div>
       <div className="col-md-3"><label className="form-label" htmlFor="block-time">Time</label><select id="block-time" className="form-select" value={time} onChange={event => setTime(event.target.value)}><option value="">Whole day</option>{timeOptions.map(option => <option key={option}>{option}</option>)}</select></div>

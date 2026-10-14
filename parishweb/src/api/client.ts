@@ -217,11 +217,11 @@ export const apiClient = {
   },
 
   siteContent: {
-    async get<T>(page: 'about' | 'gallery' | 'contact' | 'footer') {
+    async get<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news') {
       return apiRequest<{ content: T | null }>(`/api/site-content/${page}`);
     },
 
-    async save<T>(page: 'about' | 'gallery' | 'contact' | 'footer', content: T, adminToken: string) {
+    async save<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news', content: T, adminToken: string) {
       return apiRequest<{ content: T }>(`/api/admin/site-content/${page}`, {
         method: 'PUT',
         body: { content },
@@ -383,6 +383,13 @@ export const apiClient = {
       return apiRequest<{ message: string }>(`/api/admin/certificate-requests/${requestId}`, {
         method: 'PUT',
         body: { status },
+        adminToken,
+      });
+    },
+
+    async deleteCertificateRequest(requestId: number, adminToken: string) {
+      return apiRequest<{ message: string }>(`/api/admin/certificate-requests/${requestId}`, {
+        method: 'DELETE',
         adminToken,
       });
     },

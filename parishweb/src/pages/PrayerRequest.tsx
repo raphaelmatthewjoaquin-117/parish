@@ -19,12 +19,12 @@ interface FormErrors {
 }
 
 const CATEGORIES: { value: PrayerCategory; label: string }[] = [
-  { value: 'healing', label: '🙏 Healing & Health' },
-  { value: 'thanksgiving', label: '🙌 Thanksgiving & Praise' },
-  { value: 'guidance', label: '🕊️ Guidance & Wisdom' },
-  { value: 'family', label: '👨‍👩‍👧‍👦 Family & Relationships' },
-  { value: 'deceased', label: '✝️ For the Deceased' },
-  { value: 'other', label: '📝 Other Intentions' },
+  { value: 'healing', label: 'Healing & Health' },
+  { value: 'thanksgiving', label: 'Thanksgiving & Praise' },
+  { value: 'guidance', label: 'Guidance & Wisdom' },
+  { value: 'family', label: 'Family & Relationships' },
+  { value: 'deceased', label: 'For the Deceased' },
+  { value: 'other', label: 'Other Intentions' },
 ]
 
 const INITIAL_FORM: PrayerFormData = {
