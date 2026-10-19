@@ -46,6 +46,7 @@ BEGIN
         EmailAddress,
         EmailConfirmed,
         PasswordHash,
+        MustChangePassword,
         CreatedAt
     )
     VALUES (
@@ -53,6 +54,7 @@ BEGIN
         'admin@parish.local',
         1,
         'ATO6EGmFV+at531pdezGByFv1+9c+oyQXJQml0WXd+XANpoz/EgClGs8tr7oK2GWlA==',
+        1,
         SYSUTCDATETIME()
     );
 
