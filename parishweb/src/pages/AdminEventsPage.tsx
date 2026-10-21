@@ -216,6 +216,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const [authLoading, setAuthLoading] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState('')
@@ -916,16 +917,20 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               required
             />
           </label>
-          <label>
+          <label htmlFor="admin-login-password">
             Password
+          </label>
+          <div className="admin-password-field">
             <input
-              type="password"
+              id="admin-login-password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="Enter your password"
               required
             />
-          </label>
+            <button type="button" className="password-visibility-btn" aria-label={`${showPassword ? 'Hide' : 'Show'} password`} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? 'Hide' : 'Show'}</button>
+          </div>
           {authError && <p className="error-message">{authError}</p>}
           <button type="submit" disabled={authLoading}>
             {authLoading ? 'Signing in...' : 'Sign in'}

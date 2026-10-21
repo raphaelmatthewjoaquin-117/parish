@@ -62,3 +62,23 @@ describe('AdminEventsPage service request status filter', () => {
     expect(within(requestList).queryByText('Taylor Pending')).toBeNull()
   })
 })
+
+describe('AdminEventsPage login password visibility', () => {
+  beforeEach(() => {
+    window.localStorage.removeItem('adminToken')
+  })
+
+  it('shows and hides the password on the staff sign-in form', async () => {
+    render(<AdminEventsPage />)
+
+    const passwordInput = await screen.findByLabelText('Password')
+    expect(passwordInput.getAttribute('type')).toBe('password')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(passwordInput.getAttribute('type')).toBe('text')
+    expect(screen.getByRole('button', { name: 'Hide password' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+    expect(passwordInput.getAttribute('type')).toBe('password')
+  })
+})

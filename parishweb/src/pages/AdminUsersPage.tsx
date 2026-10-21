@@ -40,8 +40,10 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
   const [message, setMessage] = useState('')
   const [roleFilter, setRoleFilter] = useState('All roles')
   const [newUser, setNewUser] = useState({ userName: '', email: '', password: '', role: 'Staff' })
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false)
   const [accountEdit, setAccountEdit] = useState<AccountEdit | null>(null)
   const [accountValue, setAccountValue] = useState('')
+  const [showAccountPassword, setShowAccountPassword] = useState(false)
   const [permissionsUser, setPermissionsUser] = useState<UserItem | null>(null)
   const canManageAccounts = currentRole === 'Admin'
   const canAssignRoles = ['Admin', 'ParishPriest', 'Secretary'].includes(currentRole)
@@ -106,6 +108,7 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
   const openAccountEdit = (user: UserItem, field: AccountEdit['field']) => {
     setError('')
     setMessage('')
+    setShowAccountPassword(false)
     setAccountEdit({ userId: user.userId, field })
     setAccountValue(field === 'email' ? user.email : '')
   }
@@ -126,6 +129,7 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
     if (updated) {
       setAccountEdit(null)
       setAccountValue('')
+      setShowAccountPassword(false)
     }
   }
 
@@ -143,6 +147,7 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.message || 'Unable to create staff account.')
       setNewUser({ userName: '', email: '', password: '', role: 'Staff' })
+      setShowTemporaryPassword(false)
       setMessage(`✓ User "${newUser.userName}" has been added successfully.`)
       await loadData()
     } catch (err) {
@@ -187,7 +192,13 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
           <h3>Create staff account</h3>
           <label>Username<input className="form-control" required maxLength={256} value={newUser.userName} onChange={event => setNewUser({ ...newUser, userName: event.target.value })} /></label>
           <label>Email<input className="form-control" required type="email" value={newUser.email} onChange={event => setNewUser({ ...newUser, email: event.target.value })} /></label>
-          <label>Temporary password<input className="form-control" minLength={8} type="password" placeholder="Leave blank to use the default password" value={newUser.password} onChange={event => setNewUser({ ...newUser, password: event.target.value })} /></label>
+          <div className="password-field">
+            <label htmlFor="temporary-password">Temporary password</label>
+            <div className="password-input-group">
+              <input id="temporary-password" className="form-control" minLength={8} type={showTemporaryPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="Leave blank to use the default password" value={newUser.password} onChange={event => setNewUser({ ...newUser, password: event.target.value })} />
+              <button type="button" className="secondary-btn password-visibility-btn" aria-label={`${showTemporaryPassword ? 'Hide' : 'Show'} temporary password`} aria-pressed={showTemporaryPassword} onClick={() => setShowTemporaryPassword(value => !value)}>{showTemporaryPassword ? 'Hide' : 'Show'}</button>
+            </div>
+          </div>
           <small className="account-form-hint">The user must change this password the first time they sign in.</small>
           <label>Initial role<select className="form-select" value={newUser.role} onChange={event => setNewUser({ ...newUser, role: event.target.value })}>{ROLES.map(role => <option key={role}>{role}</option>)}</select></label>
           <button type="submit" className="primary-btn btn btn-dark" disabled={saving}>Create account</button>
@@ -232,23 +243,42 @@ export function AdminUsersPage({ embedded = false, currentRole = '', onUsersChan
                 </div>
                 {canManageAccounts && accountEdit?.userId === user.userId && (
                   <form className="user-card-account-form" onSubmit={event => void saveAccountEdit(event, user)}>
-                    <label>
-                      {accountEdit.field === 'email' ? 'New email address' : 'New password'}
-                      <input
-                        className="form-control"
-                        type={accountEdit.field === 'email' ? 'email' : 'password'}
-                        value={accountValue}
-                        onChange={event => setAccountValue(event.target.value)}
-                        required
-                        minLength={accountEdit.field === 'password' ? 8 : undefined}
-                        autoComplete={accountEdit.field === 'password' ? 'new-password' : 'email'}
-                        autoFocus
-                      />
-                    </label>
+                    <div className="account-edit-field">
+                      <label htmlFor={`account-edit-${accountEdit.field}-${user.userId}`}>
+                        {accountEdit.field === 'email' ? 'New email address' : 'New password'}
+                      </label>
+                      {accountEdit.field === 'password' ? (
+                        <div className="password-input-group">
+                          <input
+                            id={`account-edit-${accountEdit.field}-${user.userId}`}
+                            className="form-control"
+                            type={showAccountPassword ? 'text' : 'password'}
+                            value={accountValue}
+                            onChange={event => setAccountValue(event.target.value)}
+                            required
+                            minLength={8}
+                            autoComplete="new-password"
+                            autoFocus
+                          />
+                          <button type="button" className="secondary-btn password-visibility-btn" aria-label={`${showAccountPassword ? 'Hide' : 'Show'} new password`} aria-pressed={showAccountPassword} onClick={() => setShowAccountPassword(value => !value)}>{showAccountPassword ? 'Hide' : 'Show'}</button>
+                        </div>
+                      ) : (
+                        <input
+                          id={`account-edit-${accountEdit.field}-${user.userId}`}
+                          className="form-control"
+                          type="email"
+                          value={accountValue}
+                          onChange={event => setAccountValue(event.target.value)}
+                          required
+                          autoComplete="email"
+                          autoFocus
+                        />
+                      )}
+                    </div>
                     {accountEdit.field === 'password' && <small className="account-form-hint">Use at least 8 characters.</small>}
                     <div className="user-card-actions">
                       <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Saving...' : accountEdit.field === 'email' ? 'Save email' : 'Set new password'}</button>
-                      <button type="button" className="secondary-btn" onClick={() => { setAccountEdit(null); setAccountValue(''); setError('') }} disabled={saving}>Cancel</button>
+                      <button type="button" className="secondary-btn" onClick={() => { setAccountEdit(null); setAccountValue(''); setShowAccountPassword(false); setError('') }} disabled={saving}>Cancel</button>
                     </div>
                   </form>
                 )}

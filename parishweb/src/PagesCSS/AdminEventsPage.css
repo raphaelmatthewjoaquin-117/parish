@@ -1196,6 +1196,7 @@
   box-shadow: 0 4px 16px rgba(22,28,24,.08), 0 16px 40px rgba(22,28,24,.08);
 }
 .admin-login-page > p:last-child { width: min(100%, 400px); margin: 1.1rem 0 0; font-size: .875rem; color: #7a8a80 }
+.admin-login-form label[for="admin-login-password"] { margin-bottom: 0 }
 
 .admin-login-form label {
   display: block;
@@ -1216,6 +1217,33 @@
   background: #f8f5ef;
   color: #161c18;
   transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.admin-password-field {
+  display: flex;
+  align-items: stretch;
+  gap: .5rem;
+}
+.admin-password-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.admin-login-form .password-visibility-btn {
+  width: auto;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: .5rem .75rem;
+  margin-top: .3rem;
+  border: 1px solid rgba(30,40,34,.2);
+  border-radius: 9px;
+  background: #f8f5ef;
+  color: #1b2e24;
+  font-size: .82rem;
+  box-shadow: none;
+}
+.admin-login-form .password-visibility-btn:hover {
+  background: #ece7dc;
+  transform: none;
+  box-shadow: none;
 }
 .admin-login-form input:focus {
   outline: none;

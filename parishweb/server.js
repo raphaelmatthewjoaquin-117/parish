@@ -344,7 +344,7 @@ app.use(requestLoggingMiddleware);
 app.use(metricsMiddleware);
 app.use('/api', apiRateLimit);
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const dbAuth = (process.env.DB_AUTH || '').toLowerCase();
 logger.info('DB startup config:', {
@@ -408,7 +408,7 @@ if (process.env.NODE_ENV === 'production' && !adminSecret) {
 const staffTokenLifetimeMs = 8 * 60 * 60 * 1000;
 
 async function sendEmail(to, subject, html) {
-  if (!process.env.RESEND_API_KEY) {
+  if (!resend) {
     logger.warn('RESEND_API_KEY not configured, skipping email send');
     return null;
   }

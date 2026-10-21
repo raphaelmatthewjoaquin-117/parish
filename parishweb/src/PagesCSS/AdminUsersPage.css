@@ -104,9 +104,31 @@
   padding: .65rem .75rem;
 }
 
+.password-input-group {
+  display: flex;
+  align-items: stretch;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.password-input-group input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.password-visibility-btn {
+  flex: 0 0 auto;
+  min-width: 4.5rem;
+}
+
 .user-create-panel textarea {
   min-height: 5.5rem;
   resize: vertical;
+}
+
+.user-create-panel .password-field {
+  display: grid;
+  gap: .4rem;
 }
 
 .user-create-panel input:focus,
@@ -397,8 +419,17 @@
   font-weight: 700;
 }
 
+.user-card-account-form .account-edit-field {
+  display: grid;
+  gap: .35rem;
+}
+
 .user-card-account-form input {
   width: 100%;
+}
+
+.user-card-account-form .password-input-group input {
+  width: auto;
 }
 
 .account-form-hint {
