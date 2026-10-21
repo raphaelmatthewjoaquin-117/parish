@@ -10,6 +10,7 @@ import { NewsPage } from './pages/NewsPage'
 import ServicePage from './pages/ServicePage'
 import { PrayerRequest } from './pages/PrayerRequest'
 import { UnifiedAdminPage } from './pages/UnifiedAdminPage'
+import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { apiClient } from './api/client'
 import { defaultFooterContent, type FooterContent } from './content/siteContent'
 import logo from './images/SDP logo.png'
@@ -151,6 +152,7 @@ function AppShell() {
           <Route path="/services" element={<ServicePage />} />
           <Route path="/contact" element={<ContactPage language={language} />} />
           <Route path="/admin" element={<UnifiedAdminPage />} />
+          <Route path="/admin/reset-password" element={<ResetPasswordPage />} />
           <Route path="/admin/events" element={<AdminEventsPage />} />
           <Route path="/prayerRequests" element={<PrayerRequest />} />
         </Routes>

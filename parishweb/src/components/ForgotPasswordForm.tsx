@@ -21,7 +21,7 @@ export function ForgotPasswordForm({ onBack }: ForgotPasswordFormProps) {
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.message || 'Unable to request a password reset.')
-      setMessage(body.message || 'If a staff account matches that email, password reset instructions will be sent when email delivery is enabled.')
+      setMessage(body.message || 'If a staff account matches that email, password reset instructions will be sent if email delivery is available.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to request a password reset.')
     } finally {

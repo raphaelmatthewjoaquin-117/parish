@@ -30,6 +30,13 @@ import {
 } from './server-rules.js';
 import { hashAspNetPassword } from './password-hash.js';
 import { deleteServiceRequest } from './src/service-request-deletion.js';
+import { certificateRequestEmail, passwordResetEmail, serviceBookingEmail } from './email-templates.js';
+import {
+  createPasswordResetToken,
+  hashPasswordResetToken,
+  isValidPasswordResetToken,
+  isValidResetPassword,
+} from './password-reset.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -415,22 +422,28 @@ async function sendEmail(to, subject, html) {
 
   try {
     const response = await resend.emails.send({
-      from: 'onboarding@resend.dev',
+      from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
       to: to,
       subject: subject,
       html: html
     });
+    if (response.error) {
+      logError(response.error.message, {
+        action: 'sendEmail',
+        statusCode: response.error.statusCode,
+        subject,
+      });
+      return null;
+    }
     logEmail('sent', {
-      to,
       subject,
-      messageId: response.id,
+      messageId: response.data.id,
       timestamp: new Date().toISOString()
     });
     return response;
   } catch (error) {
     logError(error, {
       action: 'sendEmail',
-      to,
       subject
     });
     return null;
@@ -649,60 +662,14 @@ app.post('/api/certificate-requests', async (req, res) => {
     const requestId = result.recordset[0].CertificateRequestId;
 
     // Send confirmation email if configured
-    const emailHtml = `
-      <div style="font-family: Georgia, 'Times New Roman', serif; background-color: #f9f6f0; margin: 0; padding: 0;">
-        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-top: 4px solid #8b1a1a;">
-
-          <!-- Header -->
-          <div style="background-color: #8b1a1a; padding: 32px 40px 28px; text-align: center;">
-            <p style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #f0c96e;">Saint John Parish</p>
-            <h1 style="margin: 0; font-family: Georgia, serif; font-size: 24px; font-weight: normal; color: #ffffff; letter-spacing: 0.5px;">Certificate Request Received</h1>
-          </div>
-
-          <!-- Body -->
-          <div style="padding: 36px 40px 28px;">
-            <p style="margin: 0 0 20px; font-size: 16px; color: #2c2c2c; line-height: 1.6;">Dear ${escapeHtml(firstName)},</p>
-            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
-              We have received your request for a <strong style="color: #1a1a1a;">${escapeHtml(certificateType)}</strong> certificate.
-              The parish office will review your request and confirm your appointment shortly.
-            </p>
-
-            <!-- Details card -->
-            <div style="background-color: #faf8f4; border-left: 3px solid #8b1a1a; border-radius: 0 6px 6px 0; padding: 24px 28px; margin: 0 0 28px;">
-              <p style="margin: 0 0 6px; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #888888;">Your Reference Code</p>
-              <p style="margin: 0 0 20px; font-family: 'Courier New', monospace; font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #8b1a1a;">${escapeHtml(referenceCode)}</p>
-              <table style="width: 100%; border-collapse: collapse; font-size: 14px; border-top: 1px solid #ede8df;">
-                <tr>
-                  <td style="padding: 10px 0 7px; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px;">Preferred Date</td>
-                  <td style="padding: 10px 0 7px; color: #1a1a1a; font-size: 15px;">${escapeHtml(preferredDate)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Preferred Time</td>
-                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(preferredTime)}</td>
-                </tr>
-              </table>
-            </div>
-
-            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
-              Keep your reference code safe — you can use it to check the status of your request anytime on the Services page.
-            </p>
-
-            <p style="margin: 0; font-size: 13px; color: #888888; line-height: 1.6; font-family: Arial, sans-serif;">
-              If you did not submit this request, you can safely ignore this email. For any concerns, please contact the parish office directly.
-            </p>
-          </div>
-
-          <!-- Footer -->
-          <div style="background-color: #f2ede4; border-top: 1px solid #e0d8cc; padding: 20px 40px; text-align: center;">
-            <p style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #888888; line-height: 1.6;">
-              Saint John Parish &nbsp;·&nbsp; This is an automated message, please do not reply directly to this email.
-            </p>
-          </div>
-
-        </div>
-      </div>
-    `;
-    await sendEmail(String(email).trim().toLowerCase(), 'Certificate Request Received', emailHtml);
+    const { subject, html } = certificateRequestEmail({
+      firstName,
+      certificateType,
+      referenceCode,
+      preferredDate,
+      preferredTime,
+    });
+    await sendEmail(String(email).trim().toLowerCase(), subject, html);
 
     res.status(201).json({ requestId, referenceCode });
   } catch (error) {
@@ -1266,71 +1233,15 @@ app.post('/api/service-requests', async (req, res) => {
     const verificationLink = `${req.protocol}://${req.get('host')}/api/service-requests/verify?token=${token}`;
 
     // Send confirmation email
-    const emailHtml = `
-      <div style="font-family: Georgia, 'Times New Roman', serif; background-color: #f9f6f0; margin: 0; padding: 0;">
-        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-top: 4px solid #8b1a1a;">
-
-          <!-- Header -->
-          <div style="background-color: #8b1a1a; padding: 32px 40px 28px; text-align: center;">
-            <p style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #f0c96e;">Saint John Parish</p>
-            <h1 style="margin: 0; font-family: Georgia, serif; font-size: 24px; font-weight: normal; color: #ffffff; letter-spacing: 0.5px;">Service Booking Confirmation</h1>
-          </div>
-
-          <!-- Body -->
-          <div style="padding: 36px 40px 28px;">
-            <p style="margin: 0 0 20px; font-size: 16px; color: #2c2c2c; line-height: 1.6;">Dear ${escapeHtml(firstName)},</p>
-            <p style="margin: 0 0 28px; font-size: 15px; color: #444444; line-height: 1.7;">
-              Thank you for reaching out to Saint John Parish. We have received your service booking and it is now pending verification. Please find your booking details below.
-            </p>
-
-            <!-- Details card -->
-            <div style="background-color: #faf8f4; border-left: 3px solid #8b1a1a; border-radius: 0 6px 6px 0; padding: 24px 28px; margin: 0 0 28px;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                <tr>
-                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px;">Booking&nbsp;ID</td>
-                  <td style="padding: 7px 0; color: #1a1a1a; font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold;">${escapeHtml(String(requestId))}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Date</td>
-                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(scheduledDate)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Time</td>
-                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 15px; border-top: 1px solid #ede8df;">${escapeHtml(scheduledTime)}</td>
-                </tr>
-                ${notes ? `
-                <tr>
-                  <td style="padding: 7px 0; color: #888888; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; vertical-align: top; padding-right: 20px; border-top: 1px solid #ede8df;">Notes</td>
-                  <td style="padding: 7px 0; color: #1a1a1a; font-size: 14px; line-height: 1.5; border-top: 1px solid #ede8df;">${escapeHtml(notes)}</td>
-                </tr>` : ''}
-              </table>
-            </div>
-
-            <!-- Verify CTA -->
-            <p style="margin: 0 0 16px; font-size: 15px; color: #444444; line-height: 1.7;">
-              To confirm your booking, please click the button below. Your booking will not be finalized until it has been verified.
-            </p>
-            <div style="text-align: center; margin: 28px 0 32px;">
-              <a href="${verificationLink}" style="display: inline-block; background-color: #8b1a1a; color: #ffffff; text-decoration: none; font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; padding: 14px 36px; border-radius: 3px;">Verify My Booking</a>
-            </div>
-
-            <p style="margin: 0; font-size: 13px; color: #888888; line-height: 1.6; font-family: Arial, sans-serif;">
-              If you did not make this booking, you can safely ignore this email. For any changes or concerns, please contact the parish office directly.
-            </p>
-          </div>
-
-          <!-- Footer -->
-          <div style="background-color: #f2ede4; border-top: 1px solid #e0d8cc; padding: 20px 40px; text-align: center;">
-            <p style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #888888; line-height: 1.6;">
-              Saint John Parish &nbsp;·&nbsp; This is an automated message, please do not reply directly to this email.
-            </p>
-          </div>
-
-        </div>
-      </div>
-    `;
-
-    await sendEmail(email, 'Service Booking Confirmation', emailHtml);
+    const { subject, html } = serviceBookingEmail({
+      firstName,
+      requestId,
+      scheduledDate,
+      scheduledTime,
+      notes,
+      verificationLink,
+    });
+    await sendEmail(email, subject, html);
 
     res.json({ requestId, status: 'PendingVerification', verificationLink });
   } catch (error) {
@@ -1868,13 +1779,151 @@ app.post('/api/admin/login', authRateLimit, async (req, res) => {
   }
 });
 
-app.post('/api/admin/forgot-password', authRateLimit, (req, res) => {
+app.post('/api/admin/forgot-password', authRateLimit, async (req, res) => {
+  const message = 'If a staff account matches that email, password reset instructions will be sent if email delivery is available.';
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  if (email.length > 510) return res.status(400).json({ message: 'Enter a valid email address.' });
+  if (!email || email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(202).json({ message });
+  }
 
-  return res.status(202).json({
-    message: 'If a staff account matches that email, password reset instructions will be sent when email delivery is enabled.',
-  });
+  try {
+    const accountResult = await getPool().request()
+      .input('email', sql.NVarChar(255), email)
+      .query(`
+        SELECT TOP 1 u.UserId, u.EmailAddress, u.UserName
+        FROM dbo.AspNetUsers u
+        INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
+        INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+        WHERE u.EmailAddress = @email
+          AND r.Name IN ('Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff')
+      `);
+    const account = accountResult.recordset[0];
+
+    if (account && resend) {
+      const token = createPasswordResetToken();
+      const tokenHash = hashPasswordResetToken(token);
+      const transaction = new sql.Transaction(getPool());
+      let transactionStarted = false;
+      try {
+        await transaction.begin();
+        transactionStarted = true;
+        await transaction.request()
+          .input('userId', sql.Int, account.UserId)
+          .query(`
+            UPDATE dbo.PasswordResetTokens
+            SET UsedAt = SYSUTCDATETIME()
+            WHERE UserId = @userId AND UsedAt IS NULL
+          `);
+        await transaction.request()
+          .input('userId', sql.Int, account.UserId)
+          .input('tokenHash', sql.Char(64), tokenHash)
+          .query(`
+            INSERT INTO dbo.PasswordResetTokens (UserId, TokenHash, ExpiresAt)
+            VALUES (@userId, @tokenHash, DATEADD(MINUTE, 30, SYSUTCDATETIME()))
+          `);
+        await transaction.commit();
+        transactionStarted = false;
+      } catch (error) {
+        if (transactionStarted) {
+          try { await transaction.rollback(); } catch (rollbackError) {
+            logError(rollbackError, { context: 'forgotPasswordRollback' });
+          }
+        }
+        throw error;
+      }
+
+      const resetUrl = new URL('/admin/reset-password', process.env.FRONTEND_URL || 'http://localhost:5173');
+      resetUrl.searchParams.set('token', token);
+      const { subject, html } = passwordResetEmail({
+        userName: account.UserName,
+        resetLink: resetUrl.toString(),
+      });
+      if (!await sendEmail(account.EmailAddress, subject, html)) {
+        try {
+          await getPool().request()
+            .input('tokenHash', sql.Char(64), tokenHash)
+            .query('UPDATE dbo.PasswordResetTokens SET UsedAt = SYSUTCDATETIME() WHERE TokenHash = @tokenHash');
+        } catch (error) {
+          logError(error, { context: 'invalidateUndeliveredPasswordReset' });
+        }
+      }
+    } else if (account) {
+      logger.warn('RESEND_API_KEY not configured, skipping password reset email');
+    }
+
+    return res.status(202).json({ message });
+  } catch (error) {
+    logError(error, { context: 'forgotPassword' });
+    return res.status(500).json({ message: 'Unable to process the password reset request.' });
+  }
+});
+
+app.post('/api/admin/reset-password', authRateLimit, async (req, res) => {
+  const token = req.body?.token;
+  const newPassword = req.body?.newPassword;
+  if (!isValidPasswordResetToken(token)) {
+    return res.status(400).json({ message: 'This password reset link is invalid or has expired.' });
+  }
+  if (!isValidResetPassword(newPassword)) {
+    return res.status(400).json({ message: 'The new password must be 8 to 128 characters.' });
+  }
+  if (newPassword === defaultStaffPassword()) {
+    return res.status(400).json({ message: 'Choose a password that is different from the default password.' });
+  }
+
+  let transaction;
+  let transactionStarted = false;
+  try {
+    transaction = new sql.Transaction(getPool());
+    await transaction.begin();
+    transactionStarted = true;
+    const tokenResult = await transaction.request()
+      .input('tokenHash', sql.Char(64), hashPasswordResetToken(token))
+      .query(`
+        UPDATE resetToken
+        SET UsedAt = SYSUTCDATETIME()
+        OUTPUT inserted.UserId
+        FROM dbo.PasswordResetTokens AS resetToken WITH (UPDLOCK, ROWLOCK)
+        WHERE resetToken.TokenHash = @tokenHash
+          AND resetToken.UsedAt IS NULL
+          AND resetToken.ExpiresAt > SYSUTCDATETIME()
+          AND EXISTS (
+            SELECT 1
+            FROM dbo.AspNetUserRoles ur
+            INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+            WHERE ur.UserId = resetToken.UserId
+              AND r.Name IN ('Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff')
+          )
+      `);
+    const userId = tokenResult.recordset[0]?.UserId;
+    if (!userId) {
+      await transaction.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ message: 'This password reset link is invalid or has expired.' });
+    }
+
+    const passwordResult = await transaction.request()
+      .input('userId', sql.Int, userId)
+      .input('passwordHash', sql.NVarChar(1024), hashAspNetPassword(newPassword))
+      .query('UPDATE dbo.AspNetUsers SET PasswordHash = @passwordHash, MustChangePassword = 0 WHERE UserId = @userId');
+    if (passwordResult.rowsAffected[0] !== 1) {
+      throw new Error('Password reset did not update exactly one staff account.');
+    }
+    await transaction.request()
+      .input('userId', sql.Int, userId)
+      .query('UPDATE dbo.PasswordResetTokens SET UsedAt = SYSUTCDATETIME() WHERE UserId = @userId AND UsedAt IS NULL');
+    await transaction.commit();
+    transactionStarted = false;
+    return res.json({ message: 'Your password has been reset. You can now sign in with your new password.' });
+  } catch (error) {
+    if (transactionStarted && transaction) {
+      try { await transaction.rollback(); } catch (rollbackError) {
+        logError(rollbackError, { context: 'resetPasswordRollback' });
+      }
+    }
+    logError(error, { context: 'resetPassword' });
+    return res.status(500).json({ message: 'Unable to reset the password. Please request a new reset link.' });
+  }
 });
 
 app.get('/api/admin/verify', requireAdmin, async (req, res) => {

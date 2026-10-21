@@ -84,6 +84,28 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+/****** Object:  Table [dbo].[PasswordResetTokens] ******/
+CREATE TABLE [dbo].[PasswordResetTokens](
+	[PasswordResetTokenId] [int] IDENTITY(1,1) NOT NULL,
+	[UserId] [int] NOT NULL,
+	[TokenHash] [char](64) NOT NULL,
+	[CreatedAt] [datetime2](7) NOT NULL CONSTRAINT [DF_PasswordResetTokens_CreatedAt] DEFAULT (sysutcdatetime()),
+	[ExpiresAt] [datetime2](7) NOT NULL,
+	[UsedAt] [datetime2](7) NULL,
+ CONSTRAINT [PK_PasswordResetTokens] PRIMARY KEY CLUSTERED
+(
+	[PasswordResetTokenId] ASC
+) ON [PRIMARY],
+ CONSTRAINT [UQ_PasswordResetTokens_TokenHash] UNIQUE NONCLUSTERED
+(
+	[TokenHash] ASC
+) ON [PRIMARY],
+ CONSTRAINT [FK_PasswordResetTokens_AspNetUsers] FOREIGN KEY([UserId])
+	REFERENCES [dbo].[AspNetUsers] ([UserId]) ON DELETE CASCADE
+) ON [PRIMARY]
+GO
+CREATE INDEX [IX_PasswordResetTokens_UserId] ON [dbo].[PasswordResetTokens] ([UserId])
+GO
 /****** Object:  Table [dbo].[BaptismRecords]    Script Date: 10/19/2026 10:50:42 PM ******/
 SET ANSI_NULLS ON
 GO

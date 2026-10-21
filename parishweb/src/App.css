@@ -3,6 +3,7 @@
   --Coffeebrown: #6F4E37;
   --Cream: #D3BC8D;
   --Gold: #DA9100;
+  --topbar-h: 84px;
   --white: #FFFFFF;
 }
 
@@ -294,7 +295,7 @@ body {
   height: 44px;
   margin-left: auto;
   padding: .65rem .75rem;
-  border: 1px solid rgba(255, 255, 255, .72);
+  border: 1px solid var(--black);
   border-radius: 8px;
   background: var(--parish-green, #1f4337);
   cursor: pointer;

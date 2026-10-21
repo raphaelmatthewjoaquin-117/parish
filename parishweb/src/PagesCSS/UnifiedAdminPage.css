@@ -36,7 +36,6 @@
   /* ── Sizing ── */
   --sidebar-w:           284px;
   --sidebar-w-collapsed:  72px;
-  --topbar-h:             84px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -462,7 +461,7 @@
   }
 
   /* Hamburger button — rides just below the topbar */
-  .admin-mobile-toggle {
+  .admin-mobile-toggle.btn.btn-light {
     position: fixed;
     top: calc(var(--topbar-h, 84px) + .75rem);
     left: .9rem;
@@ -470,7 +469,7 @@
     display: grid !important;
     gap: 5px;
     padding: .7rem .75rem;
-    border: 1px solid var(--a-gold);
+    border: 1px solid #000;
     border-radius: 8px;
     background: var(--a-ink);
     cursor: pointer;
