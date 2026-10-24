@@ -1,13 +1,6 @@
 export type Language = 'en' | 'tl'
 
 const tagalogTranslations: Record<string, string> = {
-  'Home': 'Tahanan',
-  'About Us': 'Tungkol sa Amin',
-  'News & Events': 'Balita at mga Kaganapan',
-  'Gallery': 'Galeriya',
-  'Services': 'Mga Serbisyo',
-  'Contact Us': 'Makipag-ugnayan',
-  'Prayer Requests': 'Mga Kahilingan sa Panalangin',
   'Go to home': 'Pumunta sa tahanan',
   'Toggle navigation menu': 'Buksan o isara ang menu',
   'Main navigation': 'Pangunahing nabigasyon',

@@ -30,6 +30,24 @@
 	box-shadow: 0 14px 34px rgba(31, 44, 35, .12);
 }
 
+.fc .fc-scroller,
+.fc .fc-view-harness,
+.fc .fc-view-harness-active,
+.fc .fc-scrollgrid,
+.fc .fc-scrollgrid-sync-table,
+.fc .fc-daygrid-body {
+	overflow: hidden !important;
+	height: auto !important;
+	max-height: none !important;
+}
+
+.fc .fc-scroller::-webkit-scrollbar,
+.fc .fc-view-harness::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+	display: none;
+}
+
 .fc .fc-toolbar {
 	gap: 1rem;
 	padding: 1.1rem 1.25rem;
@@ -203,6 +221,25 @@
 	color: #4c554f;
 	line-height: 1.7;
 	white-space: pre-line;
+}
+
+.church-news-link {
+	display: inline-flex;
+	align-items: center;
+	gap: .45rem;
+	margin-top: 1rem;
+	color: #6f4e37;
+	font-size: .85rem;
+	font-weight: 800;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+	text-decoration: none;
+}
+
+.church-news-link:hover,
+.church-news-link:focus-visible {
+	color: #9a6b00;
+	text-decoration: underline;
 }
 
 @media (max-width: 700px) {

@@ -36,6 +36,7 @@ function AppShell() {
   const [footerContent, setFooterContent] = useState<FooterContent>(defaultFooterContent)
   const location = useLocation()
   const isAdminPage = location.pathname.startsWith('/admin')
+  const hasAdminSession = Boolean(window.localStorage.getItem('adminToken'))
 
   const closeMobileMenu = () => setMobileMenuOpen(false)
 
@@ -84,7 +85,7 @@ function AppShell() {
           </NavLink>
           <div className="site-brand" aria-hidden="true">
             <span className="site-brand-name">Santo Domingo Parish</span>
-            <span className="site-brand-tagline">National Shrine · La Naval de Manila</span>
+            <span className="site-brand-tagline">National Shrine of Our Lady of the Most Holy Rosary La Naval de Manila</span>
           </div>
           {!isAdminPage && (
             <nav
@@ -114,7 +115,7 @@ function AppShell() {
             >
               {language === 'en' ? 'Tagalog' : 'English'}
             </button>
-            {isAdminPage && (
+            {isAdminPage && hasAdminSession && (
               <button
                 className="admin-header-signout"
                 type="button"

@@ -71,6 +71,7 @@ export type NewsContent = {
     bodyTl?: string
     date?: string
     image?: string
+    link?: string
   }>
 }
 

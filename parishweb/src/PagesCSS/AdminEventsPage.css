@@ -676,7 +676,22 @@
   box-shadow: none;
 }
 
-.mass-calendar-wrapper .fc .fc-toolbar {
+.mass-calendar-wrapper .fc .fc-scroller,
+.mass-calendar-wrapper .fc .fc-view-harness,
+.mass-calendar-wrapper .fc .fc-view-harness-active,
+.mass-calendar-wrapper .fc .fc-daygrid-body,
+.mass-calendar-wrapper .fc .fc-scrollgrid,
+.mass-calendar-wrapper .fc .fc-scrollgrid-sync-table {
+  overflow: hidden !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+.mass-calendar-wrapper .fc .fc-daygrid-day-frame {
+  min-height: 5.5rem;
+}
+
+.mass-calendar-wrapper .fc-toolbar {
   gap: 1rem;
   padding: 1rem 1.25rem;
   margin: 0 !important;
@@ -1228,10 +1243,13 @@
   min-width: 0;
 }
 .admin-login-form .password-visibility-btn {
-  width: auto;
-  flex: 0 0 auto;
-  align-self: flex-start;
-  padding: .5rem .75rem;
+  width: 2.9rem;
+  flex: 0 0 2.9rem;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: .5rem;
   margin-top: .3rem;
   border: 1px solid rgba(30,40,34,.2);
   border-radius: 9px;
@@ -1239,17 +1257,54 @@
   color: #1b2e24;
   font-size: .82rem;
   box-shadow: none;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
 }
-.admin-login-form .password-visibility-btn:hover {
+.admin-login-form .password-visibility-btn:hover,
+.admin-login-form .password-visibility-btn:focus-visible {
   background: #ece7dc;
+  border-color: rgba(30,40,34,.32);
   transform: none;
   box-shadow: none;
-}
-.admin-login-form input:focus {
   outline: none;
-  border-color: #b8891e;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(184,137,30,.15);
+}
+.password-visibility-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+  color: currentColor;
+}
+.password-visibility-icon path {
+  fill: currentColor;
+}
+.admin-login-form .forgot-password-link {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: .35rem .5rem;
+  margin: .9rem 0 0;
+  background: transparent;
+  color: #1b2e24;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: .95rem;
+  text-decoration: none;
+  text-underline-offset: .18rem;
+  box-shadow: none;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .15s ease, box-shadow .15s ease;
+}
+.admin-login-form .forgot-password-link:hover,
+.admin-login-form .forgot-password-link:focus-visible {
+  background: rgba(27, 46, 36, 0.06);
+  border-color: rgba(27, 46, 36, 0.12);
+  color: #274635;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(27,46,36,.08);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  outline: none;
 }
 .admin-login-form button {
   width: 100%;
@@ -1822,4 +1877,12 @@
   .card-label { font-size: .7rem }
   .dashboard-card strong { margin-top: .65rem; font-size: 1.9rem }
   .dashboard-panel { padding: 1rem }
+}
+
+/* Hide calendar internal scrollbar on WebKit browsers */
+.mass-calendar-wrapper .fc .fc-scroller::-webkit-scrollbar,
+.mass-calendar-wrapper .fc .fc-view-harness::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }

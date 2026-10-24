@@ -929,13 +929,32 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               placeholder="Enter your password"
               required
             />
-            <button type="button" className="password-visibility-btn" aria-label={`${showPassword ? 'Hide' : 'Show'} password`} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? 'Hide' : 'Show'}</button>
+            <button
+              type="button"
+              className="password-visibility-btn"
+              aria-label={`${showPassword ? 'Hide' : 'Show'} password`}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword(value => !value)}
+              title={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
+                  <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Zm9 3.25A3.25 3.25 0 1 0 12 8.5a3.25 3.25 0 0 0 0 6.75Zm0-1.5A1.75 1.75 0 1 1 12 9.75a1.75 1.75 0 0 1 0 3.5Z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
+                  <path d="M2.5 2.5 21.5 21.5M10.5 10.5A3.25 3.25 0 0 0 13.5 13.5M9.3 5.9A10.7 10.7 0 0 1 12 5.5c5.5 0 9 6.5 9 6.5a17 17 0 0 1-3.5 4.8M7.2 7.2A15.6 15.6 0 0 0 3 12s3.5 6.5 9 6.5a10.1 10.1 0 0 0 4.3-.95" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
           </div>
           {authError && <p className="error-message">{authError}</p>}
           <button type="submit" disabled={authLoading}>
             {authLoading ? 'Signing in...' : 'Sign in'}
           </button>
-          <button type="button" className="btn btn-link p-0 text-start" onClick={() => setShowForgotPassword(true)}>Forgot password?</button>
+          <button type="button" className="forgot-password-link" onClick={() => setShowForgotPassword(true)}>
+            Forgot password?
+          </button>
         </form>}
         {!showForgotPassword && <p>Use your parish email or username and password. If the ASP.NET Identity tables are connected, the app will validate the role from <code>AspNetUserRoles</code> and <code>AspNetRoles</code>.</p>}
       </section>

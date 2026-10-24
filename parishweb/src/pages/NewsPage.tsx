@@ -118,6 +118,7 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
           }}
           events={calendarEvents}
           height="450px"
+          contentHeight="auto"
         />
       </div>
 
@@ -181,6 +182,16 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
                 )}
                 <h3 data-no-translate>{localize(article.title, article.titleTl, language)}</h3>
                 <p data-no-translate>{localize(article.body, article.bodyTl, language)}</p>
+                {article.link && article.link.trim() && (
+                  <a
+                    className="church-news-link"
+                    href={article.link}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {localize('Read more', 'Magbasa pa', language)}
+                  </a>
+                )}
               </article>
             ))}
           </div>

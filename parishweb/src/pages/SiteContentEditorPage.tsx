@@ -450,6 +450,7 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
                   body: '',
                   bodyTl: '',
                   date: '',
+                  link: '',
                 }, ...current.articles],
               }))}
             >
@@ -566,6 +567,19 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
                       value={article.bodyTl ?? ''}
                       onChange={event => setNews(current => ({
                         articles: current.articles.map(item => item.id === article.id ? { ...item, bodyTl: event.target.value } : item),
+                      }))}
+                    />
+                  </label>
+                </div>
+                <div className="news-editor-link-field">
+                  <label>
+                    External link (optional)
+                    <input
+                      type="url"
+                      value={article.link ?? ''}
+                      placeholder="https://example.com"
+                      onChange={event => setNews(current => ({
+                        articles: current.articles.map(item => item.id === article.id ? { ...item, link: event.target.value } : item),
                       }))}
                     />
                   </label>

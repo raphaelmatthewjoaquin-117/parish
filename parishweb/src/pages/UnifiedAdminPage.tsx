@@ -23,8 +23,8 @@ type AdminSection = (
 
 const sections: AdminSection[] = [
   { kind: 'events', tab: 'dashboard', label: 'Dashboard', icon: '▦', group: 'Overview' },
-  { kind: 'events', tab: 'events', label: 'Events Management', icon: '◫', group: 'Overview' },
   { kind: 'messages', label: 'Contact Messages', icon: '✉', group: 'Overview', module: 'ContactMessages' },
+  { kind: 'events', tab: 'events', label: 'Events Management', icon: '◫', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'content', page: 'about', label: 'About Page', icon: '¶', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'content', page: 'gallery', label: 'Photo Gallery', icon: '▧', group: 'Website Content', module: 'Gallery' },
   { kind: 'content', page: 'contact', label: 'Contact Page', icon: '☎', group: 'Website Content', module: 'WebsiteContent' },
