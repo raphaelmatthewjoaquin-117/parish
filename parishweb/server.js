@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 import { Resend } from 'resend';
+import { BlobServiceClient, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -295,8 +296,68 @@ const contactRateLimit = rateLimit({
   message: { message: 'Too many messages sent. Please try again later.' },
 });
 
-const uploadDirectory = path.resolve('uploads');
+const uploadDirectory = path.resolve(process.env.UPLOADS_DIR || 'uploads');
 fs.mkdirSync(uploadDirectory, { recursive: true });
+
+const configuredPublicUploadBaseUrl = (process.env.PUBLIC_UPLOAD_BASE_URL || '').trim().replace(/\/+$/, '');
+const azureStorageAccountName = (process.env.AZURE_STORAGE_ACCOUNT_NAME || '').trim();
+const azureStorageAccountKey = (process.env.AZURE_STORAGE_ACCOUNT_KEY || '').trim();
+const azureStorageContainer = (process.env.AZURE_STORAGE_CONTAINER_NAME || 'uploads').trim();
+const azureStorageConnectionString = (process.env.AZURE_STORAGE_CONNECTION_STRING || '').trim();
+
+function buildPublicUploadUrl(filename) {
+  const safeFilename = String(filename || '').trim();
+  if (!safeFilename) return '';
+
+  if (configuredPublicUploadBaseUrl) {
+    const normalizedBase = configuredPublicUploadBaseUrl.replace(/\/+$/, '');
+    const looksLikeFullFileUrl = /^https?:\/\//i.test(safeFilename);
+    if (looksLikeFullFileUrl) return safeFilename;
+    return `${normalizedBase}/${safeFilename}`;
+  }
+
+  if (azureStorageAccountName && azureStorageContainer) {
+    return `https://${azureStorageAccountName}.blob.core.windows.net/${azureStorageContainer}/${safeFilename}`;
+  }
+
+  return `/uploads/${safeFilename}`;
+}
+
+function isAzureConfigured() {
+  return Boolean(
+    (azureStorageConnectionString || (azureStorageAccountName && azureStorageAccountKey)) &&
+    azureStorageContainer
+  );
+}
+
+async function uploadFileToAzure(file, fileName) {
+  if (!isAzureConfigured()) {
+    return null;
+  }
+
+  const storageClient = azureStorageConnectionString
+    ? BlobServiceClient.fromConnectionString(azureStorageConnectionString)
+    : new BlobServiceClient(
+        `https://${azureStorageAccountName}.blob.core.windows.net`,
+        new StorageSharedKeyCredential(azureStorageAccountName, azureStorageAccountKey)
+      );
+
+  const containerClient = storageClient.getContainerClient(azureStorageContainer);
+  await containerClient.createIfNotExists({ access: 'blob' });
+
+  const extension = path.extname(fileName || file.originalname || '').toLowerCase();
+  const objectPath = `${randomUUID()}${extension}`;
+  const fileBuffer = await fs.promises.readFile(file.path);
+
+  const blockBlobClient = containerClient.getBlockBlobClient(objectPath);
+  await blockBlobClient.uploadData(fileBuffer, {
+    blobHTTPHeaders: {
+      blobContentType: file.mimetype || 'application/octet-stream',
+    },
+  });
+
+  return `https://${azureStorageAccountName}.blob.core.windows.net/${azureStorageContainer}/${objectPath}`;
+}
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -801,7 +862,27 @@ app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
       }
       return res.status(400).json({ message: 'The selected file is not a valid JPEG, PNG, or WebP image.' });
     }
-    return res.status(201).json({ photoUrl: `/uploads/${req.file.filename}` });
+
+    let photoUrl = buildPublicUploadUrl(req.file.filename);
+
+    if (isAzureConfigured()) {
+      try {
+        photoUrl = await uploadFileToAzure(req.file, req.file.originalname);
+      } catch (error) {
+        logError(error, { context: 'uploadToAzure' });
+        return res.status(500).json({ message: 'Unable to upload the photo to Azure Blob Storage.' });
+      }
+    }
+
+    try {
+      if (isAzureConfigured()) {
+        await fs.promises.unlink(req.file.path);
+      }
+    } catch (error) {
+      logError(error, { context: 'cleanupLocalUpload' });
+    }
+
+    return res.status(201).json({ photoUrl });
   } catch (error) {
     logError(error, { context: 'validateImageUpload' });
     return res.status(500).json({ message: 'Unable to validate the uploaded image.' });

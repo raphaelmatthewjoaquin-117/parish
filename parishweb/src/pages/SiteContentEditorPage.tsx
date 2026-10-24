@@ -178,8 +178,6 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const closePreviewButtonRef = useRef<HTMLButtonElement>(null)
   const imagePreviewUrlsRef = useRef<Record<string, string>>({})
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({})
   const [previewRevision, setPreviewRevision] = useState(0)
@@ -197,16 +195,6 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
     imagePreviewUrlsRef.current = { ...imagePreviewUrlsRef.current, [imageUrl]: previewUrl }
     setImagePreviewUrls(imagePreviewUrlsRef.current)
   }
-
-  useEffect(() => {
-    if (!previewOpen) return
-    closePreviewButtonRef.current?.focus()
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPreviewOpen(false)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewOpen])
 
   useEffect(() => {
     let active = true
@@ -1097,9 +1085,9 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
       )}
 
       <div className="site-content-save">
-        <button className="btn btn-outline-dark" type="button" onClick={() => setPreviewOpen(true)}>
+        <a className="btn btn-outline-dark" href={publicPagePaths[page]} target="_blank" rel="noopener noreferrer">
           View page
-        </button>
+        </a>
         <button type="button" className="btn btn-dark" disabled={loading || saving} onClick={() => void saveContent()}>
           {saving ? 'Saving…' : 'Save and publish'}
         </button>
@@ -1124,29 +1112,6 @@ export function SiteContentEditorPage({ page }: { page: SiteContentPage }) {
           }}
           onClose={() => setPhotoEditModal(null)}
         />
-      )}
-
-      {previewOpen && (
-        <div className="site-content-preview-backdrop" role="presentation" onMouseDown={() => setPreviewOpen(false)}>
-          <section
-            className="site-content-preview"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="site-content-preview-title"
-            onMouseDown={event => event.stopPropagation()}
-          >
-            <header className="site-content-preview-header">
-              <h2 id="site-content-preview-title">Page preview</h2>
-              <button ref={closePreviewButtonRef} className="btn btn-outline-dark" type="button" onClick={() => setPreviewOpen(false)}>
-                Close preview
-              </button>
-            </header>
-            <iframe
-              src={publicPagePaths[page]}
-              title={`Preview of ${page === 'about' ? 'the About Us page' : page === 'contact' ? 'the Contact page' : page === 'gallery' ? 'the photo gallery' : page === 'news' ? 'the News page' : 'the website home page'}`}
-            />
-          </section>
-        </div>
       )}
     </section>
   )

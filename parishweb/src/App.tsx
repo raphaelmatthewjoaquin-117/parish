@@ -41,6 +41,24 @@ function AppShell() {
   const closeMobileMenu = () => setMobileMenuOpen(false)
 
   useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual'
+    }
+  }, [])
+
+  useEffect(() => {
+    const resetScroll = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      document.body.scrollTop = 0
+      document.documentElement.scrollTop = 0
+    }
+
+    resetScroll()
+    const frame = window.requestAnimationFrame(resetScroll)
+    return () => window.cancelAnimationFrame(frame)
+  }, [location.pathname])
+
+  useEffect(() => {
     window.localStorage.setItem('site-language', language)
     document.documentElement.lang = language
   }, [language])
