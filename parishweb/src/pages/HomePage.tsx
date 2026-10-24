@@ -163,7 +163,7 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
           )}
 
           {events.slice(0, 3).map((event) => (
-            <article className="event-card col-sm-6 col-md-4 col-lg-3 card border-0 shadow-sm p-0" key={event.id}>
+            <article className="event-card col-sm-6 col-md-4 col-lg-3 card border-0 p-0" key={event.id}>
               {event.photoUrl && (
                 <img className="event-card-image" src={getPhotoUrl(event.photoUrl)} alt="" />
               )}

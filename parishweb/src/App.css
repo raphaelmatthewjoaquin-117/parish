@@ -49,9 +49,6 @@
   .simple-page,
   .content-section,
   .hero-copy,
-  .vatican-news-card,
-  .homepage-community-column,
-  .event-card,
   .event-detail-card,
   .service-detail,
   .services-detail-card,
@@ -71,6 +68,12 @@
   .gallery-grid,
   .news-grid {
     animation: fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .vatican-news-card,
+  .homepage-community-column,
+  .event-card {
+    animation: fadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   /* Stagger child cards inside grids for a premium sequential reveal */
