@@ -5,6 +5,7 @@ import { SiteContentEditorPage } from './SiteContentEditorPage'
 
 vi.mock('../api/client', () => ({
   API_BASE_URL: '',
+  getMediaUrl: (url: string) => url,
   apiClient: {
     siteContent: {
       get: vi.fn().mockResolvedValue({ content: null }),

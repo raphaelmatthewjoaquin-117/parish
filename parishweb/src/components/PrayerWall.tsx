@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { API_BASE_URL } from '../api/client'
 
 interface Prayer {
@@ -155,7 +156,7 @@ export function PrayerWall() {
         </div>
       </div>
 
-      {selectedPrayer && (
+      {selectedPrayer && createPortal(
         <div className="prayer-modal-overlay" onClick={() => setSelectedPrayer(null)}>
           <div className="prayer-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="prayer-modal-header">
@@ -183,7 +184,8 @@ export function PrayerWall() {
               <span className="prayer-modal-name">— {selectedPrayer.name}</span>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )

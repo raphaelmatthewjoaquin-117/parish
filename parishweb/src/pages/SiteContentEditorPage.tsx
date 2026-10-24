@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
-import { apiClient, API_BASE_URL } from '../api/client'
+import { createPortal } from 'react-dom'
+import { apiClient, getMediaUrl } from '../api/client'
 import { AdminFeedback } from '../components/AdminFeedback'
 import {
   defaultAboutContent,
@@ -51,9 +52,7 @@ function CollapsibleSection({ title, subtitle, defaultOpen = false, children }: 
   )
 }
 
-const getImageUrl = (image: string) => (
-  image.startsWith('/uploads/') ? `${API_BASE_URL}${image}` : image
-)
+const getImageUrl = getMediaUrl
 
 /* ── Photo description modal ────────────────────────────── */
 function PhotoDescModal({
@@ -91,7 +90,7 @@ function PhotoDescModal({
 
   const displayUrl = imagePreviewUrl ?? getImageUrl(photoUrl)
 
-  return (
+  return createPortal(
     <div
       className="photo-desc-modal-backdrop"
       role="presentation"
@@ -156,7 +155,8 @@ function PhotoDescModal({
           </button>
         </div>
       </dialog>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

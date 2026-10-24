@@ -7,6 +7,27 @@
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+export function getMediaUrl(mediaUrl: string): string {
+  const apiBaseUrl = API_BASE_URL.replace(/\/+$/, '');
+  if (mediaUrl.startsWith('/uploads/')) {
+    return `${apiBaseUrl}${mediaUrl}`;
+  }
+
+  try {
+    const url = new URL(mediaUrl);
+    const filename = url.pathname.match(
+      /^\/[^/]+\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpe?g|png|webp))$/i,
+    )?.[1];
+    if (url.protocol === 'https:' && /^[a-z0-9-]+\.blob\.core\.windows\.net$/i.test(url.hostname) && filename) {
+      return `${apiBaseUrl}/uploads/${filename}`;
+    }
+  } catch {
+    return mediaUrl;
+  }
+
+  return mediaUrl;
+}
+
 type RequestConfig = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;

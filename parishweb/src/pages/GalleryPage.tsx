@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, useParams } from 'react-router-dom'
-import { apiClient, API_BASE_URL } from '../api/client'
+import { apiClient, getMediaUrl } from '../api/client'
 import {
   defaultGalleryContent,
   galleryPhotoUrl,
@@ -13,9 +14,7 @@ import {
 import type { Language } from '../i18n'
 import '../PagesCSS/GalleryPage.css'
 
-function getPhotoUrl(image: string) {
-  return image.startsWith('/uploads/') ? `${API_BASE_URL}${image}` : image
-}
+const getPhotoUrl = getMediaUrl
 
 type LightboxState = { photo: GalleryPhoto; index: number; total: number; albumTitle: string } | null
 
@@ -60,7 +59,7 @@ function Lightbox({
   )
   const url = getPhotoUrl(galleryPhotoUrl(state.photo))
 
-  return (
+  return createPortal(
     <div
       className="gallery-lightbox-backdrop"
       role="presentation"
@@ -121,7 +120,8 @@ function Lightbox({
           {state.index + 1} / {state.total}
         </p>
       </dialog>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

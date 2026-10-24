@@ -330,20 +330,22 @@ function isAzureConfigured() {
   );
 }
 
-async function uploadFileToAzure(file, fileName) {
-  if (!isAzureConfigured()) {
-    return null;
-  }
-
-  const storageClient = azureStorageConnectionString
+function createAzureStorageClient() {
+  return azureStorageConnectionString
     ? BlobServiceClient.fromConnectionString(azureStorageConnectionString)
     : new BlobServiceClient(
         `https://${azureStorageAccountName}.blob.core.windows.net`,
         new StorageSharedKeyCredential(azureStorageAccountName, azureStorageAccountKey)
       );
+}
 
-  const containerClient = storageClient.getContainerClient(azureStorageContainer);
-  await containerClient.createIfNotExists({ access: 'blob' });
+async function uploadFileToAzure(file, fileName) {
+  if (!isAzureConfigured()) {
+    return null;
+  }
+
+  const containerClient = createAzureStorageClient().getContainerClient(azureStorageContainer);
+  await containerClient.createIfNotExists();
 
   const extension = path.extname(fileName || file.originalname || '').toLowerCase();
   const objectPath = `${randomUUID()}${extension}`;
@@ -356,7 +358,7 @@ async function uploadFileToAzure(file, fileName) {
     },
   });
 
-  return `https://${azureStorageAccountName}.blob.core.windows.net/${azureStorageContainer}/${objectPath}`;
+  return `/uploads/${objectPath}`;
 }
 
 const upload = multer({
@@ -897,23 +899,50 @@ app.get('/uploads/:filename', async (req, res) => {
   }
 
   try {
+    const azurePath = `/${azureStorageContainer}/${filename}`;
     const result = await getPool().request()
       .input('url', sql.NVarChar(1000), `/uploads/${filename}`)
+      .input('azurePath', sql.NVarChar(1000), azurePath)
       .query(`
         SELECT TOP 1 1 AS found
-        WHERE EXISTS (SELECT 1 FROM dbo.Events WHERE PhotoUrl = @url)
+        WHERE EXISTS (
+             SELECT 1 FROM dbo.Events
+             WHERE PhotoUrl = @url OR CHARINDEX(@azurePath, PhotoUrl) > 0
+           )
            OR EXISTS (
              SELECT 1 FROM dbo.SiteContent
-             WHERE ContentKey IN ('about', 'gallery', 'news') AND ContentJson LIKE '%' + @url + '%'
+             WHERE ContentKey IN ('about', 'gallery', 'news')
+               AND (CHARINDEX(@url, ContentJson) > 0 OR CHARINDEX(@azurePath, ContentJson) > 0)
            )
       `);
     const filePath = path.join(uploadDirectory, filename);
-    if (result.recordset.length === 0 || !fs.existsSync(filePath)) {
+    if (result.recordset.length === 0) {
       return res.status(404).json({ message: 'Photo not found.' });
     }
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
-    return res.sendFile(filePath);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+
+    if (!isAzureConfigured() || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpe?g|png|webp)$/i.test(filename)) {
+      return res.status(404).json({ message: 'Photo not found.' });
+    }
+
+    const blobClient = createAzureStorageClient()
+      .getContainerClient(azureStorageContainer)
+      .getBlockBlobClient(filename);
+    const properties = await blobClient.getProperties();
+    if ((properties.contentLength ?? 0) > 5 * 1024 * 1024) {
+      return res.status(413).json({ message: 'Photo is too large to display.' });
+    }
+    const image = await blobClient.downloadToBuffer();
+    res.set('Content-Type', properties.contentType || 'application/octet-stream');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.send(image);
   } catch (error) {
+    if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
+      return res.status(404).json({ message: 'Photo not found.' });
+    }
     logError(error, { context: 'serveEventPhoto' });
     return res.status(500).json({ message: 'Unable to load photo.' });
   }
@@ -3176,12 +3205,12 @@ app.listen(PORT, () => {
       encrypt: true,
       trustServerCertificate: true,
     },
+  }).then(() => {
+    startFinanceReportSchedule();
+    startNoShowVoidSchedule();
+    startTokenCleanupSchedule();
   }).catch(err => {
     console.error('Database initialization failed:', err);
     process.exit(1);
   });
 });
-
-startFinanceReportSchedule();
-startNoShowVoidSchedule();
-startTokenCleanupSchedule();

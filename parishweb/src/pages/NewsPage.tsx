@@ -4,7 +4,7 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { EventDetailsModal } from '../components/EventDetailsModal'
-import { API_BASE_URL as API_URL, apiClient } from '../api/client'
+import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client'
 import { localize, type NewsContent } from '../content/siteContent'
 import type { Language } from '../i18n'
 import '../PagesCSS/NewsPage.css'
@@ -26,9 +26,7 @@ type EventItem = {
 
 type NewsArticle = NewsContent['articles'][number]
 
-const getPhotoUrl = (photoUrl: string) => (
-  photoUrl.startsWith('/') ? `${API_URL}${photoUrl}` : photoUrl
-)
+const getPhotoUrl = getMediaUrl
 
 export function NewsPage({ language = 'en' }: { language?: Language }) {
   const [events, setEvents] = useState<EventItem[]>([])

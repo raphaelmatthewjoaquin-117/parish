@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { API_BASE_URL, apiClient } from '../api/client'
+import { apiClient, getMediaUrl } from '../api/client'
 import { defaultAboutContent, localize, type AboutContent } from '../content/siteContent'
 import type { Language } from '../i18n'
 import '../PagesCSS/AboutPage.css'
@@ -12,9 +12,7 @@ const withNewFieldDefaults = (saved: AboutContent): AboutContent => ({
   timeline: saved.timeline ?? defaultAboutContent.timeline,
 })
 
-const getImageUrl = (image: string) => (
-  image.startsWith('/uploads/') ? `${API_BASE_URL}${image}` : image
-)
+const getImageUrl = getMediaUrl
 
 export function AboutPage({ language = 'en' }: { language?: Language }) {
   const [content, setContent] = useState(defaultAboutContent)

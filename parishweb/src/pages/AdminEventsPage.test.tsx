@@ -63,6 +63,94 @@ describe('AdminEventsPage service request status filter', () => {
   })
 })
 
+describe('AdminEventsPage event details', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('adminToken', 'staff-token')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Secretary' } }
+        : url.endsWith('/api/events')
+          ? [{
+            id: 'event-1',
+            title: 'Parish Feast',
+            description: 'Celebrate together',
+            detail: 'Community gathering',
+            date: '2026-11-01',
+            time: '10:00',
+            location: 'Parish grounds',
+            photoUrl: '',
+          }]
+          : []
+      return { ok: true, json: async () => body } as Response
+    }))
+  })
+
+  it('opens the selected event details from the event management list', async () => {
+    render(<AdminEventsPage initialTab="events" embedded />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Parish Feast' })
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
+    expect(within(dialog).getByText('Celebrate together')).toBeTruthy()
+    expect(within(dialog).getByText('Community gathering')).toBeTruthy()
+    expect(within(dialog).getByText('Parish grounds')).toBeTruthy()
+  })
+})
+
+describe('AdminEventsPage event action feedback', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('adminToken', 'staff-token')
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Admin' } }
+        : url.endsWith('/api/events')
+          ? [{
+            id: 'event-1',
+            title: 'Parish Feast',
+            description: 'Celebrate together',
+            detail: 'Community gathering',
+            date: '2026-11-01',
+            time: '10:00',
+            location: 'Parish grounds',
+            photoUrl: '',
+          }]
+          : {}
+      return { ok: true, json: async () => body } as Response
+    }))
+  })
+
+  it('confirms when an event is added', async () => {
+    render(<AdminEventsPage initialTab="events" embedded />)
+
+    fireEvent.change(await screen.findByLabelText('Title', { selector: 'input' }), { target: { value: 'New event' } })
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-12-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add event' }))
+
+    expect((await screen.findByRole('status')).textContent).toContain('Event added successfully.')
+  })
+
+  it('confirms when an event is edited', async () => {
+    render(<AdminEventsPage initialTab="events" embedded />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect((await screen.findByRole('status')).textContent).toContain('Event updated successfully.')
+  })
+
+  it('confirms when an event is deleted', async () => {
+    render(<AdminEventsPage initialTab="events" embedded />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+
+    expect((await screen.findByRole('status')).textContent).toContain('Event deleted successfully.')
+  })
+})
+
 describe('AdminEventsPage login password visibility', () => {
   beforeEach(() => {
     window.localStorage.removeItem('adminToken')

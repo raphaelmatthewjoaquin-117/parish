@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { localize } from '../content/siteContent'
 import type { Language } from '../i18n'
 
@@ -39,7 +40,7 @@ export function EventDetailsModal({ event, photoUrl, language, onClose }: EventD
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  return (
+  return createPortal(
     <div className="event-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
         className="event-modal"
@@ -78,6 +79,7 @@ export function EventDetailsModal({ event, photoUrl, language, onClose }: EventD
           </dl>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }

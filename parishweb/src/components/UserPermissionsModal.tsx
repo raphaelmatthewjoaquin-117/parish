@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { API_BASE_URL as API_URL } from '../api/client'
 import { PERMISSION_MODULES, roleModuleAccess, type ModuleAccess, type ModuleName, type ModuleOverrides } from '../utils/rbac'
 
@@ -67,7 +68,7 @@ export function UserPermissionsModal({ user, onClose, onSaved }: UserPermissions
     }
   }
 
-  return (
+  return createPortal(
     <div className="modal d-block" role="dialog" aria-modal="true" aria-label={`Permissions for ${user.userName}`} style={{ background: 'rgba(0,0,0,.45)' }}>
       <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div className="modal-content">
@@ -102,6 +103,7 @@ export function UserPermissionsModal({ user, onClose, onSaved }: UserPermissions
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

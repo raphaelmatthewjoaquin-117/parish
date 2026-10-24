@@ -6,7 +6,8 @@ import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { SacramentalRecordForm } from '../components/SacramentalRecordForm'
 import { AdminFeedback } from '../components/AdminFeedback'
-import { API_BASE_URL as API_URL } from '../api/client'
+import { EventDetailsModal } from '../components/EventDetailsModal'
+import { API_BASE_URL as API_URL, getMediaUrl } from '../api/client'
 import { ForgotPasswordForm } from '../components/ForgotPasswordForm'
 import type { ModuleOverrides } from '../utils/rbac'
 import '../PagesCSS/AdminEventsPage.css'
@@ -150,12 +151,15 @@ const formatServiceRequestStatus = (status: string) => ({
   ConflictVoided: 'Schedule conflict',
 }[status] || status.replace(/([a-z])([A-Z])/g, '$1 $2'))
 
+const getPhotoUrl = getMediaUrl
+
 export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated, overrides }: AdminEventsPageProps) {
   // Tab state
   const [activeTab, setActiveTab] = useState<AdminEventsTab>(initialTab)
 
   // Event states
   const [events, setEvents] = useState<EventItem[]>([])
+  const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
   const [form, setForm] = useState<EventForm>(initialForm)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -270,7 +274,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   // Event functions
   const loadEvents = () => {
     setLoading(true)
-    setError(null)
+    setErrorState(null)
 
     fetch(`${API_URL}/api/events`)
       .then(response => {
@@ -765,6 +769,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           throw new Error('Unable to delete event')
         }
         loadEvents()
+        setMessage('Event deleted successfully.')
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Unable to delete event')
@@ -833,6 +838,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       .then(() => {
         resetForm()
         loadEvents()
+        setMessage(editingId ? 'Event updated successfully.' : 'Event added successfully.')
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Unable to save event')
@@ -1243,6 +1249,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                     {event.location && <div>{event.location}</div>}
                   </div>
                   <div className="admin-buttons">
+                    <button type="button" onClick={() => setSelectedEvent(event)} className="secondary-btn">
+                      View
+                    </button>
                     <button type="button" onClick={() => startEdit(event)} disabled={saving}>
                       Edit
                     </button>
@@ -1255,6 +1264,15 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             </ul>
           </div>
         </div>
+      )}
+
+      {selectedEvent && (
+        <EventDetailsModal
+          event={{ ...selectedEvent, location: selectedEvent.location || '', photoUrl: selectedEvent.photoUrl || '' }}
+          photoUrl={getPhotoUrl(selectedEvent.photoUrl || '')}
+          language="en"
+          onClose={() => setSelectedEvent(null)}
+        />
       )}
 
       {activeTab === 'prayers' && (
@@ -1318,7 +1336,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             )}
           </div>
 
-          {selectedPrayer && (
+          {selectedPrayer && createPortal(
             <div className="prayer-modal-overlay" onClick={() => setSelectedPrayer(null)}>
               <div className="prayer-modal-card prayer-modal-card-enhanced" onClick={(e) => e.stopPropagation()}>
                 <div className="prayer-modal-header-enhanced">
@@ -1435,7 +1453,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   </div>
                 </div>}
               </div>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
       )}
@@ -1547,7 +1566,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             )}
           </div>
 
-          {selectedServiceRequest && (
+          {selectedServiceRequest && createPortal(
             <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setSelectedServiceRequest(null) }}>
             <div className="admin-service-detail service-request-modal-card">
               <div className="detail-header">
@@ -1655,7 +1674,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 </div>
               </div>
             </div>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
       )}
@@ -1907,7 +1927,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       )}
 
       {/* Sacramental Record Detail Modal */}
-      {selectedSacramentalRecord && (
+      {selectedSacramentalRecord && createPortal(
         <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setSelectedSacramentalRecord(null) }}>
         <div className="admin-prayer-detail sacramental-detail-modal service-request-modal-card">
           <div className="detail-header">
@@ -2002,7 +2022,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             {recordAudit.length === 0 ? <p>No changes recorded.</p> : recordAudit.map(item => { let changedFields: string[]; try { changedFields = Object.keys(JSON.parse(item.Changes || '{}')) } catch { changedFields = [] } return <p key={item.AuditId}><strong>{item.ActionName}</strong> by {item.ChangedBy} on {new Date(item.ChangedAt).toLocaleString()}{changedFields.length > 0 && <small> — fields: {changedFields.join(', ')}</small>}</p> })}
           </div>
         </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {showRecordForm && createPortal(

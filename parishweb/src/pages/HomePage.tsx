@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from 'react'
 import { EventDetailsModal } from '../components/EventDetailsModal'
-import { API_BASE_URL as API_URL, apiClient } from '../api/client'
+import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client'
 import { defaultGalleryContent, localize, type GalleryContent } from '../content/siteContent'
 import type { Language } from '../i18n'
 import parishLogo from '../images/SDP logo.png'
@@ -31,13 +31,8 @@ type VaticanNewsItem = {
   imageUrl: string
 }
 
-const getPhotoUrl = (photoUrl: string) => (
-  photoUrl.startsWith('/') ? `${API_URL}${photoUrl}` : photoUrl
-)
-
-const getGalleryPhotoUrl = (photoUrl: string) => (
-  photoUrl.startsWith('/uploads/') ? `${API_URL}${photoUrl}` : photoUrl
-)
+const getPhotoUrl = getMediaUrl
+const getGalleryPhotoUrl = getMediaUrl
 
 
 export function HomePage({ language = 'en' }: { language?: Language }) {
