@@ -413,6 +413,7 @@ app.use(express.json());
 app.use(requestLoggingMiddleware);
 app.use(metricsMiddleware);
 app.use('/api', apiRateLimit);
+app.get('/health', handleHealthCheck);
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
