@@ -228,6 +228,10 @@
   color: #7a5a48;
 }
 
+.legend-item.partially-blocked {
+  color: #b07116;
+}
+
 .date-picker {
   border: 1px solid rgba(111, 78, 55, 0.12);
   border-radius: 1.25rem;
@@ -244,6 +248,41 @@
 .slots {
   display: grid;
   gap: .6rem;
+}
+
+.date-picker-nav {
+  grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+}
+
+.date-picker-nav strong {
+  text-align: center;
+}
+
+.date-picker-nav .month-nav {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(111, 78, 55, 0.25);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.65);
+  color: #4a382d;
+  font-size: 1.35rem;
+  line-height: 1;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.date-picker-nav .month-nav:hover {
+  border-color: #6f4e37;
+  background: #6f4e37;
+  color: #fff;
+}
+
+.date-picker-nav .month-nav:focus-visible {
+  outline: 3px solid rgba(218, 145, 0, 0.65);
+  outline-offset: 2px;
 }
 
 .date-picker-weekdays,
@@ -287,6 +326,18 @@
   color: #6b564c;
 }
 
+.date-picker-day.blocked {
+  border-color: rgba(122, 90, 72, 0.18);
+  background: rgba(122, 90, 72, 0.12);
+  color: #6b564c;
+  text-decoration: line-through;
+}
+
+.date-picker-day.partially-blocked {
+  border-color: rgba(176, 113, 22, 0.65);
+  background: rgba(176, 113, 22, 0.1);
+}
+
 .date-picker-day.selected {
   border-color: #6f4e37 !important;
   background: #6f4e37;
@@ -297,6 +348,26 @@
 .date-picker-day:disabled {
   opacity: .45;
   cursor: not-allowed;
+}
+
+.cert-date-picker {
+  padding: .75rem;
+}
+
+.cert-date-picker .date-picker-days {
+  gap: .35rem;
+}
+
+.cert-date-legend {
+  justify-content: flex-start;
+  margin-top: .75rem;
+}
+
+.cert-availability-error {
+  color: #7a2a1a;
+  font-size: .8rem;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .time-slots {
@@ -504,6 +575,24 @@
   display: grid;
   gap: .9rem;
   margin-top: .75rem;
+}
+
+.cert-date-time-row {
+  display: grid;
+  gap: .75rem;
+}
+
+.cert-date-field {
+  display: grid;
+  gap: .35rem;
+  color: #452f26;
+  font-weight: 600;
+}
+
+.cert-date-field .label-text {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
 }
 
 .cert-form label,

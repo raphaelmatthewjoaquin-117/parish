@@ -327,6 +327,10 @@ export const apiClient = {
   },
 
   certificates: {
+    async availability() {
+      return apiRequest<{ blockedSlots: { date: string; time: string | null }[] }>('/api/certificate-availability');
+    },
+
     async create(data: {
       firstName: string;
       lastName: string;

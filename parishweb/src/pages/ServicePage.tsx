@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import '../PagesCSS/ServicePage.css';
 import { API_BASE_URL as API_URL, apiClient } from '../api/client';
+import { isCertificateDateBlocked, isCertificateTimeBlocked, type CertificateBlockedSlot } from '../certificate-availability';
 
 type Service = {
   id: string;
@@ -93,6 +94,9 @@ export default function ServicePage(): React.JSX.Element {
   const [certType, setCertType] = useState<string>('Baptism');
   const [certDate, setCertDate] = useState('');
   const [certTime, setCertTime] = useState('');
+  const [certBlockedSlots, setCertBlockedSlots] = useState<CertificateBlockedSlot[]>([]);
+  const [certAvailabilityLoading, setCertAvailabilityLoading] = useState(true);
+  const [certAvailabilityError, setCertAvailabilityError] = useState('');
   const [certNotes, setCertNotes] = useState('');
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [certLoading, setCertLoading] = useState(false);
@@ -214,6 +218,31 @@ export default function ServicePage(): React.JSX.Element {
   }, [bookingService?.dbId]);
 
   useEffect(() => {
+    if (!isCertificateTab) return;
+
+    let current = true;
+    const timer = window.setTimeout(() => {
+      setCertAvailabilityLoading(true);
+      setCertAvailabilityError('');
+      apiClient.certificates.availability()
+        .then(result => {
+          if (!Array.isArray(result.blockedSlots)) throw new Error('Invalid certificate availability response.');
+          if (current) setCertBlockedSlots(result.blockedSlots);
+        })
+        .catch(reason => {
+          if (!current) return;
+          setCertBlockedSlots([]);
+          setCertAvailabilityError(reason instanceof Error ? reason.message : 'Unable to load certificate appointment availability.');
+        })
+        .finally(() => {
+          if (current) setCertAvailabilityLoading(false);
+        });
+    }, 0);
+
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [isCertificateTab]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined' && window.location.hash.replace('#', '') !== active) {
       window.history.replaceState(null, '', `#${active}`);
     }
@@ -279,6 +308,18 @@ export default function ServicePage(): React.JSX.Element {
   const submitCertificateRequest = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCertError('');
+    if (!certDate || !certTime) {
+      setCertError('Please choose a preferred date and time.');
+      return;
+    }
+    if (certAvailabilityLoading || certAvailabilityError) {
+      setCertError('Unable to check appointment availability. Please refresh the page and try again.');
+      return;
+    }
+    if (isCertificateDateBlocked(certBlockedSlots, certDate) || isCertificateTimeBlocked(certBlockedSlots, certDate, certTime)) {
+      setCertError('That appointment date or time is unavailable. Please choose another.');
+      return;
+    }
     setCertLoading(true);
     try {
       const result = await apiClient.certificates.create({
@@ -337,6 +378,8 @@ export default function ServicePage(): React.JSX.Element {
   const selectedDateRestriction = selectedDateSlots.length > 0 && !selectedDateSlots.some(slot => slot.available)
     ? selectedDateSlots.find(slot => slot.message)?.message
     : undefined;
+  const certificateDateBlocked = certDate && isCertificateDateBlocked(certBlockedSlots, certDate);
+  const certificateTimeBlocked = certDate && certTime && isCertificateTimeBlocked(certBlockedSlots, certDate, certTime);
 
   return (
     <div className="services-tabs container py-5">
@@ -482,18 +525,53 @@ export default function ServicePage(): React.JSX.Element {
                       </select>
                     </div>
                   </label>
-                  <div className="form-row">
-                    <label>
-                      <span className="label-text">Preferred date</span>
-                      <div className="field-wrap">
-                        <input className="form-control" type="date" required value={certDate} min={minCertDate} onChange={e => setCertDate(e.target.value)} />
+                  <div className="cert-date-time-row">
+                    <div className="cert-date-field">
+                      <span className="label-text" id="cert-date-label">Preferred date</span>
+                      <div className="date-picker cert-date-picker" role="group" aria-labelledby="cert-date-label">
+                        <div className="date-picker-nav">
+                          <button type="button" className="month-nav" aria-label="Previous month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button>
+                          <strong>{calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
+                          <button type="button" className="month-nav" aria-label="Next month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>›</button>
+                        </div>
+                        <div className="date-picker-weekdays">{WEEKDAYS.map(day => <span key={day}>{day}</span>)}</div>
+                        <div className="date-picker-days">
+                          {calendarDays.map((day, index) => {
+                            if (!day) return <span key={`cert-empty-${index}`} className="date-picker-empty" />;
+                            const date = toDateKey(day);
+                            const isBlocked = isCertificateDateBlocked(certBlockedSlots, date);
+                            const hasBlockedTimes = certBlockedSlots.some(block => block.date === date && block.time !== null);
+                            const isBeforeMinimum = date < minCertDate;
+                            return (
+                              <button
+                                key={date}
+                                type="button"
+                                disabled={certAvailabilityLoading || !!certAvailabilityError || isBlocked || isBeforeMinimum}
+                                aria-label={`${day.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}${isBlocked ? ', unavailable' : hasBlockedTimes ? ', some times unavailable' : ''}`}
+                                aria-pressed={certDate === date}
+                                className={`date-picker-day ${isBlocked ? 'blocked' : ''} ${hasBlockedTimes && !isBlocked ? 'partially-blocked' : ''} ${certDate === date ? 'selected' : ''}`}
+                                onClick={() => { setCertDate(date); setCertTime(''); setCertError(''); }}
+                              >
+                                {day.getDate()}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="slot-legend cert-date-legend">
+                          <span className="legend-item fully-booked">Unavailable</span>
+                          <span className="legend-item partially-blocked">Some times blocked</span>
+                        </div>
+                        {certAvailabilityLoading && <p className="slot-status" role="status">Loading certificate availability…</p>}
+                        {certAvailabilityError && <p className="slot-status" role="alert">{certAvailabilityError}</p>}
+                        {!certDate && !certAvailabilityLoading && !certAvailabilityError && <p className="slot-status">Select a preferred date.</p>}
                       </div>
-                    </label>
+                    </div>
                     <label>
                       <span className="label-text">Preferred time</span>
                       <div className="field-wrap">
                         <input className="form-control" type="time" required value={certTime} onChange={e => setCertTime(e.target.value)} />
                       </div>
+                      {certificateTimeBlocked && <small className="cert-availability-error" role="alert">That time is blocked. Please choose another time.</small>}
                     </label>
                   </div>
                   <label>
@@ -533,7 +611,7 @@ export default function ServicePage(): React.JSX.Element {
                     </div>
                   </label>
                   <div>
-                    <button className="btn btn-dark" type="submit" disabled={certLoading}>
+                    <button className="btn btn-dark" type="submit" disabled={certLoading || !!certificateDateBlocked || !!certificateTimeBlocked}>
                       {certLoading ? 'Submitting…' : 'Submit request'}
                     </button>
                   </div>
@@ -560,9 +638,9 @@ export default function ServicePage(): React.JSX.Element {
 
               <div className="date-picker">
                 <div className="date-picker-nav">
-                  <button type="button" className="month-nav btn btn-outline-dark" aria-label="Previous month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button>
+                  <button type="button" className="month-nav" aria-label="Previous month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button>
                   <strong>{calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
-                  <button type="button" className="month-nav" aria-label="Next month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>»</button>
+                  <button type="button" className="month-nav" aria-label="Next month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>›</button>
                 </div>
                 <div className="date-picker-weekdays">{WEEKDAYS.map(d => <span key={d}>{d}</span>)}</div>
                 <div className="date-picker-days">

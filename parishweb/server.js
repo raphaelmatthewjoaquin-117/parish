@@ -644,6 +644,21 @@ const certUpload = multer({
   },
 });
 
+app.get('/api/certificate-availability', async (_req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT CONVERT(varchar(10), BlockDate, 23) AS date, BlockTime AS time
+      FROM dbo.BlockedSlots
+      WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date)
+        AND Scope IN ('All', 'Certificate')
+    `);
+    res.json({ blockedSlots: result.recordset });
+  } catch (error) {
+    logError(error, { context: 'getCertificateAvailability' });
+    res.status(500).json({ message: 'Unable to load certificate appointment availability.' });
+  }
+});
+
 app.post('/api/certificate-requests', async (req, res) => {
   const { firstName, lastName, email, phone, certificateType, preferredDate, preferredTime, notes } = req.body;
 
