@@ -130,10 +130,10 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
           </p>
 
           <div className="button-row d-flex flex-wrap justify-content-center gap-3">
-            <a href="https://www.google.com/maps/place/Santo+Domingo+Church+-+National+Shrine+of+Our+Lady+of+the+Most+Holy+Rosary+(Diocese+of+Cubao)/@14.6264066,121.0079432,17z/data=!3m1!4b1!4m6!3m5!1s0x3397b64000dd2767:0x2cb38929d93bd98d!8m2!3d14.6264014!4d121.0105181!16s%2Fm%2F010rdrv_?entry=ttu&g_ep=EgoyMDI2MDkyOC4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noreferrer" className="primary-btn btn btn-dark">
+            <a href="https://www.google.com/maps/place/Santo+Domingo+Church+-+National+Shrine+of+Our+Lady+of+the+Most+Holy+Rosary+(Diocese+of+Cubao)/@14.6264066,121.0079432,17z/data=!3m1!4b1!4m6!3m5!1s0x3397b64000dd2767:0x2cb38929d93bd98d!8m2!3d14.6264014!4d121.0105181!16s%2Fm%2F010rdrv_?entry=ttu&g_ep=EgoyMDI2MDkyOC4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noreferrer" className="primary-btn hero-action-btn">
               Plan Your Visit
             </a>
-            <a href="/about" className="secondary-btn btn btn-outline-dark">
+            <a href="/about" className="secondary-btn hero-action-btn">
               Learn More
             </a>
           </div>
@@ -271,29 +271,15 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
                 <small>Official Facebook page</small>
               </span>
             </a>
-            <div className="homepage-facebook-actions">
-              <a href="https://www.facebook.com/stodomingoparishofficialpage/" target="_blank" rel="noreferrer">
-                Follow Page
-              </a>
-              <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fwww.facebook.com%2Fstodomingoparishofficialpage%2F" target="_blank" rel="noreferrer">
-                Share
-              </a>
-            </div>
-            <div className="homepage-facebook-feed-window">
-              <iframe
-                className="homepage-facebook-embed"
-                title="Recent posts from Sto. Domingo Parish on Facebook"
-                src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Fstodomingoparishofficialpage%2F&tabs=timeline&width=300&height=700&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=true"
-                width="300"
-                height="700"
-                style={{ border: 'none', overflow: 'hidden' }}
-                scrolling="no"
-                frameBorder="0"
-                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
-                allowFullScreen
-                loading="lazy"
-              />
-            </div>
+            <a
+              className="homepage-facebook-feed-link"
+              href="https://www.facebook.com/stodomingoparishofficialpage/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span>See the latest parish updates</span>
+              <span>Visit our Facebook page</span>
+            </a>
           </div>
         </div>
       </section>
