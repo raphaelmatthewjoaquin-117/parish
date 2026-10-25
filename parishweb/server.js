@@ -38,6 +38,9 @@ import {
   isValidPasswordResetToken,
   isValidResetPassword,
 } from './password-reset.js';
+import { assertProductionStorageConfiguration, createDatabaseConfig } from './src/db/config.js';
+import { checkDatabaseReadiness } from './src/db/readiness.js';
+import { createCorsOptions } from './src/http/cors-config.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -186,6 +189,16 @@ const handleHealthCheck = (_req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 };
 
+const handleReadinessCheck = async (_req, res) => {
+  try {
+    await checkDatabaseReadiness(getPool());
+    res.json({ status: 'ready' });
+  } catch (error) {
+    logError(error, { context: 'readinessCheck' });
+    res.status(503).json({ status: 'not_ready' });
+  }
+};
+
 const handleMetricsRequest = (_req, res) => {
   res.json({ totalRequests, uptime: process.uptime() });
 };
@@ -330,6 +343,8 @@ function isAzureConfigured() {
   );
 }
 
+assertProductionStorageConfiguration(process.env, isAzureConfigured());
+
 function createAzureStorageClient() {
   return azureStorageConnectionString
     ? BlobServiceClient.fromConnectionString(azureStorageConnectionString)
@@ -386,25 +401,10 @@ const archiveUpload = multer({
   },
 });
 
-// CORS configuration - allow localhost and dynamic FRONTEND_URL
-const allowedOrigins = [
-  'http://localhost:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token'],
-  maxAge: 3600
-};
+const corsOptions = createCorsOptions(
+  process.env.FRONTEND_URL,
+  process.env.NODE_ENV === 'production',
+);
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -414,6 +414,7 @@ app.use(requestLoggingMiddleware);
 app.use(metricsMiddleware);
 app.use('/api', apiRateLimit);
 app.get('/health', handleHealthCheck);
+app.get('/readyz', handleReadinessCheck);
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -429,48 +430,7 @@ logger.info('DB startup config:', {
 // DB_AUTH: 'sql' for SQL Server authentication (user/password),
 // 'ntlm' for Windows NTLM with explicit credentials,
 // empty/default => integrated authentication (when using msnodesqlv8 driver).
-const baseConfig = {
-  server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME || 'ParishDB',
-  options: {
-    encrypt: true,
-    trustServerCertificate: (() => {
-      const setting = process.env.DB_TRUST_SERVER_CERTIFICATE;
-      if (setting === undefined) return process.env.NODE_ENV !== 'production';
-      if (setting.toLowerCase() === 'true') return true;
-      if (setting.toLowerCase() === 'false') return false;
-      throw new Error('DB_TRUST_SERVER_CERTIFICATE must be true or false.');
-    })(),
-  },
-  port: Number(process.env.DB_PORT || 1433),
-};
-
-let config = { ...baseConfig };
-
-if (dbAuth === 'sql') {
-  // SQL authentication using username/password
-  config = {
-    ...baseConfig,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  };
-} else if (dbAuth === 'ntlm') {
-  // Explicit Windows credentials over NTLM
-  config = {
-    ...baseConfig,
-    authentication: {
-      type: 'ntlm',
-      options: {
-        domain: process.env.DB_DOMAIN || '',
-        userName: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-      },
-    },
-  };
-} else {
-  // Leave config as baseConfig; for integrated auth you should use msnodesqlv8 driver
-  config = baseConfig;
-}
+const config = createDatabaseConfig(process.env);
 
 const adminSecret = process.env.ADMIN_TOKEN || (process.env.NODE_ENV === 'production' ? '' : 'letmein');
 if (process.env.NODE_ENV === 'production' && !adminSecret) {
@@ -3197,16 +3157,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  initializePool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    server: process.env.DB_SERVER,
-    database: process.env.DB_NAME,
-    options: {
-      encrypt: true,
-      trustServerCertificate: true,
-    },
-  }).then(() => {
+  initializePool(config).then(() => {
     startFinanceReportSchedule();
     startNoShowVoidSchedule();
     startTokenCleanupSchedule();

@@ -282,58 +282,58 @@
 <div class="report">
   <header>
     <h1>Deployment Readiness Audit</h1>
-    <p class="subtitle">Parish Web — assessed October 6, 2026</p>
+    <p class="subtitle">Parish Web — deployment notes updated October 26, 2026</p>
   </header>
 
   <div class="score-row">
     <div class="score-card">
       <span class="label">Build</span>
       <span class="value pass">Pass</span>
-      <span class="detail">0 TypeScript errors, 1.41s</span>
+      <span class="detail">309.72 KB entry JS (98.44 KB gzip), route chunks split</span>
     </div>
     <div class="score-card">
       <span class="label">Tests</span>
-      <span class="value pass">114 / 114</span>
-      <span class="detail">7 suites, all passing</span>
+      <span class="value pass">57 / 57</span>
+      <span class="detail">14 test files passing</span>
     </div>
     <div class="score-card">
       <span class="label">Coverage</span>
-      <span class="value warn">67.8%</span>
-      <span class="detail">Statements (client.ts at 38%)</span>
+      <span class="value warn">Not measured</span>
+      <span class="detail">No current coverage run recorded</span>
     </div>
     <div class="score-card">
       <span class="label">Verdict</span>
-      <span class="value warn">Almost</span>
-      <span class="detail">5 issues to address</span>
+      <span class="value warn">External setup</span>
+      <span class="detail">Render, Vercel, SQL Server, and Azure settings required</span>
     </div>
   </div>
 
   <!-- BLOCKERS -->
   <section>
-    <h2>🔴 Blockers — fix before deploy</h2>
+    <h2>🔴 Complete before live traffic</h2>
     <div class="check-list">
 
       <div class="check-item">
         <span class="badge fail">Critical</span>
         <div class="content">
-          <div class="title"><code>.env</code> not in <code>.gitignore</code></div>
-          <div class="desc">Your <code>.gitignore</code> does not exclude <code>.env</code>. This file holds your DB password, admin token, and Resend API key. If committed, those secrets are in your Git history permanently. Add <code>.env</code> to <code>.gitignore</code> and run <code>git rm --cached .env</code> if it was ever tracked.</div>
+          <div class="title">Rotate the exposed Azure Storage key</div>
+          <div class="desc">The local <code>.env</code> is ignored by Git, but an Azure key appeared in a shared IDE/chat context. Rotate the key in Azure, update Render's secret setting, and verify uploads. Never put the replacement in Git or chat.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge fail">Critical</span>
         <div class="content">
-          <div class="title">No <code>helmet</code> or rate limiting</div>
-          <div class="desc">The server has no <code>helmet</code> (security headers) and no rate limiting middleware. Without these, the API is exposed to brute-force login attempts, clickjacking, MIME-sniffing, and XSS via missing headers. Install <code>helmet</code> and <code>express-rate-limit</code>.</div>
+          <div class="title">Configure the Render production environment</div>
+          <div class="desc">Set <code>NODE_ENV</code>, <code>FRONTEND_URL</code>, <code>ADMIN_TOKEN</code>, SQL Server credentials, and Azure Blob Storage credentials in Render's secret settings. Use a SQL Server with a valid TLS certificate. The API refuses production startup when the frontend origin or Azure storage is missing.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge fail">Critical</span>
         <div class="content">
-          <div class="title">Port hardcoded to 5000</div>
-          <div class="desc"><code>app.listen(5000)</code> on line 2515 of <code>server.js</code> ignores the <code>PORT</code> environment variable. Most hosting platforms (Azure, Render, Railway) inject <code>PORT</code> at runtime. Change to <code>app.listen(process.env.PORT || 5000)</code>.</div>
+          <div class="title">Configure Vercel to call the Render API</div>
+          <div class="desc">Set <code>VITE_API_URL</code> in Vercel to the public HTTPS origin of the Render API before building the frontend. Production builds reject a missing or localhost API URL.</div>
         </div>
       </div>
 
@@ -348,48 +348,48 @@
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title">6 MB hero image ships unoptimized</div>
-          <div class="desc"><code>heading page.JPG</code> is 5.9 MB in the production bundle — larger than the entire JS + CSS combined. Resize to ≤ 400 KB, convert to WebP, and use responsive <code>&lt;img srcset&gt;</code>. This alone will cut first-load time significantly.</div>
+          <div class="title">Check route chunk sizes on each production build</div>
+          <div class="desc">Page routes are loaded on demand to reduce the initial JavaScript download. Recheck the Vite build output after adding large features or dependencies.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title">No <code>.env.example</code> file</div>
-          <div class="desc">There's no <code>.env.example</code> documenting which environment variables the project needs. Without it, anyone deploying (including your future self) has to read the source to figure out the config. Create one with all 9 keys and placeholder values.</div>
+          <div class="title">Use environment settings, not a production <code>.env</code></div>
+          <div class="desc">The repository includes <code>parishweb/.env.example</code> for local development. Production secrets belong in Render and Vercel settings; do not commit them.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title">API URL scattered across 10 files</div>
-          <div class="desc">The <code>VITE_API_URL || 'http://localhost:5000'</code> fallback is duplicated in 10 separate page files instead of imported from the centralized API client. If the fallback ever needs to change, you'd miss some. Import from <code>src/api/client.ts</code> everywhere.</div>
+          <div class="title">Keep the Render and Vercel origins in sync</div>
+          <div class="desc">Set <code>FRONTEND_URL</code> in Render to the exact Vercel HTTPS origin, and set <code>VITE_API_URL</code> in Vercel to the Render HTTPS origin. Update both when custom domains change.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title"><code>trustServerCertificate: true</code> in DB config</div>
-          <div class="desc">Line 314 of <code>server.js</code> trusts any SQL Server certificate. This is fine for local dev but should be <code>false</code> in production when connecting to a properly certified database, or set via an environment variable.</div>
+          <div class="title">SQL Server certificate validation is required in production</div>
+          <div class="desc">Production configuration rejects <code>DB_TRUST_SERVER_CERTIFICATE=true</code> and defaults certificate validation to enabled. Configure SQL Server with a trusted certificate.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title">No <code>NODE_ENV</code> in current <code>.env</code></div>
-          <div class="desc">Your <code>.env</code> defines 9 variables but not <code>NODE_ENV</code>. Several behaviors differ in production mode (the admin token fallback, Pino log format, CORS). Make sure the deploy platform sets <code>NODE_ENV=production</code>.</div>
+          <div class="title">Keep scheduled jobs on one API instance</div>
+          <div class="desc">Finance snapshots, no-show handling, and token cleanup run in the API process. Multiple Render instances would run duplicate schedules; use one instance until jobs move to a dedicated worker.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge warn">Warning</span>
         <div class="content">
-          <div class="title">No <code>FRONTEND_URL</code> in <code>.env</code></div>
-          <div class="desc">CORS origin falls back to <code>http://localhost:5173</code>. In production, <code>FRONTEND_URL</code> must be set to your real domain or the frontend can't reach the API.</div>
+          <div class="title">Confirm SQL Server is reachable from Render</div>
+          <div class="desc">The API must connect to the production SQL Server during startup. Verify the SQL firewall and network allow Render to reach the configured host and port.</div>
         </div>
       </div>
 
@@ -404,48 +404,48 @@
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Build compiles cleanly</div>
-          <div class="desc">TypeScript and Vite build with 0 errors in 1.41 seconds. Bundle size is 646 KB JS (184 KB gzipped).</div>
+          <div class="title">Production build command is available</div>
+          <div class="desc">The project provides <code>npm run build</code> for TypeScript checking and Vite production output. Use a configured public <code>VITE_API_URL</code> when running it for production.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">114 tests passing across 7 suites</div>
-          <div class="desc">All test files pass: server rules, RBAC, service rules, SQL utilities, API client, hooks, and password hashing.</div>
+          <div class="title">Automated test suite is available</div>
+          <div class="desc">Run <code>npm run test:run</code> from <code>parishweb</code> before deployment; this page does not pin a stale test count.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Connection pooling implemented</div>
-          <div class="desc">Singleton pool with error recovery, used across all 82 endpoints. Graceful shutdown on SIGTERM / SIGINT.</div>
+          <div class="title">Database readiness endpoint</div>
+          <div class="desc"><code>/readyz</code> runs a database query and returns unavailable until the SQL connection is working. Use it as Render's health check path.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Parameterized queries</div>
-          <div class="desc">All SQL queries use parameterized inputs via <code>request.input()</code> — no string concatenation found.</div>
+          <div class="title">CORS includes the frontend's PATCH requests</div>
+          <div class="desc">Production CORS is restricted to the configured HTTPS <code>FRONTEND_URL</code> and includes the <code>PATCH</code> method used by the admin client.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">CORS restricted to frontend origin</div>
-          <div class="desc">Configured with credentials, specific methods, allowed headers, and 1-hour preflight cache.</div>
+          <div class="title">Runtime port is configurable</div>
+          <div class="desc">The Express API listens on the host-provided <code>PORT</code>, which Render sets for web services.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Graceful shutdown handlers</div>
-          <div class="desc">Both SIGTERM and SIGINT close the database pool before exiting.</div>
+          <div class="title">Azure uploads are required in production</div>
+          <div class="desc">The API checks for Azure Blob Storage configuration at startup so ephemeral Render disk is not silently used for production uploads.</div>
         </div>
       </div>
 
@@ -460,32 +460,32 @@
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Request logging and metrics middleware</div>
-          <div class="desc">Every request logs method, path, status, and duration. Metrics collection and health endpoint in place.</div>
+          <div class="title">Separate liveness and readiness checks</div>
+          <div class="desc"><code>/health</code> reports process liveness; <code>/readyz</code> checks database readiness.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">Environment-based configuration</div>
-          <div class="desc">Database, email, CORS, and auth all read from <code>process.env</code> with dev-safe defaults.</div>
+          <div class="title">Production API URL fails closed</div>
+          <div class="desc">A production frontend build rejects an unset, localhost, or non-HTTPS <code>VITE_API_URL</code> instead of sending requests to each visitor's computer.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">19 database migrations tracked</div>
-          <div class="desc">Migrations are numbered sequentially (001–019) plus a baseline. Schema changes are version-controlled.</div>
+          <div class="title">Environment example is available</div>
+          <div class="desc"><code>parishweb/.env.example</code> documents local development settings with placeholders. Production values must be configured in the hosting dashboards.</div>
         </div>
       </div>
 
       <div class="check-item">
         <span class="badge pass">Pass</span>
         <div class="content">
-          <div class="title">File upload validation</div>
-          <div class="desc">Multer configured with size limits (10 MB) and MIME type filtering for both archive and portal uploads.</div>
+          <div class="title">Deployment documentation is included</div>
+          <div class="desc">The root README documents the Vercel frontend, Render API, required environment variables, durable uploads, health check, and key-rotation steps.</div>
         </div>
       </div>
 
@@ -495,36 +495,32 @@
   <!-- VERDICT -->
   <div class="verdict-bar mostly-ready">
     <span class="icon">⚠</span>
-    <span>Almost deployment-ready — 3 blockers must be fixed first, then 6 warnings addressed for a production-grade deploy.</span>
+    <span>Repository changes improve production safety, but live readiness still depends on Render/Vercel configuration, SQL connectivity, and Azure key rotation.</span>
   </div>
 
   <!-- ACTION PLAN -->
   <div class="action-section">
     <h3>Pre-deployment checklist</h3>
     <ul class="action-list">
-      <li>Add <code>.env</code> to <code>.gitignore</code> and remove it from tracking if committed</li>
-      <li>Install and configure <code>helmet</code> and <code>express-rate-limit</code></li>
-      <li>Change <code>app.listen(5000)</code> to <code>app.listen(process.env.PORT || 5000)</code></li>
-      <li>Compress <code>heading page.JPG</code> to ≤ 400 KB (WebP recommended)</li>
-      <li>Create <code>.env.example</code> with all required variables documented</li>
-      <li>Consolidate the 10 scattered <code>API_URL</code> declarations to use the API client</li>
-      <li>Make <code>trustServerCertificate</code> configurable via environment variable</li>
-      <li>Set <code>NODE_ENV=production</code> and <code>FRONTEND_URL</code> on deploy platform</li>
-      <li>Rotate DB password, admin token, and Resend API key before going live</li>
+      <li>Rotate the exposed Azure Storage key, update Render's secret setting, and verify uploads</li>
+      <li>Set the required production environment variables in Render and Vercel</li>
+      <li>Set Vercel's <code>VITE_API_URL</code> and Render's <code>FRONTEND_URL</code> to the correct HTTPS origins</li>
+      <li>Verify Render can connect to SQL Server with certificate validation enabled</li>
+      <li>Keep one API instance while scheduled jobs run inside the web process</li>
+      <li>Run tests, lint, and the production build before deploying</li>
     </ul>
   </div>
 
   <div class="action-section">
     <h3>Nice to have</h3>
     <ul class="action-list">
-      <li>Implement code splitting (dynamic <code>import()</code>) to reduce the 646 KB JS chunk</li>
-      <li>Add a <code>ContactPage.tsx</code> form submission backend (currently a TODO)</li>
-      <li>Increase test coverage on <code>client.ts</code> (currently 38% statements)</li>
-      <li>Set up a CI/CD pipeline (GitHub Actions) for automated build + test on push</li>
+      <li>Measure route chunk sizes and frontend performance on real production pages</li>
+      <li>Move scheduled jobs to a single worker before scaling the API horizontally</li>
+      <li>Run a live smoke test for database-backed pages, email, and Azure uploads</li>
     </ul>
   </div>
 
   <footer>
-    Generated by deployment audit &middot; parish-web &middot; October 6, 2026
+    Deployment notes &middot; parish-web &middot; updated October 26, 2026
   </footer>
 </div>

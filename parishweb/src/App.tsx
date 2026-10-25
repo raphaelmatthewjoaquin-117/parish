@@ -1,20 +1,21 @@
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import './App.css'
-import { AboutPage } from './pages/AboutPage'
-import { AdminEventsPage } from './pages/AdminEventsPage'
-import { ContactPage } from './pages/ContactPage'
-import { GalleryPage } from './pages/GalleryPage'
-import { HomePage } from './pages/HomePage'
-import { NewsPage } from './pages/NewsPage'
-import ServicePage from './pages/ServicePage'
-import { PrayerRequest } from './pages/PrayerRequest'
-import { UnifiedAdminPage } from './pages/UnifiedAdminPage'
-import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { apiClient } from './api/client'
 import { defaultFooterContent, type FooterContent } from './content/siteContent'
 import logo from './images/SDP logo.png'
 import { observeTranslations, type Language } from './i18n'
+
+const AboutPage = lazy(() => import('./pages/AboutPage').then(module => ({ default: module.AboutPage })))
+const AdminEventsPage = lazy(() => import('./pages/AdminEventsPage').then(module => ({ default: module.AdminEventsPage })))
+const ContactPage = lazy(() => import('./pages/ContactPage').then(module => ({ default: module.ContactPage })))
+const GalleryPage = lazy(() => import('./pages/GalleryPage').then(module => ({ default: module.GalleryPage })))
+const HomePage = lazy(() => import('./pages/HomePage').then(module => ({ default: module.HomePage })))
+const NewsPage = lazy(() => import('./pages/NewsPage').then(module => ({ default: module.NewsPage })))
+const ServicePage = lazy(() => import('./pages/ServicePage'))
+const PrayerRequest = lazy(() => import('./pages/PrayerRequest').then(module => ({ default: module.PrayerRequest })))
+const UnifiedAdminPage = lazy(() => import('./pages/UnifiedAdminPage').then(module => ({ default: module.UnifiedAdminPage })))
+const ResetPasswordPage = lazy(() => import('./components/ResetPasswordPage').then(module => ({ default: module.ResetPasswordPage })))
 
 const navItems = [
   { label: 'Home', to: '/' },
@@ -162,19 +163,21 @@ function AppShell() {
       </header>
 
       <main>
-        <Routes>
-          <Route path="/" element={<HomePage language={language} />} />
-          <Route path="/about" element={<AboutPage language={language} />} />
-          <Route path="/news" element={<NewsPage language={language} />} />
-          <Route path="/gallery" element={<GalleryPage language={language} />} />
-          <Route path="/gallery/:albumId" element={<GalleryPage language={language} />} />
-          <Route path="/services" element={<ServicePage />} />
-          <Route path="/contact" element={<ContactPage language={language} />} />
-          <Route path="/admin" element={<UnifiedAdminPage />} />
-          <Route path="/admin/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/admin/events" element={<AdminEventsPage />} />
-          <Route path="/prayerRequests" element={<PrayerRequest />} />
-        </Routes>
+        <Suspense fallback={<div role="status" aria-live="polite">Loading page…</div>}>
+          <Routes>
+            <Route path="/" element={<HomePage language={language} />} />
+            <Route path="/about" element={<AboutPage language={language} />} />
+            <Route path="/news" element={<NewsPage language={language} />} />
+            <Route path="/gallery" element={<GalleryPage language={language} />} />
+            <Route path="/gallery/:albumId" element={<GalleryPage language={language} />} />
+            <Route path="/services" element={<ServicePage />} />
+            <Route path="/contact" element={<ContactPage language={language} />} />
+            <Route path="/admin" element={<UnifiedAdminPage />} />
+            <Route path="/admin/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/admin/events" element={<AdminEventsPage />} />
+            <Route path="/prayerRequests" element={<PrayerRequest />} />
+          </Routes>
+        </Suspense>
       </main>
 
       {!isAdminPage && (

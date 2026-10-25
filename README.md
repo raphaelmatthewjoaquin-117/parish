@@ -106,6 +106,88 @@ Common connection problems:
 - **Login failed:** check that SQL Server Authentication is enabled and that the configured login/password are correct and the login can access `ParishDB`.
 - **Invalid object/table name:** confirm the query window was set to `ParishDB` before executing the baseline, and that the baseline completed without errors.
 
+## Production deployment (Vercel + Render)
+
+The frontend is a Vite static site on Vercel. The Express API runs as a
+persistent Node.js web service on Render. They are separate deployments: the
+Vercel build must use the public Render API URL, and Render must allow the
+public Vercel origin.
+
+### Render API service
+
+Create or update a Render Web Service for this repository. Use the repository
+root so npm can resolve the `parishweb` workspace:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | repository root |
+| Build Command | `npm ci` |
+| Start Command | `npm run start --workspace parishweb` |
+| Health Check Path | `/readyz` |
+
+Configure these environment variables in Render's service settings. Set values
+in the Render dashboard, not in Git or chat.
+
+| Variable | Production value |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `PORT` | Let Render provide it |
+| `FRONTEND_URL` | Exact HTTPS origin of the Vercel site, with no path |
+| `ADMIN_TOKEN` | Long, random secret |
+| `DB_AUTH` | `sql` |
+| `DB_SERVER`, `DB_PORT`, `DB_NAME` | Production SQL Server host, port, and database |
+| `DB_USER`, `DB_PASSWORD` | Dedicated SQL login and password |
+| `DB_TRUST_SERVER_CERTIFICATE` | `false`; the SQL Server certificate must validate |
+| `AZURE_STORAGE_CONNECTION_STRING` | Rotated Azure Storage connection string |
+| `AZURE_STORAGE_CONTAINER_NAME` | `uploads` (or the configured container) |
+| `RESEND_API_KEY` | Optional; set only if production email is enabled |
+| `RESEND_FROM_EMAIL` | Optional verified sender for Resend |
+
+Production startup requires an HTTPS `FRONTEND_URL`, SQL authentication
+credentials with certificate validation enabled, and Azure Blob Storage.
+Missing settings or a failed database connection stop the API. Render's
+`/readyz` health check verifies the database; `/health` only reports that the
+process is running.
+
+This API starts scheduled finance, appointment, and token-cleanup jobs inside
+the web process. Keep one running Render instance unless those jobs are moved
+to a separate single worker; multiple instances would run duplicate schedules.
+Confirm that the SQL Server firewall/network allows connections from Render
+before deploying.
+
+Render's local filesystem is not durable storage. Production uploads are
+required to use Azure Blob Storage, and the API refuses to start in production
+without it. Do not use the example/local `uploads/` folder for production data.
+
+### Vercel frontend
+
+Configure the Vercel project to build the `parishweb` app with the Vite build
+command `npm run build` and output directory `dist`. Set `VITE_API_URL` in
+Vercel's production environment to the Render service's public HTTPS origin,
+for example `https://<your-render-service>.onrender.com` (no path). Set it
+before building: the client rejects a missing, non-HTTPS, or localhost API URL
+in production. After changing it, redeploy the frontend.
+
+Set production variables in Vercel's dashboard. Do not put
+`NODE_ENV=production` in a `.env` file used by Vite; Vite warns on that
+configuration. The API's `NODE_ENV=production` belongs in Render's settings.
+
+Use the exact Vercel site origin for Render's `FRONTEND_URL`. The API's CORS
+policy allows that production origin and permits the `PATCH` method used by
+admin screens. Keep localhost origins for local development only.
+
+### Rotate the exposed Azure Storage key
+
+The Azure Storage key shown in the shared IDE/chat context must be treated as
+exposed. In the Azure portal, open the storage account and go to **Security +
+networking → Access keys**. First switch Render's
+`AZURE_STORAGE_CONNECTION_STRING` to the other key's connection string and
+redeploy. Verify that uploads work; then regenerate the exposed key in Azure.
+If you cannot identify which of the two keys was exposed, rotate both in a
+planned sequence, updating Render and verifying access between rotations.
+Never paste the replacement key into Git or chat. See Microsoft's
+[Azure Storage key rotation guide](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage?tabs=azure-portal).
+
 ## Testing and development commands
 
 Run these from `parishweb`:

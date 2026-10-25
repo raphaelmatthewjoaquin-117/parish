@@ -4,8 +4,11 @@
  */
 /* The API surface returns legacy SQL-shaped payloads; response types are refined at call sites. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { resolveApiBaseUrl } from './base-url'
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export { resolveApiBaseUrl } from './base-url'
+
+export const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.PROD);
 
 export function getMediaUrl(mediaUrl: string): string {
   const apiBaseUrl = API_BASE_URL.replace(/\/+$/, '');
