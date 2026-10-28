@@ -31,6 +31,7 @@ import {
 } from './server-rules.js';
 import { hashAspNetPassword } from './password-hash.js';
 import { deleteServiceRequest } from './src/service-request-deletion.js';
+import { createPrayerRouter } from './src/prayer-routes.js';
 import { certificateRequestEmail, passwordResetEmail, serviceBookingEmail } from './email-templates.js';
 import {
   createPasswordResetToken,
@@ -2493,6 +2494,8 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
     res.status(500).json({ message: 'Unable to delete staff account.' });
   }
 });
+
+app.use(createPrayerRouter({ getPool, sql, requireAdmin, requireRole, logError }));
 
 app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
