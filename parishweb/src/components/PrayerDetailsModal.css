@@ -1,0 +1,237 @@
+.prayer-modal-overlay {
+  --prayer-ink: #1c2d29;
+  --prayer-green: #285b4f;
+  --prayer-gold: #b47b24;
+  --prayer-paper: #fbfaf6;
+  --prayer-line: #ddd8ca;
+  --prayer-muted: #6d746d;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(28, 45, 41, .75);
+  backdrop-filter: blur(4px);
+  animation: prayer-modal-fade-in .2s ease;
+}
+
+@keyframes prayer-modal-fade-in {
+  from { opacity: 0 }
+  to { opacity: 1 }
+}
+
+.prayer-modal-card {
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid var(--prayer-line);
+  border-radius: 12px;
+  background: var(--prayer-paper);
+  color: var(--prayer-ink);
+  box-shadow: 0 24px 60px rgba(28, 45, 41, .3);
+  animation: prayer-modal-slide-up .3s ease;
+}
+
+@keyframes prayer-modal-slide-up {
+  from { transform: translateY(20px); opacity: 0 }
+  to { transform: translateY(0); opacity: 1 }
+}
+
+.prayer-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 1.75rem;
+  border-bottom: 1px solid var(--prayer-line);
+}
+
+.prayer-modal-header > div {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.prayer-modal-category {
+  padding: .3rem .65rem;
+  border-radius: 999px;
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.prayer-modal-date {
+  color: var(--prayer-muted);
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.prayer-modal-close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--prayer-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prayer-ink);
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+
+.prayer-modal-close:hover {
+  border-color: var(--prayer-gold);
+  background: #f4f1e8;
+  color: var(--prayer-gold);
+}
+
+.prayer-modal-body {
+  padding: 1.75rem 1.75rem 1.5rem;
+}
+
+.prayer-modal-title {
+  margin-bottom: 1rem;
+  color: var(--prayer-green);
+  font-size: 1.35rem;
+}
+
+.prayer-modal-text {
+  margin: 0;
+  color: var(--prayer-ink);
+  font-size: 1rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.prayer-modal-admin-details {
+  display: grid;
+  gap: .5rem;
+  margin-top: 1rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--prayer-line);
+  color: var(--prayer-ink);
+}
+
+.prayer-modal-admin-details p {
+  margin: 0;
+}
+
+.prayer-modal-footer {
+  padding: 1rem 1.75rem 1.5rem;
+  border-top: 1px solid var(--prayer-line);
+  background: #f9f7f2;
+}
+
+.prayer-modal-footer .prayer-modal-actions {
+  margin-top: 1rem;
+}
+
+.prayer-modal-name {
+  color: var(--prayer-green);
+  font-size: .95rem;
+  font-weight: 600;
+  font-style: italic;
+}
+
+.prayer-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .3rem .75rem;
+  border-radius: 999px;
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.prayer-status-badge.status-approved {
+  border: 1px solid #b8dcc8;
+  background: #e6f4ed;
+  color: #2d5f44;
+}
+
+.prayer-status-badge.status-pending {
+  border: 1px solid #ffd699;
+  background: #fff4e6;
+  color: #8b5a00;
+}
+
+.prayer-modal-actions {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.prayer-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem 1.5rem;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  font-size: .95rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+
+.prayer-action-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.prayer-approve-btn {
+  border-color: var(--prayer-green);
+  background: var(--prayer-green);
+  color: #fff;
+}
+
+.prayer-approve-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: #1e473e;
+  background: #1e473e;
+}
+
+.prayer-delete-btn {
+  border-color: #c53030;
+  background: #fff;
+  color: #c53030;
+}
+
+.prayer-delete-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: #c53030;
+  color: #fff;
+}
+
+@media (max-width: 575.98px) {
+  .prayer-modal-card {
+    max-height: 90vh;
+    border-radius: 8px;
+  }
+
+  .prayer-modal-header,
+  .prayer-modal-body,
+  .prayer-modal-footer {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  .prayer-modal-actions {
+    flex-direction: column;
+  }
+
+  .prayer-action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

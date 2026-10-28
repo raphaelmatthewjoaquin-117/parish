@@ -99,6 +99,48 @@ describe('AdminEventsPage event details', () => {
   })
 })
 
+describe('AdminEventsPage prayer details', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('adminToken', 'staff-token')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Admin' } }
+        : url.endsWith('/api/admin/prayers')
+          ? [{
+            id: 21,
+            name: 'Jordan Parishioner',
+            category: 'healing',
+            request: 'Please pray for a full recovery.',
+            anonymous: false,
+            shareWithCommunity: true,
+            isApproved: false,
+            createdAt: '2026-10-28T08:00:00.000Z',
+          }]
+          : []
+      return { ok: true, json: async () => body } as Response
+    }))
+  })
+
+  it('uses the client prayer details modal while retaining admin status and actions', async () => {
+    render(<AdminEventsPage initialTab="prayers" embedded />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Prayer Request' })
+    expect(dialog.classList.contains('prayer-modal-card')).toBe(true)
+    expect(within(dialog).getByText('Please pray for a full recovery.')).toBeTruthy()
+    expect(within(dialog).getByText('Shared with community')).toBeTruthy()
+    expect(within(dialog).getByText('Pending Approval')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Delete Prayer' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve Prayer' }))
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/prayers/21/approve'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+})
+
 describe('AdminEventsPage event action feedback', () => {
   beforeEach(() => {
     window.localStorage.setItem('adminToken', 'staff-token')

@@ -1,14 +1,7 @@
 import { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import { API_BASE_URL } from '../api/client'
-
-interface Prayer {
-  id: number
-  name: string
-  category: string
-  request: string
-  createdAt: string
-}
+import { PrayerDetailsModal } from './PrayerDetailsModal'
+import { getPrayerCategoryColor, type PrayerDetails } from '../utils/prayer'
 
 const CATEGORIES = [
   { value: 'all', label: 'All Prayers' },
@@ -19,23 +12,6 @@ const CATEGORIES = [
   { value: 'deceased', label: 'Deceased' },
   { value: 'other', label: 'Other' },
 ]
-
-const getCategoryColor = (category: string): string => {
-  switch (category) {
-    case 'healing':
-      return '#4caf50'
-    case 'thanksgiving':
-      return '#2196f3'
-    case 'guidance':
-      return '#ff9800'
-    case 'family':
-      return '#9c27b0'
-    case 'deceased':
-      return '#757575'
-    default:
-      return '#d4af37'
-  }
-}
 
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString)
@@ -48,11 +24,11 @@ const truncateText = (text: string, maxLength: number = 120): string => {
 }
 
 export function PrayerWall() {
-  const [prayers, setPrayers] = useState<Prayer[]>([])
+  const [prayers, setPrayers] = useState<PrayerDetails[]>([])
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedPrayer, setSelectedPrayer] = useState<Prayer | null>(null)
+  const [selectedPrayer, setSelectedPrayer] = useState<PrayerDetails | null>(null)
 
   useEffect(() => {
     const fetchPrayers = async () => {
@@ -132,7 +108,7 @@ export function PrayerWall() {
                   <div className="prayer-card-header">
                     <span
                       className="prayer-card-category"
-                      style={{ backgroundColor: getCategoryColor(prayer.category) }}
+                      style={{ backgroundColor: getPrayerCategoryColor(prayer.category) }}
                     >
                       {prayer.category}
                     </span>
@@ -156,37 +132,7 @@ export function PrayerWall() {
         </div>
       </div>
 
-      {selectedPrayer && createPortal(
-        <div className="prayer-modal-overlay" onClick={() => setSelectedPrayer(null)}>
-          <div className="prayer-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="prayer-modal-header">
-              <div>
-                <span
-                  className="prayer-modal-category"
-                  style={{ backgroundColor: getCategoryColor(selectedPrayer.category) }}
-                >
-                  {selectedPrayer.category}
-                </span>
-                <span className="prayer-modal-date">{formatDate(selectedPrayer.createdAt)}</span>
-              </div>
-              <button
-                className="prayer-modal-close"
-                onClick={() => setSelectedPrayer(null)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="prayer-modal-body">
-              <p className="prayer-modal-text">{selectedPrayer.request}</p>
-            </div>
-            <div className="prayer-modal-footer">
-              <span className="prayer-modal-name">— {selectedPrayer.name}</span>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+      {selectedPrayer && <PrayerDetailsModal prayer={selectedPrayer} onClose={() => setSelectedPrayer(null)} />}
     </>
   )
 }
