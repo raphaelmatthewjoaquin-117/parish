@@ -23,6 +23,7 @@ import {
   isAllowedArchiveUpload,
   isAllowedImageUpload,
   hasValidImageSignature,
+  hasValidArchiveSignature,
   isValidGalleryContent,
   isValidNewsContent,
   toCsv,
@@ -34,6 +35,7 @@ import { hashAspNetPassword } from './password-hash.js';
 import { deleteServiceRequest } from './src/service-request-deletion.js';
 import { createPrayerRouter } from './src/prayer-routes.js';
 import { createBlockedSlotsRouter } from './src/blocked-slots-router.js';
+import { createAdminReportingRouter } from './src/admin-reporting-routes.js';
 import { certificateRequestEmail, passwordResetEmail, serviceBookingEmail } from './email-templates.js';
 import {
   createPasswordResetToken,
@@ -377,6 +379,121 @@ async function uploadFileToAzure(file, fileName) {
   });
 
   return `/uploads/${objectPath}`;
+}
+
+async function saveArchiveFile(file) {
+  let keepLocalFile = false;
+  try {
+    const contents = await fs.promises.readFile(file.path);
+    if (!hasValidArchiveSignature(file.mimetype, contents)) {
+      const error = new Error('Sacramental archive file signature does not match its declared type.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (isAzureConfigured()) {
+      const uploadedUrl = await uploadFileToAzure(file, file.originalname);
+      if (!uploadedUrl) throw new Error('Azure archive storage is not available.');
+      return buildPublicUploadUrl(path.basename(uploadedUrl));
+    }
+
+    keepLocalFile = true;
+    return buildPublicUploadUrl(file.filename);
+  } finally {
+    if (!keepLocalFile) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          logError(error, { context: 'cleanupSacramentalArchiveUpload' });
+        }
+      }
+    }
+  }
+}
+
+function getArchiveObjectName(fileUrl) {
+  if (typeof fileUrl !== 'string' || !fileUrl.trim()) {
+    throw new Error('Invalid sacramental archive file URL.');
+  }
+  let url;
+  try {
+    url = new URL(fileUrl, 'https://local.invalid');
+  } catch {
+    throw new Error('Invalid sacramental archive file URL.');
+  }
+
+  const filename = path.posix.basename(url.pathname);
+  if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..') || filename === '.') {
+    throw new Error('Invalid sacramental archive file name.');
+  }
+  const validLocalPath = url.origin === 'https://local.invalid'
+    && url.pathname === `/uploads/${filename}`;
+  const validAzurePath = isAzureConfigured()
+    && url.hostname === `${azureStorageAccountName}.blob.core.windows.net`
+    && url.pathname === `/${azureStorageContainer}/${filename}`;
+  let validPublicPath = false;
+  if (configuredPublicUploadBaseUrl) {
+    try {
+      const base = new URL(configuredPublicUploadBaseUrl);
+      validPublicPath = url.origin === base.origin
+        && url.pathname === `${base.pathname.replace(/\/+$/, '')}/${filename}`;
+    } catch {
+      validPublicPath = false;
+    }
+  }
+  if (!validLocalPath && !validAzurePath && !validPublicPath) {
+    throw new Error('Sacramental archive file URL is outside the configured upload storage.');
+  }
+  return filename;
+}
+
+async function getArchiveFile(fileUrl) {
+  const filename = getArchiveObjectName(fileUrl);
+  const localPath = path.join(uploadDirectory, filename);
+  let contents;
+  if (fs.existsSync(localPath)) {
+    contents = await fs.promises.readFile(localPath);
+  } else if (isAzureConfigured()) {
+    const blobClient = createAzureStorageClient()
+      .getContainerClient(azureStorageContainer)
+      .getBlockBlobClient(filename);
+    const properties = await blobClient.getProperties();
+    if ((properties.contentLength ?? 0) > 20 * 1024 * 1024) {
+      throw new Error('Sacramental archive file exceeds the allowed size.');
+    }
+    contents = await blobClient.downloadToBuffer();
+  } else {
+    const error = new Error('Sacramental archive file was not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const extension = path.extname(filename).toLowerCase();
+  const contentType = {
+    '.pdf': 'application/pdf',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+  }[extension] || 'application/octet-stream';
+  return { contents, contentType, filename };
+}
+
+async function deleteArchiveFile(fileUrl) {
+  const filename = getArchiveObjectName(fileUrl);
+  const localPath = path.join(uploadDirectory, filename);
+  if (fs.existsSync(localPath)) {
+    await fs.promises.unlink(localPath);
+    return;
+  }
+  if (isAzureConfigured()) {
+    await createAzureStorageClient()
+      .getContainerClient(azureStorageContainer)
+      .getBlockBlobClient(filename)
+      .deleteIfExists();
+  }
 }
 
 const upload = multer({
@@ -2504,6 +2621,19 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
 
 app.use(createPrayerRouter({ getPool, sql, requireAdmin, requireRole, logError }));
 app.use(createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRole, logError }));
+app.use(createAdminReportingRouter({
+  getPool,
+  sql,
+  requireAdmin,
+  requireRole,
+  logError,
+  uploadDirectory,
+  uploadArchive: archiveUpload.single('document'),
+  saveArchiveFile,
+  requireAdminWithQueryToken,
+  getArchiveFile,
+  deleteArchiveFile,
+}));
 
 app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {

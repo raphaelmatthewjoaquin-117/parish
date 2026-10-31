@@ -65,6 +65,7 @@ export const ALLOWED_REQUEST_STATUSES: string[];
 export function isAllowedArchiveUpload(originalName: string, mimeType: string, size: number): boolean;
 export function isAllowedImageUpload(originalName: string, mimeType: string, size: number): boolean;
 export function hasValidImageSignature(mimeType: string, bytes: Uint8Array): boolean;
+export function hasValidArchiveSignature(mimeType: string, bytes: unknown): boolean;
 export function isValidGalleryContent(content: unknown): boolean;
 export function isValidNewsContent(content: unknown): boolean;
 export function toCsv(rows: Array<Record<string, unknown>>, columns: CsvColumn[]): string;

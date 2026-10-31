@@ -568,7 +568,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     setError(null)
     try {
       const uploaded = await fetch(`${API_URL}/api/admin/sacramental/upload-archive`, { method: 'POST', headers: { 'x-admin-token': adminToken }, body: (() => { const body = new FormData(); body.append('document', archiveFile); return body })() }).then(response => response.ok ? response.json() : response.json().then(body => Promise.reject(new Error(body.message || 'Unable to upload archive')))) as { fileUrl: string }
-      await fetch(`${API_URL}/api/admin/sacramental/archives`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ sacramentType: selectedSacramentalRecord.RecordType.toLowerCase(), bookNumber: Number(archiveBookNumber), pageNumber: Number(archivePageNumber), fileUrl: uploaded.fileUrl, notes: archiveNotes || null }) }).then(response => response.ok ? response.json() : response.json().then(body => Promise.reject(new Error(body.message || 'Unable to save archive entry'))))
+      await fetch(`${API_URL}/api/admin/sacramental/archives`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ sacramentType: selectedSacramentalRecord.RecordType.toLowerCase(), bookNumber: Number(archiveBookNumber), pageNumber: Number(archivePageNumber), registryNumber: selectedSacramentalRecord.RegistryNumber, fileUrl: uploaded.fileUrl, notes: archiveNotes || null }) }).then(response => response.ok ? response.json() : response.json().then(body => Promise.reject(new Error(body.message || 'Unable to save archive entry'))))
       setArchiveBookNumber('')
       setArchivePageNumber('')
       setArchiveNotes('')

@@ -209,6 +209,25 @@ export function hasValidImageSignature(mimeType, bytes) {
   return false;
 }
 
+/** Check supported sacramental archive signatures after upload. */
+export function hasValidArchiveSignature(mimeType, bytes) {
+  if (!(bytes instanceof Uint8Array)) return false;
+  const type = String(mimeType || '').toLowerCase();
+  if (type === 'application/pdf') return bytes.length >= 5 && String.fromCharCode(...bytes.subarray(0, 5)) === '%PDF-';
+  if (type === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (type === 'image/png') {
+    return bytes.length >= 8
+      && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+      && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  }
+  if (type === 'image/tiff') {
+    return bytes.length >= 4
+      && ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00)
+        || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a));
+  }
+  return false;
+}
+
 /** Validate the saved gallery shape while accepting legacy single-photo items. */
 export function isValidGalleryContent(content) {
   const isPhotoUrl = value => typeof value === 'string'
