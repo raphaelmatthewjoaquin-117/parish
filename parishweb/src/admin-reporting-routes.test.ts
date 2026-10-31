@@ -472,6 +472,33 @@ describe('admin reporting routes', () => {
     await expect(response.json()).resolves.toEqual({ BaptismId: 5, RegistryNumber: 'B-005' })
   })
 
+  it('creates a baptism record and returns its generated ID', async () => {
+    const api = createTestApi(async (statement, inputs) => {
+      expect(statement).toMatch(/INSERT INTO dbo\.BaptismRecords/)
+      expect(statement).toMatch(/OUTPUT INSERTED\.BaptismId AS id/)
+      expect(inputs.get('field0')).toBe('B-005')
+      expect(inputs.get('field1')).toBe('Ana')
+      expect(inputs.get('createdBy')).toBe('staff')
+      return { recordset: [{ id: 5 }] }
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        registryNumber: 'B-005',
+        childFirstName: 'Ana',
+        childLastName: 'Santos',
+        dateOfBirth: '2024-01-02',
+        dateOfBaptism: '2024-02-03',
+        ministerName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({ id: 5 })
+  })
+
   it('returns sacramental audit history for the selected record', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/FROM dbo\.SacramentalRecordAudit/i)

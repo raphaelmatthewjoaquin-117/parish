@@ -3,11 +3,58 @@ import path from 'node:path'
 
 const sacramentTypes = new Set(['baptism', 'confirmation', 'marriage', 'death'])
 const financeTypes = new Set(['StoleFee', 'MassOffering', 'Donation', 'Rental', 'OtherIncome', 'Expense'])
+const textField = (column, length, required = false) => ({ column, kind: 'text', length, required })
+const dateField = (column, required = false) => ({ column, kind: 'date', required })
+const integerField = column => ({ column, kind: 'integer', required: false })
 const sacramentRecords = {
-  baptism: { table: 'BaptismRecords', idColumn: 'BaptismId' },
-  confirmation: { table: 'ConfirmationRecords', idColumn: 'ConfirmationId' },
-  marriage: { table: 'MarriageRecords', idColumn: 'MarriageId' },
-  death: { table: 'DeathRecords', idColumn: 'DeathId' },
+  baptism: {
+    table: 'BaptismRecords',
+    idColumn: 'BaptismId',
+    fields: [
+      textField('RegistryNumber', 50, true), textField('ChildFirstName', 100, true),
+      textField('ChildMiddleName', 100), textField('ChildLastName', 100, true),
+      dateField('DateOfBirth', true), textField('PlaceOfBirth', 200),
+      dateField('DateOfBaptism', true), textField('FatherFullName', 200),
+      textField('MotherFullName', 200), textField('MinisterName', 200, true),
+      textField('Sponsors', null), textField('Remarks', null),
+    ],
+  },
+  confirmation: {
+    table: 'ConfirmationRecords',
+    idColumn: 'ConfirmationId',
+    fields: [
+      textField('RegistryNumber', 50, true), textField('CandidateFirstName', 100, true),
+      textField('CandidateMiddleName', 100), textField('CandidateLastName', 100, true),
+      dateField('DateOfBirth', true), dateField('DateOfConfirmation', true),
+      textField('FatherFullName', 200), textField('MotherFullName', 200),
+      textField('SponsorName', 200), textField('BishopOrMinister', 200, true),
+      textField('ParishOfBaptism', 200),
+    ],
+  },
+  marriage: {
+    table: 'MarriageRecords',
+    idColumn: 'MarriageId',
+    fields: [
+      textField('RegistryNumber', 50, true), textField('GroomFirstName', 100, true),
+      textField('GroomMiddleName', 100), textField('GroomLastName', 100, true),
+      integerField('GroomAge'), textField('GroomParents', 200),
+      textField('BrideFirstName', 100, true), textField('BrideMiddleName', 100),
+      textField('BrideLastName', 100, true), integerField('BrideAge'),
+      textField('BrideParents', 200), dateField('DateOfMarriage', true),
+      textField('Witnesses', null), textField('SolemnizingPriest', 200, true),
+    ],
+  },
+  death: {
+    table: 'DeathRecords',
+    idColumn: 'DeathId',
+    fields: [
+      textField('RegistryNumber', 50, true), textField('DeceasedFirstName', 100, true),
+      textField('DeceasedMiddleName', 100), textField('DeceasedLastName', 100, true),
+      integerField('Age'), dateField('DateOfDeath', true), dateField('DateOfBurial'),
+      textField('CauseOfDeath', 200), textField('PlaceOfBurial', 200),
+      textField('SacramentsReceived', 500), textField('OfficiatingPriest', 200, true),
+    ],
+  },
 }
 
 const recordQuery = `
@@ -85,6 +132,76 @@ export function createAdminReportingRouter({
   const financeAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper'])]
   const recordsAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff'])]
   const archiveFileAccess = [requireAdminWithQueryToken || requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff'])]
+
+  router.post('/api/admin/sacramental/:type', ...recordsAccess, async (req, res, next) => {
+    const record = sacramentRecords[req.params.type]
+    if (!record) return next()
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ message: 'A sacramental record is required.' })
+    }
+
+    const columns = []
+    const values = []
+    const inputs = []
+    for (const [index, field] of record.fields.entries()) {
+      const key = field.column.charAt(0).toLowerCase() + field.column.slice(1)
+      const rawValue = req.body[key] ?? req.body[field.column] ?? null
+      let value = rawValue
+
+      if (field.kind === 'text') {
+        if (value !== null && typeof value !== 'string') {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+        value = typeof value === 'string' ? value.trim() || null : null
+        if (value && field.length && value.length > field.length) {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+      } else if (field.kind === 'date') {
+        if (value === '') value = null
+        if (value !== null && !isIsoDate(value)) {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+      } else if (field.kind === 'integer') {
+        if (value === '') value = null
+        if (value !== null) {
+          value = Number(value)
+          if (!Number.isSafeInteger(value) || value < 0) {
+            return res.status(400).json({ message: `Invalid value for ${key}.` })
+          }
+        }
+      }
+
+      if (field.required && (value === null || value === '')) {
+        return res.status(400).json({ message: `${key} is required.` })
+      }
+
+      const type = field.kind === 'date'
+        ? sql.Date
+        : field.kind === 'integer'
+          ? sql.Int
+          : sql.NVarChar(field.length ?? sql.MAX)
+      const parameter = `field${index}`
+      inputs.push([parameter, type, value])
+      columns.push(field.column)
+      values.push(`@${parameter}`)
+    }
+
+    try {
+      const request = getPool().request()
+      for (const [parameter, type, value] of inputs) request.input(parameter, type, value)
+      request.input('createdBy', sql.NVarChar(256), req.staff?.email || req.staff?.role || 'staff')
+      const result = await request.query(`
+        INSERT INTO dbo.${record.table} (${columns.join(', ')}, CreatedBy)
+        OUTPUT INSERTED.${record.idColumn} AS id
+        VALUES (${values.join(', ')}, @createdBy)
+      `)
+      if (!result.recordset[0]) throw new Error('Sacramental record insert returned no ID.')
+      res.status(201).json(result.recordset[0])
+    } catch (error) {
+      logError(error, { context: 'createSacramentalRecord' })
+      res.status(500).json({ message: 'Unable to save sacramental record.' })
+    }
+  })
 
   router.post('/api/admin/sacramental/upload-archive', ...recordsAccess, (req, res, next) => {
     if (!uploadArchive || !saveArchiveFile) {
