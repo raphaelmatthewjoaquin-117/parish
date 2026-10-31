@@ -22,6 +22,41 @@ export function servicePolicy(serviceName, scheduledDate, now = new Date()) {
   return { allowed: true };
 }
 
+/** Appointment start times during published parish office hours. */
+export function officeHourSlotTimes(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return [];
+
+  const weekday = parsed.getUTCDay();
+  if (weekday === 0) return ['09:00', '10:00', '11:00'];
+  if (weekday >= 2 && weekday <= 6) {
+    return Array.from({ length: 8 }, (_, index) => `${String(index + 9).padStart(2, '0')}:00`);
+  }
+  return [];
+}
+
+/** Normalize and validate an admin block before it reaches SQL. */
+export function normalizeBlockedSlotInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const { date, scope } = input;
+  if (typeof date !== 'string' || officeHourSlotTimes(date).length === 0) return null;
+  if (!['All', 'Service', 'Certificate'].includes(scope)) return null;
+
+  const time = input.time == null || input.time === '' ? null : input.time;
+  if (time !== null && (typeof time !== 'string' || !officeHourSlotTimes(date).includes(time))) return null;
+
+  const serviceId = input.serviceId == null || input.serviceId === '' ? null : Number(input.serviceId);
+  if (scope === 'Service' && (!Number.isInteger(serviceId) || serviceId <= 0)) return null;
+  if (scope !== 'Service' && serviceId !== null) return null;
+
+  const reason = input.reason == null || input.reason === '' ? null : input.reason;
+  if (reason !== null && (typeof reason !== 'string' || reason.trim().length > 300)) return null;
+
+  return { date, time, scope, serviceId, reason: reason?.trim() || null };
+}
+
 /**
  * Detect priest/location double-booking for a Mass schedule entry.
  * `candidate`: { date, time, location, priestUsername, excludeId? }

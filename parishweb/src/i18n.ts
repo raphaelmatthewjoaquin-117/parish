@@ -35,6 +35,8 @@ const tagalogTranslations: Record<string, string> = {
   'An active parish of the Diocese of Cubao, celebrating Mass, sacraments, and the feast of La Naval de Manila.': 'Isang aktibong parokya ng Diyosesis ng Cubao, na nagdiriwang ng Misa, mga sakramento, at ang pista ng La Naval de Manila.',
   'Parish Office': 'Opisina ng Parokya',
   'Monday to Friday: 9:00 AM - 5:00 PM': 'Lunes hanggang Biyernes: 9:00 AM - 5:00 PM',
+  'Tuesday to Saturday: 9:00 AM - 5:00 PM': 'Martes hanggang Sabado: 9:00 AM - 5:00 PM',
+  'Sunday: 9:00 AM - 12:00 NN': 'Linggo: 9:00 AM - 12:00 NN',
   'For inquiries, please contact the parish office.': 'Para sa mga katanungan, pakipag-ugnayan sa opisina ng parokya.',
   'Failed to fetch': 'Hindi ma-load',
   'Change your password': 'Palitan ang iyong password',

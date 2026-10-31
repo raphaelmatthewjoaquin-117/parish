@@ -10,6 +10,15 @@ export interface ServicePolicyResult {
   quotaLabel?: string;
 }
 
+export function officeHourSlotTimes(date: string): string[];
+export function normalizeBlockedSlotInput(input: unknown): {
+  date: string;
+  time: string | null;
+  scope: 'All' | 'Service' | 'Certificate';
+  serviceId: number | null;
+  reason: string | null;
+} | null;
+
 export interface ScheduleLike {
   id?: number;
   date: string | Date;

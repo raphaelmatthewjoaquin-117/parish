@@ -123,7 +123,7 @@ export const defaultContactContent: ContactContent = {
   heading: 'We would love to hear from you',
   description: "Get in touch with our parish community. We're here to help answer any questions you may have.",
   cards: [
-    { type: 'visit', title: 'Visit Us', lines: ['145 Church Avenue', 'Saint John Parish', 'Open Monday to Saturday', '9:00 AM - 5:00 PM'] },
+    { type: 'visit', title: 'Visit Us', lines: ['145 Church Avenue', 'Saint John Parish', 'Tuesday to Saturday: 9:00 AM - 5:00 PM', 'Sunday: 9:00 AM - 12:00 NN'] },
     { type: 'call', title: 'Call Us', lines: ['(555) 123-4567', 'Monday - Friday', '9:00 AM - 4:00 PM'] },
     { type: 'email', title: 'Email Us', lines: ['office@saintjohnparish.org', 'We respond within 24 hours'] },
   ],
@@ -157,7 +157,7 @@ export const defaultFooterContent: FooterContent = {
     'Weekday: 7:00 AM',
   ],
   officeHoursTitle: 'Parish Office',
-  officeHoursLines: ['Monday to Friday: 9:00 AM - 5:00 PM'],
+  officeHoursLines: ['Tuesday to Saturday: 9:00 AM - 5:00 PM', 'Sunday: 9:00 AM - 12:00 NN'],
   contactTitle: 'Contact Us',
   contactIntro: 'For inquiries, please contact the parish office.',
   phoneNumbers: ['(555) 123-4567'],

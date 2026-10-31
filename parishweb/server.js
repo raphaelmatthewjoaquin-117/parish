@@ -12,6 +12,7 @@ import path from 'node:path';
 import multer from 'multer';
 import {
   servicePolicy,
+  officeHourSlotTimes,
   findScheduleConflict,
   findIntentionConflict,
   financeActionForStatus,
@@ -32,6 +33,7 @@ import {
 import { hashAspNetPassword } from './password-hash.js';
 import { deleteServiceRequest } from './src/service-request-deletion.js';
 import { createPrayerRouter } from './src/prayer-routes.js';
+import { createBlockedSlotsRouter } from './src/blocked-slots-router.js';
 import { certificateRequestEmail, passwordResetEmail, serviceBookingEmail } from './email-templates.js';
 import {
   createPasswordResetToken,
@@ -672,6 +674,9 @@ app.post('/api/certificate-requests', async (req, res) => {
   if (!isValidDate(preferredDate) || !isFutureDate(preferredDate) || !preferredTime) {
     return res.status(400).json({ message: 'Please provide a valid future date and time.' });
   }
+  if (!officeHourSlotTimes(String(preferredDate).slice(0, 10)).includes(String(preferredTime).slice(0, 5))) {
+    return res.status(400).json({ message: 'Please choose an appointment during parish office hours.' });
+  }
 
   // Generate a 6-char uppercase hex reference code
   const referenceCode = randomBytes(3).toString('hex').toUpperCase();
@@ -1034,7 +1039,6 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
   const date = req.query.date ? String(req.query.date) : null;
   const startDate = date ? new Date(date) : new Date();
 
-  const slotTimes = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
   const daysToShow = 30;
   const requestedDate = new Date(startDate);
 
@@ -1087,13 +1091,13 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
     );
     let weekdayCount = 0;
     while (weekdayCount < daysToShow) {
-      const dayOfWeek = slotDate.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        const isoDate = [
-          slotDate.getFullYear(),
-          String(slotDate.getMonth() + 1).padStart(2, '0'),
-          String(slotDate.getDate()).padStart(2, '0'),
-        ].join('-');
+      const isoDate = [
+        slotDate.getFullYear(),
+        String(slotDate.getMonth() + 1).padStart(2, '0'),
+        String(slotDate.getDate()).padStart(2, '0'),
+      ].join('-');
+      const slotTimes = officeHourSlotTimes(isoDate);
+      if (slotTimes.length) {
         const policyForDate = servicePolicy(policy.name, isoDate);
         slotTimes.forEach(time => {
           const key = `${isoDate}|${time}`;
@@ -1211,6 +1215,9 @@ app.post('/api/service-requests', async (req, res) => {
   // Validate date is not in the past
   if (!isFutureDate(scheduledDate)) {
     return res.status(400).json({ message: 'Scheduled date must be in the future.' });
+  }
+  if (!officeHourSlotTimes(String(scheduledDate).slice(0, 10)).includes(String(scheduledTime).slice(0, 5))) {
+    return res.status(400).json({ message: 'Please choose an appointment during parish office hours.' });
   }
 
   // Validate serviceId is numeric
@@ -2496,6 +2503,7 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
 });
 
 app.use(createPrayerRouter({ getPool, sql, requireAdmin, requireRole, logError }));
+app.use(createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRole, logError }));
 
 app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {

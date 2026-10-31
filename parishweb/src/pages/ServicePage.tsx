@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import '../PagesCSS/ServicePage.css';
 import { API_BASE_URL as API_URL, apiClient } from '../api/client';
 import { isCertificateDateBlocked, isCertificateTimeBlocked, type CertificateBlockedSlot } from '../certificate-availability';
+import { officeHourSlotTimes } from '../../server-rules.js';
 
 type Service = {
   id: string;
@@ -380,6 +381,7 @@ export default function ServicePage(): React.JSX.Element {
     : undefined;
   const certificateDateBlocked = certDate && isCertificateDateBlocked(certBlockedSlots, certDate);
   const certificateTimeBlocked = certDate && certTime && isCertificateTimeBlocked(certBlockedSlots, certDate, certTime);
+  const certificateSlotTimes = officeHourSlotTimes(certDate);
 
   return (
     <div className="services-tabs container py-5">
@@ -542,12 +544,13 @@ export default function ServicePage(): React.JSX.Element {
                             const isBlocked = isCertificateDateBlocked(certBlockedSlots, date);
                             const hasBlockedTimes = certBlockedSlots.some(block => block.date === date && block.time !== null);
                             const isBeforeMinimum = date < minCertDate;
+                            const isOfficeDate = officeHourSlotTimes(date).length > 0;
                             return (
                               <button
                                 key={date}
                                 type="button"
-                                disabled={certAvailabilityLoading || !!certAvailabilityError || isBlocked || isBeforeMinimum}
-                                aria-label={`${day.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}${isBlocked ? ', unavailable' : hasBlockedTimes ? ', some times unavailable' : ''}`}
+                                disabled={certAvailabilityLoading || !!certAvailabilityError || isBlocked || isBeforeMinimum || !isOfficeDate}
+                                aria-label={`${day.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}${!isOfficeDate ? ', parish office closed' : isBlocked ? ', unavailable' : hasBlockedTimes ? ', some times unavailable' : ''}`}
                                 aria-pressed={certDate === date}
                                 className={`date-picker-day ${isBlocked ? 'blocked' : ''} ${hasBlockedTimes && !isBlocked ? 'partially-blocked' : ''} ${certDate === date ? 'selected' : ''}`}
                                 onClick={() => { setCertDate(date); setCertTime(''); setCertError(''); }}
@@ -569,7 +572,10 @@ export default function ServicePage(): React.JSX.Element {
                     <label>
                       <span className="label-text">Preferred time</span>
                       <div className="field-wrap">
-                        <input className="form-control" type="time" required value={certTime} onChange={e => setCertTime(e.target.value)} />
+                        <select className="form-select" required value={certTime} disabled={!certDate || certAvailabilityLoading || !!certAvailabilityError} onChange={e => setCertTime(e.target.value)}>
+                          <option value="">Select a time</option>
+                          {certificateSlotTimes.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+                        </select>
                       </div>
                       {certificateTimeBlocked && <small className="cert-availability-error" role="alert">That time is blocked. Please choose another time.</small>}
                     </label>
@@ -649,17 +655,17 @@ export default function ServicePage(): React.JSX.Element {
                     const date = toDateKey(day);
                     const dateSlots = slotsByDate.get(date) ?? [];
                     const hasAvailability = dateSlots.some(s => s.available);
-                    const isWeekday = day.getDay() > 0 && day.getDay() < 6;
+                    const isOfficeDate = officeHourSlotTimes(date).length > 0;
                     const today = new Date(); today.setHours(0, 0, 0, 0);
                     const dayMid = new Date(day); dayMid.setHours(0, 0, 0, 0);
                     const isFuture = dayMid > today;
-                    const isSelectable = isWeekday && isFuture && hasAvailability;
+                    const isSelectable = isOfficeDate && isFuture && hasAvailability;
                     return (
                       <button
                         key={date}
                         type="button"
                         disabled={slotsLoading || !isSelectable}
-                        className={`date-picker-day ${hasAvailability && isWeekday && isFuture ? 'available' : ''} ${dateSlots.length > 0 && !hasAvailability && isWeekday && isFuture ? 'fully-booked' : ''} ${selectedDate === date ? 'selected' : ''}`}
+                        className={`date-picker-day ${hasAvailability && isOfficeDate && isFuture ? 'available' : ''} ${dateSlots.length > 0 && !hasAvailability && isOfficeDate && isFuture ? 'fully-booked' : ''} ${selectedDate === date ? 'selected' : ''}`}
                         onClick={() => { setSelectedDate(date); setSelectedSlot(''); }}
                       >
                         {day.getDate()}
