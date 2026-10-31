@@ -102,6 +102,114 @@ describe('admin reporting routes', () => {
     ])
   })
 
+  it('returns sacramental statistics for a validated year', async () => {
+    const api = createTestApi(async (statement, inputs) => {
+      expect(inputs.get('year')).toBe(2026)
+      if (statement.includes('MonthList')) {
+        expect(statement).toMatch(/DATEFROMPARTS\(@year, Months\.MonthNumber, 1\)/)
+        return {
+          recordset: [{
+            month: 1,
+            monthName: 'January',
+            baptisms: 2,
+            confirmations: 1,
+            marriages: 0,
+            deaths: 1,
+          }],
+        }
+      }
+
+      expect(statement).toMatch(/FROM dbo\.BaptismRecords/)
+      expect(statement).toMatch(/FROM dbo\.ConfirmationRecords/)
+      expect(statement).toMatch(/FROM dbo\.MarriageRecords/)
+      expect(statement).toMatch(/FROM dbo\.DeathRecords/)
+      return {
+        recordset: [{
+          totalBaptisms: 2,
+          totalConfirmations: 1,
+          totalMarriages: 0,
+          totalDeaths: 1,
+          InfantsUnder1Yr: 1,
+          ChildrenOver1Yr: 1,
+          AvgGroomAge: null,
+          AvgBrideAge: null,
+          Under25: 0,
+          Age25To35: 0,
+          Over35: 0,
+          AvgDeceasedAge: 74,
+          Under18: 0,
+          Age18To59: 0,
+          Senior60Plus: 1,
+        }],
+      }
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/statistics?year=2026`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      targetYear: 2026,
+      summary: { totalBaptisms: 2, totalConfirmations: 1, totalMarriages: 0, totalDeaths: 1 },
+      demographics: {
+        baptisms: { InfantsUnder1Yr: 1, ChildrenOver1Yr: 1 },
+        marriages: { AvgGroomAge: null, AvgBrideAge: null, Under25: 0, Age25To35: 0, Over35: 0 },
+        deaths: { AvgDeceasedAge: 74, Under18: 0, Age18To59: 0, Senior60Plus: 1 },
+      },
+      monthlyBreakdown: [{
+        month: 1,
+        monthName: 'January',
+        baptisms: 2,
+        confirmations: 1,
+        marriages: 0,
+        deaths: 1,
+      }],
+    })
+  })
+
+  it('rejects invalid sacramental statistics years before querying', async () => {
+    const query = vi.fn(async () => ({ recordset: [] }))
+    const api = createTestApi(query)
+
+    const response = await fetch(`${api}/api/admin/operations/statistics?year=not-a-year`)
+
+    expect(response.status).toBe(400)
+    expect(query).not.toHaveBeenCalled()
+  })
+
+  it('lists finance audit history with entry details newest first', async () => {
+    const api = createTestApi(async statement => {
+      expect(statement).toMatch(/FROM dbo\.FinancialEntryAudit audit/i)
+      expect(statement).toMatch(/LEFT JOIN dbo\.FinancialEntries entry/i)
+      expect(statement).toMatch(/ORDER BY audit\.ChangedAt DESC/i)
+      return {
+        recordset: [{
+          AuditId: 21,
+          FinancialEntryId: 4,
+          ActionName: 'Approved',
+          EntryType: 'Donation',
+          Description: 'Sunday offering',
+          ChangedBy: 'parish@example.org',
+          ChangedAt: '2026-10-30T12:00:00Z',
+          Details: null,
+        }],
+      }
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/finance/audit`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([{
+      AuditId: 21,
+      FinancialEntryId: 4,
+      ActionName: 'Approved',
+      EntryType: 'Donation',
+      Description: 'Sunday offering',
+      ChangedBy: 'parish@example.org',
+      ChangedAt: '2026-10-30T12:00:00Z',
+      Details: null,
+    }])
+  })
+
   it('lists admin certificate requests with contact and appointment details', async () => {
     const api = createTestApi(async statement => {
       expect(statement).toMatch(/FROM dbo\.CertificateRequests/i)

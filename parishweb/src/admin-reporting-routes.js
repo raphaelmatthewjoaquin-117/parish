@@ -32,6 +32,25 @@ const recordQuery = `
   FROM dbo.DeathRecords
 `
 
+const sacramentalStatisticsQuery = `
+  SELECT 'baptism' AS RecordType, DateOfBaptism AS RecordDate,
+    DATEDIFF(YEAR, DateOfBirth, DateOfBaptism)
+      - CASE WHEN DATEADD(YEAR, DATEDIFF(YEAR, DateOfBirth, DateOfBaptism), DateOfBirth) > DateOfBaptism THEN 1 ELSE 0 END AS PersonAge,
+    CAST(NULL AS INT) AS GroomAge, CAST(NULL AS INT) AS BrideAge,
+    CAST(NULL AS DECIMAL(5, 1)) AS MarriageAge
+  FROM dbo.BaptismRecords
+  UNION ALL
+  SELECT 'confirmation', DateOfConfirmation, NULL, NULL, NULL, NULL
+  FROM dbo.ConfirmationRecords
+  UNION ALL
+  SELECT 'marriage', DateOfMarriage, NULL, GroomAge, BrideAge,
+    COALESCE((GroomAge + BrideAge) / 2.0, GroomAge, BrideAge)
+  FROM dbo.MarriageRecords
+  UNION ALL
+  SELECT 'death', DateOfDeath, Age, NULL, NULL, NULL
+  FROM dbo.DeathRecords
+`
+
 function isIsoDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T00:00:00.000Z`)
@@ -163,6 +182,128 @@ export function createAdminReportingRouter({
     } catch (error) {
       logError(error, { context: 'financeReportHistory' })
       res.status(500).json({ message: 'Unable to load finance report history.' })
+    }
+  })
+
+  router.get('/api/admin/operations/finance/audit', ...financeAccess, async (_req, res) => {
+    try {
+      const result = await getPool().request().query(`
+        SELECT TOP 200 audit.AuditId, audit.FinancialEntryId, audit.ActionName,
+          COALESCE(entry.EntryType, 'Unknown') AS EntryType,
+          COALESCE(entry.Description, 'Entry no longer exists') AS Description,
+          audit.ChangedBy, audit.ChangedAt, audit.Details
+        FROM dbo.FinancialEntryAudit audit
+        LEFT JOIN dbo.FinancialEntries entry
+          ON entry.FinancialEntryId = audit.FinancialEntryId
+        ORDER BY audit.ChangedAt DESC, audit.AuditId DESC
+      `)
+      res.json(result.recordset)
+    } catch (error) {
+      logError(error, { context: 'financeAudit' })
+      res.status(500).json({ message: 'Unable to load finance audit history.' })
+    }
+  })
+
+  router.get('/api/admin/operations/statistics', ...recordsAccess, async (req, res) => {
+    const rawYear = req.query.year
+    const year = rawYear === undefined ? new Date().getFullYear() : Number(rawYear)
+    if (
+      (rawYear !== undefined && (typeof rawYear !== 'string' || !/^\d{4}$/.test(rawYear))) ||
+      !Number.isSafeInteger(year) || year < 1900 || year > 9998
+    ) {
+      return res.status(400).json({ message: 'Provide a valid statistics year.' })
+    }
+
+    try {
+      const summaryResult = await getPool().request()
+        .input('year', sql.Int, year)
+        .query(`
+          WITH Records AS (${sacramentalStatisticsQuery})
+          SELECT
+            COUNT(CASE WHEN RecordType = 'baptism' THEN 1 END) AS totalBaptisms,
+            COUNT(CASE WHEN RecordType = 'confirmation' THEN 1 END) AS totalConfirmations,
+            COUNT(CASE WHEN RecordType = 'marriage' THEN 1 END) AS totalMarriages,
+            COUNT(CASE WHEN RecordType = 'death' THEN 1 END) AS totalDeaths,
+            COUNT(CASE WHEN RecordType = 'baptism' AND PersonAge < 1 THEN 1 END) AS InfantsUnder1Yr,
+            COUNT(CASE WHEN RecordType = 'baptism' AND PersonAge >= 1 THEN 1 END) AS ChildrenOver1Yr,
+            AVG(CASE WHEN RecordType = 'marriage' THEN GroomAge END) AS AvgGroomAge,
+            AVG(CASE WHEN RecordType = 'marriage' THEN BrideAge END) AS AvgBrideAge,
+            COUNT(CASE WHEN RecordType = 'marriage' AND MarriageAge < 25 THEN 1 END) AS Under25,
+            COUNT(CASE WHEN RecordType = 'marriage' AND MarriageAge BETWEEN 25 AND 35 THEN 1 END) AS Age25To35,
+            COUNT(CASE WHEN RecordType = 'marriage' AND MarriageAge > 35 THEN 1 END) AS Over35,
+            AVG(CASE WHEN RecordType = 'death' THEN PersonAge END) AS AvgDeceasedAge,
+            COUNT(CASE WHEN RecordType = 'death' AND PersonAge < 18 THEN 1 END) AS Under18,
+            COUNT(CASE WHEN RecordType = 'death' AND PersonAge BETWEEN 18 AND 59 THEN 1 END) AS Age18To59,
+            COUNT(CASE WHEN RecordType = 'death' AND PersonAge >= 60 THEN 1 END) AS Senior60Plus
+          FROM Records
+          WHERE RecordDate >= DATEFROMPARTS(@year, 1, 1)
+            AND RecordDate < DATEFROMPARTS(@year + 1, 1, 1)
+        `)
+      const monthlyResult = await getPool().request()
+        .input('year', sql.Int, year)
+        .query(`
+          WITH Records AS (${sacramentalStatisticsQuery}),
+          MonthlyCounts AS (
+            SELECT MONTH(RecordDate) AS MonthNumber,
+              COUNT(CASE WHEN RecordType = 'baptism' THEN 1 END) AS baptisms,
+              COUNT(CASE WHEN RecordType = 'confirmation' THEN 1 END) AS confirmations,
+              COUNT(CASE WHEN RecordType = 'marriage' THEN 1 END) AS marriages,
+              COUNT(CASE WHEN RecordType = 'death' THEN 1 END) AS deaths
+            FROM Records
+            WHERE RecordDate >= DATEFROMPARTS(@year, 1, 1)
+              AND RecordDate < DATEFROMPARTS(@year + 1, 1, 1)
+            GROUP BY MONTH(RecordDate)
+          ),
+          Months AS (
+            SELECT MonthNumber FROM (VALUES
+              (1), (2), (3), (4), (5), (6),
+              (7), (8), (9), (10), (11), (12)
+            ) AS MonthList(MonthNumber)
+          )
+          SELECT Months.MonthNumber AS month,
+            DATENAME(MONTH, DATEFROMPARTS(@year, Months.MonthNumber, 1)) AS monthName,
+            COALESCE(MonthlyCounts.baptisms, 0) AS baptisms,
+            COALESCE(MonthlyCounts.confirmations, 0) AS confirmations,
+            COALESCE(MonthlyCounts.marriages, 0) AS marriages,
+            COALESCE(MonthlyCounts.deaths, 0) AS deaths
+          FROM Months
+          LEFT JOIN MonthlyCounts ON MonthlyCounts.MonthNumber = Months.MonthNumber
+          ORDER BY Months.MonthNumber
+        `)
+
+      const summary = summaryResult.recordset[0] || {}
+      res.json({
+        targetYear: year,
+        summary: {
+          totalBaptisms: Number(summary.totalBaptisms || 0),
+          totalConfirmations: Number(summary.totalConfirmations || 0),
+          totalMarriages: Number(summary.totalMarriages || 0),
+          totalDeaths: Number(summary.totalDeaths || 0),
+        },
+        demographics: {
+          baptisms: {
+            InfantsUnder1Yr: Number(summary.InfantsUnder1Yr || 0),
+            ChildrenOver1Yr: Number(summary.ChildrenOver1Yr || 0),
+          },
+          marriages: {
+            AvgGroomAge: summary.AvgGroomAge,
+            AvgBrideAge: summary.AvgBrideAge,
+            Under25: Number(summary.Under25 || 0),
+            Age25To35: Number(summary.Age25To35 || 0),
+            Over35: Number(summary.Over35 || 0),
+          },
+          deaths: {
+            AvgDeceasedAge: summary.AvgDeceasedAge,
+            Under18: Number(summary.Under18 || 0),
+            Age18To59: Number(summary.Age18To59 || 0),
+            Senior60Plus: Number(summary.Senior60Plus || 0),
+          },
+        },
+        monthlyBreakdown: monthlyResult.recordset,
+      })
+    } catch (error) {
+      logError(error, { context: 'sacramentalStatistics' })
+      res.status(500).json({ message: 'Unable to load sacramental statistics.' })
     }
   })
 
