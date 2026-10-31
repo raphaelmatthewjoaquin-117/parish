@@ -141,6 +141,77 @@ describe('AdminEventsPage prayer details', () => {
   })
 })
 
+describe('AdminEventsPage sacramental record details', () => {
+  it.each([
+    {
+      type: 'Baptism',
+      expectedLabel: "Child's Name:",
+      expectedName: 'Jordan Rivera',
+      details: { ChildFirstName: 'Jordan', ChildLastName: 'Rivera' },
+    },
+    {
+      type: 'Confirmation',
+      expectedLabel: 'Candidate:',
+      expectedName: 'Avery Lee',
+      details: { CandidateFirstName: 'Avery', CandidateLastName: 'Lee' },
+    },
+    {
+      type: 'Marriage',
+      expectedLabel: 'Groom:',
+      expectedName: 'Sam Rivera',
+      details: { GroomFirstName: 'Sam', GroomLastName: 'Rivera' },
+    },
+    {
+      type: 'Death',
+      expectedLabel: 'Deceased:',
+      expectedName: 'Morgan Lee',
+      details: { DeceasedFirstName: 'Morgan', DeceasedLastName: 'Lee' },
+    },
+  ])('presents $type record details in the shared labeled layout', async ({ type, expectedLabel, expectedName, details }) => {
+    window.localStorage.setItem('adminToken', 'staff-token')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Admin' } }
+        : url.includes('/api/admin/sacramental/search')
+          ? {
+            records: [{
+              Id: 7,
+              RecordType: type,
+              RegistryNumber: 'R-102',
+              Name: expectedName,
+              RecordDate: '2026-10-21',
+              Priest: 'Fr. Santos',
+            }],
+            pagination: { total: 1 },
+          }
+          : url.endsWith('/7/audit')
+            ? [{
+              AuditId: 1,
+              ActionName: 'Create',
+              ChangedBy: 'Admin',
+              ChangedAt: '2026-10-21T15:46:09.000Z',
+              Changes: '{"RegistryNumber":"R-102"}',
+            }]
+            : url.includes(`/api/admin/sacramental/${type.toLowerCase()}/7`)
+              ? details
+              : { archives: [] }
+      return { ok: true, json: async () => body } as Response
+    }))
+
+    render(<AdminEventsPage initialTab="sacramental-ledger" embedded />)
+    fireEvent.click(await screen.findByRole('button', { name: 'View' }))
+
+    const dialog = await screen.findByRole('dialog', { name: `${type} Record Detail` })
+    expect(dialog.classList.contains('sacramental-detail-modal')).toBe(true)
+    expect(within(dialog).getByText('R-102')).toBeTruthy()
+    expect(within(dialog).getByText(expectedLabel)).toBeTruthy()
+    expect(within(dialog).getByText(expectedName)).toBeTruthy()
+    expect(within(dialog).getByText('Change history')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Close record details' })).toBeTruthy()
+  })
+})
+
 describe('AdminEventsPage event action feedback', () => {
   beforeEach(() => {
     window.localStorage.setItem('adminToken', 'staff-token')

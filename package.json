@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "npm --workspace parishweb run dev",
     "server": "npm --workspace parishweb run server",
+    "server:local": "npm --workspace parishweb run server:local",
     "start": "npm --workspace parishweb run start",
     "build": "npm --workspace parishweb run build",
     "test": "npm --workspace parishweb run test:run"

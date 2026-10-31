@@ -46,6 +46,7 @@ import {
 import { assertProductionStorageConfiguration, createDatabaseConfig } from './src/db/config.js';
 import { checkDatabaseReadiness } from './src/db/readiness.js';
 import { createCorsOptions } from './src/http/cors-config.js';
+import { isLocalAdminLoginAllowed, isLocalAdminPreviewRequestAllowed } from './src/local-admin-auth.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -282,7 +283,10 @@ const startTokenCleanupSchedule = (intervalMinutes = 60) => {
   }, intervalMinutes * 60 * 1000);
 };
 
-dotenv.config();
+dotenv.config({ quiet: true });
+if (process.env.NODE_ENV === 'development') {
+  dotenv.config({ path: '.env.local', override: true, quiet: true });
+}
 
 const app = express();
 const trustProxyHopsValue = process.env.TRUST_PROXY_HOPS ?? '0';
@@ -618,6 +622,13 @@ const staffRolePriority = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', '
 async function requireAdmin(req, res, next) {
   const token = String(req.headers['x-admin-token'] ?? '')
   const staff = parseStaffToken(token);
+  if (staff?.userId === 0 && !isLocalAdminPreviewRequestAllowed({
+    nodeEnv: process.env.NODE_ENV || '',
+    remoteAddress: req.socket.remoteAddress || '',
+    requestPath: req.path,
+  })) {
+    return res.status(403).json({ message: 'Local preview access is limited to localhost sign-in verification.' });
+  }
   if (staff && staff.userId > 0) {
     // Roles can change after sign-in, so use the current database role instead of the one baked into the token.
     try {
@@ -1963,15 +1974,43 @@ app.post('/api/admin/login', authRateLimit, async (req, res) => {
     return res.status(400).json({ message: 'Email and password are required.' });
   }
 
+  const localAdminUsername = process.env.LOCAL_ADMIN_USERNAME || '';
+  if (isLocalAdminLoginAllowed({
+    nodeEnv: process.env.NODE_ENV || '',
+    remoteAddress: req.socket.remoteAddress || '',
+    login: email,
+    password,
+    configuredUsername: localAdminUsername,
+    configuredPassword: process.env.LOCAL_ADMIN_PASSWORD || '',
+    tokenSecret: adminSecret,
+  })) {
+    logAuth('local_development_login', { ip: req.ip });
+    return res.json({
+      token: createStaffToken(0, 'Admin'),
+      user: {
+        id: 0,
+        userName: localAdminUsername,
+        email: '',
+        role: 'Admin',
+        mustChangePassword: false,
+        localPreview: true,
+      },
+    });
+  }
+
+  if (process.env.LOCAL_ADMIN_PREVIEW_ONLY === '1') {
+    return res.status(401).json({ message: 'Invalid email or password.' });
+  }
+
   try {
     const result = await getPool().request()
-      .input('email', sql.NVarChar(510), email)
+      .input('login', sql.NVarChar(510), email)
       .query(`
         SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, u.MustChangePassword, r.Name AS RoleName
         FROM dbo.AspNetUsers u
         INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
         INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
-        WHERE u.EmailAddress = @email
+        WHERE u.EmailAddress = @login OR u.UserName = @login
       `);
     const user = result.recordset[0];
 
@@ -3313,12 +3352,20 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  if (process.env.LOCAL_ADMIN_PREVIEW_ONLY === '1') {
+    logger.info('Local preview mode: database startup and scheduled jobs are disabled.');
+    return;
+  }
   initializePool(config).then(() => {
     startFinanceReportSchedule();
     startNoShowVoidSchedule();
     startTokenCleanupSchedule();
   }).catch(err => {
     console.error('Database initialization failed:', err);
+    if (process.env.NODE_ENV === 'development') {
+      logger.warn('Continuing in development without database-backed features.');
+      return;
+    }
     process.exit(1);
   });
 });

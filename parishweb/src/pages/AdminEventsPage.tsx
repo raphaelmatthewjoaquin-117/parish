@@ -1825,9 +1825,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
       {/* Sacramental Record Detail Modal */}
       {selectedSacramentalRecord && createPortal(
         <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setSelectedSacramentalRecord(null) }}>
-        <div className="admin-prayer-detail sacramental-detail-modal service-request-modal-card">
+        <div className="admin-prayer-detail sacramental-detail-modal service-request-modal-card" role="dialog" aria-modal="true" aria-labelledby="sacramental-detail-title">
           <div className="detail-header">
-            <h3>{selectedSacramentalRecord.RecordType.charAt(0).toUpperCase() + selectedSacramentalRecord.RecordType.slice(1)} Record Detail</h3>
+            <h3 id="sacramental-detail-title">{selectedSacramentalRecord.RecordType.charAt(0).toUpperCase() + selectedSacramentalRecord.RecordType.slice(1)} Record Detail</h3>
             {canManageSacramentalRecords && <>
               <button type="button" className="secondary-btn" onClick={() => { setRecordFormType(selectedSacramentalRecord.RecordType.toLowerCase() as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(selectedSacramentalRecord); setShowRecordForm(true) }}>Edit</button>
               <button type="button" className="secondary-btn" onClick={() => void deleteSacramentalRecord()} disabled={saving}>Delete</button>
@@ -1836,6 +1836,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               type="button"
               onClick={() => setSelectedSacramentalRecord(null)}
               className="close-btn"
+              aria-label="Close record details"
             >
               ✕
             </button>

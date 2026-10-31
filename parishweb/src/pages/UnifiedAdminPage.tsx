@@ -173,6 +173,11 @@ export function UnifiedAdminPage() {
         <div key={`heading-${visibleSectionKey}`} className="admin-workspace-heading d-flex align-items-center justify-content-between gap-3">
           <div><p className="eyebrow">Staff workspace</p><h1>{visibleSection.label}</h1></div>
         </div>
+        {profile.id === 0 && (
+          <p className="alert alert-warning" role="status">
+            Local preview sign-in only. Staff data and admin actions require a database connection.
+          </p>
+        )}
         <div
           key={visibleSectionKey}
           className="admin-section-content"
