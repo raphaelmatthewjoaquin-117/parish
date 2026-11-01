@@ -1925,6 +1925,43 @@
 .archives-list h4 { margin: 0 0 .85rem; color: #161c18; font-size: .95rem; font-weight: 700 }
 .archives-list ul { list-style: none; padding: 0; margin: 0 }
 
+.digital-archives-tab {
+  display: grid;
+  gap: 1rem;
+}
+.digital-archives-tab .ledger-heading { margin-bottom: 0 }
+.digital-archives-tab .archives-list {
+  padding: 1.25rem;
+  border: 1px solid rgba(30,40,34,.12);
+  border-radius: 12px;
+  background: #ffffff;
+}
+.digital-archives-tab .archives-list h4 {
+  margin-bottom: 1rem;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+}
+.digital-archives-tab .archive-upload-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 0;
+}
+.digital-archives-tab .archive-upload-form label { min-width: 0 }
+.digital-archives-tab .archive-upload-form input,
+.digital-archives-tab .archive-upload-form select,
+.digital-archives-tab .archive-upload-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+}
+.digital-archives-tab .archive-upload-form input[type="file"] { padding: .4rem }
+.digital-archives-tab .archive-notes-field,
+.digital-archives-tab .archive-file-field,
+.digital-archives-tab .archive-upload-form .button-row { grid-column: 1 / -1 }
+.digital-archives-tab .archive-upload-form textarea { min-height: 88px; resize: vertical }
+.digital-archives-tab .archive-upload-form .button-row { margin: 0 }
+
 .archive-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -1998,6 +2035,10 @@
   .sacramental-search-row { grid-template-columns: 1fr }
   .sacramental-advanced-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) }
 }
+@media (max-width: 1100px) {
+  .digital-archives-tab .archive-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .digital-archives-tab .archive-filters button { grid-column: 1 / -1 }
+}
 @media (max-width: 760px) {
   .dashboard-grid { grid-template-columns: 1fr }
   .admin-tabs { gap: .25rem }
@@ -2020,6 +2061,12 @@
   .sacramental-search-actions .primary-btn { flex: 1 }
   .sacramental-table { min-width: 700px }
   .archive-upload-form { grid-template-columns: 1fr }
+  .digital-archives-tab .archive-upload-form { grid-template-columns: 1fr }
+  .digital-archives-tab .archive-notes-field,
+  .digital-archives-tab .archive-file-field,
+  .digital-archives-tab .archive-upload-form .button-row,
+  .digital-archives-tab .archive-filters button { grid-column: auto }
+  .digital-archives-tab .archive-filters { grid-template-columns: 1fr }
   .sacramental-form-overlay { padding: .75rem }
   .sacramental-record-form { max-height: calc(100vh - 1.5rem) }
   .sacramental-form-grid { grid-template-columns: 1fr; gap: .75rem }

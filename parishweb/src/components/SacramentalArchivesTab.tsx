@@ -187,7 +187,7 @@ export function SacramentalArchivesTab({ adminToken, canManage }: Props) {
       <header className="ledger-heading">
         <div>
           <h3 id="digital-archives-title">Digital Archives</h3>
-          <p className="ledger-description">Browse and upload scans of parish register pages.</p>
+          <p className="ledger-description">Find and organize scanned register pages by book, page, or registry number.</p>
         </div>
       </header>
 
@@ -206,11 +206,11 @@ export function SacramentalArchivesTab({ adminToken, canManage }: Props) {
             </label>
             <label>
               Book number
-              <input type="number" min="1" value={bookNumber} onChange={event => setBookNumber(event.target.value)} />
+              <input type="number" min="1" placeholder="e.g. 1" value={bookNumber} onChange={event => setBookNumber(event.target.value)} />
             </label>
             <label>
               Page number
-              <input type="number" min="1" value={pageNumber} onChange={event => setPageNumber(event.target.value)} />
+              <input type="number" min="1" placeholder="e.g. 45" value={pageNumber} onChange={event => setPageNumber(event.target.value)} />
             </label>
             <label>
               Registry number (optional)
@@ -222,12 +222,12 @@ export function SacramentalArchivesTab({ adminToken, canManage }: Props) {
                 onChange={event => setRegistryNumber(event.target.value)}
               />
             </label>
-            <label>
+            <label className="archive-notes-field">
               Notes
-              <textarea rows={3} value={notes} onChange={event => setNotes(event.target.value)} />
+              <textarea rows={3} placeholder="Add any helpful details about this scan." value={notes} onChange={event => setNotes(event.target.value)} />
             </label>
             {!editingArchiveId && (
-              <label>
+              <label className="archive-file-field">
                 Scan file (PDF, PNG, JPG, TIFF · max 20 MB)
                 <input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={event => setFile(event.target.files?.[0] || null)} />
               </label>
