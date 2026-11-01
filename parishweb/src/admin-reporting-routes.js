@@ -203,6 +203,101 @@ export function createAdminReportingRouter({
     }
   })
 
+  router.put('/api/admin/sacramental/:type/:id', ...recordsAccess, async (req, res, next) => {
+    const record = sacramentRecords[req.params.type]
+    if (!record) return next()
+    const id = optionalPositiveInteger(req.params.id)
+    if (!id || !req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ message: 'A valid sacramental record and ID are required.' })
+    }
+
+    const assignments = []
+    const inputs = []
+    for (const [index, field] of record.fields.entries()) {
+      const key = field.column.charAt(0).toLowerCase() + field.column.slice(1)
+      const rawValue = req.body[key] ?? req.body[field.column] ?? null
+      let value = rawValue
+
+      if (field.kind === 'text') {
+        if (value !== null && typeof value !== 'string') {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+        value = typeof value === 'string' ? value.trim() || null : null
+        if (value && field.length && value.length > field.length) {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+      } else if (field.kind === 'date') {
+        if (value === '') value = null
+        if (value !== null && !isIsoDate(value)) {
+          return res.status(400).json({ message: `Invalid value for ${key}.` })
+        }
+      } else if (field.kind === 'integer') {
+        if (value === '') value = null
+        if (value !== null) {
+          value = Number(value)
+          if (!Number.isSafeInteger(value) || value < 0) {
+            return res.status(400).json({ message: `Invalid value for ${key}.` })
+          }
+        }
+      }
+
+      if (field.required && (value === null || value === '')) {
+        return res.status(400).json({ message: `${key} is required.` })
+      }
+
+      const type = field.kind === 'date'
+        ? sql.Date
+        : field.kind === 'integer'
+          ? sql.Int
+          : sql.NVarChar(field.length ?? sql.MAX)
+      const parameter = `field${index}`
+      inputs.push([parameter, type, value])
+      assignments.push(`${field.column} = @${parameter}`)
+    }
+
+    try {
+      const request = getPool().request()
+      for (const [parameter, type, value] of inputs) request.input(parameter, type, value)
+      request.input('id', sql.Int, id)
+      request.input('recordType', sql.VarChar(30), req.params.type)
+      request.input('changedBy', sql.NVarChar(256), req.staff?.email || req.staff?.role || 'staff')
+      request.input('changes', sql.NVarChar(sql.MAX), JSON.stringify(
+        Object.fromEntries(record.fields.map(field => [field.column, true])),
+      ))
+      const result = await request.query(`
+        BEGIN TRY
+          BEGIN TRANSACTION;
+          UPDATE dbo.${record.table}
+          SET ${assignments.join(', ')}
+          WHERE ${record.idColumn} = @id;
+          IF @@ROWCOUNT = 0
+          BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT CAST(0 AS bit) AS updated;
+            RETURN;
+          END;
+          INSERT INTO dbo.SacramentalRecordAudit
+            (RecordType, RecordId, ActionName, ChangedBy, Changes)
+          VALUES
+            (@recordType, @id, 'Updated', @changedBy, @changes);
+          COMMIT TRANSACTION;
+          SELECT CAST(1 AS bit) AS updated;
+        END TRY
+        BEGIN CATCH
+          IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+          THROW;
+        END CATCH
+      `)
+      if (!result.recordset[0]?.updated) {
+        return res.status(404).json({ message: 'Sacramental record not found.' })
+      }
+      res.json({ message: 'Sacramental record updated.' })
+    } catch (error) {
+      logError(error, { context: 'updateSacramentalRecord' })
+      res.status(500).json({ message: 'Unable to update sacramental record.' })
+    }
+  })
+
   router.post('/api/admin/sacramental/upload-archive', ...recordsAccess, (req, res, next) => {
     if (!uploadArchive || !saveArchiveFile) {
       return res.status(500).json({ message: 'Archive uploads are not configured.' })

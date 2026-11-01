@@ -25,8 +25,21 @@ function nextOfficeDate() {
   ].join('-')
 }
 
-async function startApi() {
-  const rows: Record<string, unknown>[] = []
+function parishDate(offsetDays = 0) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const today = `${parts.find(part => part.type === 'year')?.value}-${parts.find(part => part.type === 'month')?.value}-${parts.find(part => part.type === 'day')?.value}`
+  const date = new Date(`${today}T00:00:00+08:00`)
+  date.setUTCDate(date.getUTCDate() + offsetDays)
+  return date.toISOString().slice(0, 10)
+}
+
+async function startApi(initialRows: Record<string, unknown>[] = []) {
+  const rows = [...initialRows]
   let nextId = 1
   const sql = {
     Int: 'Int',
@@ -47,6 +60,12 @@ async function startApi() {
             return request
           },
           query: async (statement: string) => {
+            if (statement.includes('WHERE BlockDate <')) {
+              const today = parishDate()
+              const expired = rows.filter(row => String(row.BlockDate) < today)
+              for (const row of expired) rows.splice(rows.indexOf(row), 1)
+              return { recordset: [], rowsAffected: [expired.length] }
+            }
             if (statement.includes('SELECT')) return { recordset: [...rows] }
             if (statement.includes('INSERT')) {
               const row = {
@@ -90,6 +109,22 @@ afterEach(async () => {
 })
 
 describe('admin blocked slots API', () => {
+  it('automatically removes blocks before today and keeps today and future blocks', async () => {
+    const { baseUrl, rows } = await startApi([
+      { BlockedSlotId: 1, BlockDate: parishDate(-1), BlockTime: null, Scope: 'All', ServiceId: null, ServiceName: null, Reason: 'Expired' },
+      { BlockedSlotId: 2, BlockDate: parishDate(), BlockTime: null, Scope: 'All', ServiceId: null, ServiceName: null, Reason: 'Today' },
+      { BlockedSlotId: 3, BlockDate: parishDate(1), BlockTime: null, Scope: 'All', ServiceId: null, ServiceName: null, Reason: 'Future' },
+    ])
+
+    const listed = await fetch(baseUrl)
+
+    expect(await listed.json()).toEqual([
+      { id: 2, date: parishDate(), time: null, scope: 'All', serviceId: null, serviceName: null, reason: 'Today' },
+      { id: 3, date: parishDate(1), time: null, scope: 'All', serviceId: null, serviceName: null, reason: 'Future' },
+    ])
+    expect(rows.map(row => row.BlockedSlotId)).toEqual([2, 3])
+  })
+
   it('creates a slot, lists it, and deletes it', async () => {
     const { baseUrl } = await startApi()
     const date = nextOfficeDate()

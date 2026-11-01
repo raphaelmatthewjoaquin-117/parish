@@ -34,7 +34,7 @@ import {
 import { hashAspNetPassword } from './password-hash.js';
 import { deleteServiceRequest } from './src/service-request-deletion.js';
 import { createPrayerRouter } from './src/prayer-routes.js';
-import { createBlockedSlotsRouter } from './src/blocked-slots-router.js';
+import { cleanupExpiredBlockedSlots, createBlockedSlotsRouter } from './src/blocked-slots-router.js';
 import { createAdminReportingRouter } from './src/admin-reporting-routes.js';
 import { certificateRequestEmail, passwordResetEmail, serviceBookingEmail } from './email-templates.js';
 import {
@@ -281,6 +281,19 @@ const startTokenCleanupSchedule = (intervalMinutes = 60) => {
       logError(error, { context: 'tokenCleanup' });
     }
   }, intervalMinutes * 60 * 1000);
+};
+
+const startBlockedSlotCleanupSchedule = (intervalMinutes = 60) => {
+  const run = async () => {
+    try {
+      const deletedCount = await cleanupExpiredBlockedSlots(getPool);
+      if (deletedCount > 0) logger.info('Expired booking blocks cleaned up', { deletedCount });
+    } catch (error) {
+      logError(error, { context: 'blockedSlotCleanup' });
+    }
+  };
+  void run();
+  setInterval(run, intervalMinutes * 60 * 1000);
 };
 
 dotenv.config({ quiet: true });
@@ -3360,6 +3373,7 @@ app.listen(PORT, () => {
     startFinanceReportSchedule();
     startNoShowVoidSchedule();
     startTokenCleanupSchedule();
+    startBlockedSlotCleanupSchedule();
   }).catch(err => {
     console.error('Database initialization failed:', err);
     if (process.env.NODE_ENV === 'development') {

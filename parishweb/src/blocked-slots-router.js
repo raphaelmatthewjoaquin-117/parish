@@ -1,12 +1,22 @@
 import express from 'express'
 import { normalizeBlockedSlotInput } from '../server-rules.js'
 
+export async function cleanupExpiredBlockedSlots(getPool) {
+  const result = await getPool().request().query(`
+    DELETE FROM dbo.BlockedSlots
+    -- Parish booking dates use Manila time (UTC+08:00), regardless of DB host timezone.
+    WHERE BlockDate < CONVERT(date, DATEADD(HOUR, 8, SYSUTCDATETIME()))
+  `)
+  return result.rowsAffected?.[0] ?? 0
+}
+
 export function createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRole, logError }) {
   const router = express.Router()
   const availabilityAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary'])]
 
   router.get('/api/admin/blocked-slots', ...availabilityAccess, async (_req, res) => {
     try {
+      await cleanupExpiredBlockedSlots(getPool)
       const result = await getPool().request().query(`
         SELECT b.BlockedSlotId, CONVERT(varchar(10), b.BlockDate, 23) AS BlockDate,
           b.BlockTime, b.Scope, b.ServiceId, s.Name AS ServiceName, b.Reason

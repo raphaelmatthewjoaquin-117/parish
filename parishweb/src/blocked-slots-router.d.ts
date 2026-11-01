@@ -2,7 +2,7 @@ import type { RequestHandler, Router } from 'express'
 
 interface BlockedSlotRequest {
   input(name: string, type: unknown, value: unknown): BlockedSlotRequest
-  query(statement: string): Promise<{ recordset: Array<Record<string, unknown>> }>
+  query(statement: string): Promise<{ recordset: Array<Record<string, unknown>>; rowsAffected?: number[] }>
 }
 
 interface BlockedSlotsRouteOptions {
@@ -19,3 +19,4 @@ interface BlockedSlotsRouteOptions {
 }
 
 export function createBlockedSlotsRouter(options: BlockedSlotsRouteOptions): Router
+export function cleanupExpiredBlockedSlots(getPool: () => { request: () => BlockedSlotRequest }): Promise<number>

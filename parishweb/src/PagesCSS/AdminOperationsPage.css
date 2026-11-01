@@ -1172,10 +1172,14 @@
 }
 
 @media (max-width: 480px) {
-  .availability-calendar .fc .fc-toolbar { justify-content: center; padding: .65rem }
+  .availability-page.admin-embedded-page { padding-right: .75rem !important; padding-left: .75rem !important }
+  .availability-calendar-panel { padding: .75rem }
+  .availability-calendar .fc .fc-toolbar { justify-content: center; gap: .45rem; padding: .55rem .5rem }
+  .availability-calendar .fc .fc-toolbar-chunk { gap: .25rem }
   .availability-calendar .fc .fc-toolbar-title { font-size: 1rem }
-  .availability-calendar .fc .fc-button { padding: .3rem .4rem; font-size: .6rem }
+  .availability-calendar .fc .fc-button { min-height: 36px; padding: .4rem .5rem; font-size: .62rem }
+  .availability-calendar .fc .fc-col-header-cell-cushion { padding: .4rem 0; font-size: .6rem }
   .availability-calendar .fc .fc-daygrid-day-frame { min-height: 3.5rem }
-  .availability-calendar .fc .fc-daygrid-day-number { min-width: 1.6rem; min-height: 1.6rem; margin: .1rem }
+  .availability-calendar .fc .fc-daygrid-day-number { min-width: 1.75rem; min-height: 1.75rem; margin: .1rem }
   .availability-blocked-item { align-items: flex-start; flex-direction: column }
 }

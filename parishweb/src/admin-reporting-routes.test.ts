@@ -499,6 +499,77 @@ describe('admin reporting routes', () => {
     await expect(response.json()).resolves.toEqual({ id: 5 })
   })
 
+  it('updates a baptism record and records the changed fields', async () => {
+    const api = createTestApi(async (statement, inputs) => {
+      expect(statement).toMatch(/UPDATE dbo\.BaptismRecords/)
+      expect(statement).toMatch(/INSERT INTO dbo\.SacramentalRecordAudit/)
+      expect(inputs.get('id')).toBe(1)
+      expect(inputs.get('field0')).toBe('B-001')
+      expect(inputs.get('field1')).toBe('Ana')
+      expect(inputs.get('changedBy')).toBe('staff')
+      expect(inputs.get('changes')).toContain('"RegistryNumber"')
+      return { recordset: [{ updated: true }] }
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        RegistryNumber: 'B-001',
+        ChildFirstName: 'Ana',
+        ChildLastName: 'Santos',
+        DateOfBirth: '2024-01-02',
+        DateOfBaptism: '2024-02-03',
+        MinisterName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record updated.' })
+  })
+
+  it('returns not found when updating a missing sacramental record', async () => {
+    const query = vi.fn(async () => ({ recordset: [{ updated: false }] }))
+    const api = createTestApi(query)
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        RegistryNumber: 'B-001',
+        ChildFirstName: 'Ana',
+        ChildLastName: 'Santos',
+        DateOfBirth: '2024-01-02',
+        DateOfBaptism: '2024-02-03',
+        MinisterName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record not found.' })
+  })
+
+  it('rejects invalid sacramental updates before querying', async () => {
+    const query = vi.fn(async () => ({ recordset: [] }))
+    const api = createTestApi(query)
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        RegistryNumber: 'B-001',
+        ChildFirstName: 'Ana',
+        ChildLastName: 'Santos',
+        DateOfBirth: 'not-a-date',
+        DateOfBaptism: '2024-02-03',
+        MinisterName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(query).not.toHaveBeenCalled()
+  })
+
   it('returns sacramental audit history for the selected record', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/FROM dbo\.SacramentalRecordAudit/i)
