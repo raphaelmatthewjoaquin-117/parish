@@ -379,6 +379,27 @@ describe('admin reporting routes', () => {
     await expect(response.json()).resolves.toEqual({ id: 17 })
   })
 
+  it('saves a standalone archive without a registry number', async () => {
+    const api = createTestApi(async (_statement, inputs) => {
+      expect(inputs.get('registryNumber')).toBeNull()
+      return { recordset: [{ id: 18 }] }
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sacramentType: 'baptism',
+        bookNumber: 1,
+        pageNumber: 6,
+        fileUrl: '/uploads/old-scan.pdf',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({ id: 18 })
+  })
+
   it('uploads a sacramental archive and returns its file URL', async () => {
     const saveArchiveFile = vi.fn(async () => '/uploads/scan.pdf')
     const api = createTestApi(async () => ({ recordset: [] }), {
@@ -431,6 +452,7 @@ describe('admin reporting routes', () => {
       expect(inputs.get('bookNumber')).toBe(2)
       expect(inputs.get('pageNumber')).toBe(8)
       expect(inputs.get('notes')).toBe('Updated notes')
+      expect(inputs.get('registryNumberProvided')).toBe(false)
       return { recordset: [] }
     })
 
@@ -438,6 +460,22 @@ describe('admin reporting routes', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bookNumber: 2, pageNumber: 8, notes: ' Updated notes ' }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Archive entry updated.' })
+  })
+
+  it('links an existing archive to a registry entry when updated', async () => {
+    const api = createTestApi(async (_statement, inputs) => {
+      expect(inputs.get('registryNumber')).toBe('B-005')
+      return { recordset: [], rowsAffected: [1] }
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives/7`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookNumber: 1, pageNumber: 6, registryNumber: ' B-005 ' }),
     })
 
     expect(response.status).toBe(200)
@@ -570,6 +608,31 @@ describe('admin reporting routes', () => {
     expect(query).not.toHaveBeenCalled()
   })
 
+  it('deletes a sacramental record and preserves an audit entry', async () => {
+    const api = createTestApi(async (statement, inputs) => {
+      expect(statement).toMatch(/DELETE FROM dbo\.BaptismRecords WHERE BaptismId = @id/)
+      expect(statement).toMatch(/INSERT INTO dbo\.SacramentalRecordAudit/)
+      expect(inputs.get('id')).toBe(1)
+      expect(inputs.get('recordType')).toBe('baptism')
+      expect(inputs.get('changedBy')).toBe('staff')
+      return { recordset: [{ deleted: true }] }
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, { method: 'DELETE' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record deleted.' })
+  })
+
+  it('returns not found when deleting a missing sacramental record', async () => {
+    const api = createTestApi(async () => ({ recordset: [{ deleted: false }] }))
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, { method: 'DELETE' })
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record not found.' })
+  })
+
   it('returns sacramental audit history for the selected record', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/FROM dbo\.SacramentalRecordAudit/i)
@@ -594,7 +657,7 @@ describe('admin reporting routes', () => {
     expect(query).not.toHaveBeenCalled()
   })
 
-  it('rejects archive creation without a registry number', async () => {
+  it('rejects archive creation with an oversized registry number', async () => {
     const query = vi.fn(async () => ({ recordset: [] }))
     const api = createTestApi(query)
 
@@ -605,6 +668,7 @@ describe('admin reporting routes', () => {
         sacramentType: 'baptism',
         bookNumber: 1,
         pageNumber: 5,
+        registryNumber: 'x'.repeat(51),
         fileUrl: '/uploads/scan.pdf',
       }),
     })

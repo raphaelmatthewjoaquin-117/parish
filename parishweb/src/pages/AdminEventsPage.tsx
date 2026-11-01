@@ -9,6 +9,7 @@ import { AdminFeedback } from '../components/AdminFeedback'
 import { EventDetailsModal } from '../components/EventDetailsModal'
 import { PrayerDetailsModal } from '../components/PrayerDetailsModal'
 import { API_BASE_URL as API_URL, getMediaUrl } from '../api/client'
+import { SacramentalArchivesTab } from '../components/SacramentalArchivesTab'
 import { ForgotPasswordForm } from '../components/ForgotPasswordForm'
 import type { ModuleOverrides } from '../utils/rbac'
 import '../PagesCSS/AdminEventsPage.css'
@@ -86,6 +87,7 @@ type SacramentalArchiveItem = {
   SacramentType: string
   BookNumber: number
   PageNumber: number
+  RegistryNumber?: string | null
   FileUrl: string
   Notes?: string
   UploadedAt: string
@@ -124,6 +126,7 @@ type MassScheduleItem = {
 }
 
 export type AdminEventsTab = 'dashboard' | 'events' | 'prayers' | 'service-requests' | 'mass-schedule' | 'sacramental-ledger'
+type SacramentalSubTab = 'records' | 'archives'
 
 type AdminEventsPageProps = {
   initialTab?: AdminEventsTab
@@ -157,6 +160,7 @@ const getPhotoUrl = getMediaUrl
 export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated, overrides }: AdminEventsPageProps) {
   // Tab state
   const [activeTab, setActiveTab] = useState<AdminEventsTab>(initialTab)
+  const [activeSacramentalSubTab, setActiveSacramentalSubTab] = useState<SacramentalSubTab>('records')
 
   // Event states
   const [events, setEvents] = useState<EventItem[]>([])
@@ -1645,11 +1649,42 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
             <div className="ledger-heading">
               <div>
                 <h3>Sacramental Records</h3>
-                <p className="ledger-description">Search the parish register or add a new entry.</p>
+                <p className="ledger-description">
+                  {activeSacramentalSubTab === 'records'
+                    ? 'Search the parish register or add a new entry.'
+                    : 'Browse and upload scans of parish register pages.'}
+                </p>
               </div>
-              {canManageSacramentalRecords && <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>Add a record</button>}
+              {activeSacramentalSubTab === 'records' && canManageSacramentalRecords && <button type="button" className="primary-btn" onClick={() => { setRecordFormType((sacramentalSearch.type || 'baptism') as 'baptism' | 'confirmation' | 'marriage' | 'death'); setRecordFormRecord(null); setShowRecordForm(true) }}>Add a record</button>}
             </div>
 
+            <div className="sacramental-subtabs" role="tablist" aria-label="Sacramental records sections">
+              <button
+                type="button"
+                role="tab"
+                id="sacramental-records-tab"
+                aria-selected={activeSacramentalSubTab === 'records'}
+                aria-controls="sacramental-module-content"
+                className={`sacramental-subtab${activeSacramentalSubTab === 'records' ? ' active' : ''}`}
+                onClick={() => setActiveSacramentalSubTab('records')}
+              >
+                Records
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="sacramental-archives-tab"
+                aria-selected={activeSacramentalSubTab === 'archives'}
+                aria-controls="sacramental-module-content"
+                className={`sacramental-subtab${activeSacramentalSubTab === 'archives' ? ' active' : ''}`}
+                onClick={() => setActiveSacramentalSubTab('archives')}
+              >
+                Digital Archives
+              </button>
+            </div>
+
+            <div id="sacramental-module-content" role="tabpanel" aria-labelledby={activeSacramentalSubTab === 'records' ? 'sacramental-records-tab' : 'sacramental-archives-tab'}>
+            {activeSacramentalSubTab === 'records' ? <>
             <form
               className="sacramental-search"
               aria-label="Search sacramental records"
@@ -1818,7 +1853,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 </div>
               )}
             </div>
+            </> : <SacramentalArchivesTab adminToken={adminToken} canManage={canManageSacramentalRecords} />}
           </div>
+        </div>
         </div>
       )}
 

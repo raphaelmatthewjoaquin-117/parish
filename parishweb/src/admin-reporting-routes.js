@@ -298,6 +298,50 @@ export function createAdminReportingRouter({
     }
   })
 
+  router.delete('/api/admin/sacramental/:type/:id', ...recordsAccess, async (req, res, next) => {
+    const record = sacramentRecords[req.params.type]
+    if (!record) return next()
+    const id = optionalPositiveInteger(req.params.id)
+    if (!id) return res.status(400).json({ message: 'A valid sacramental record ID is required.' })
+
+    try {
+      const result = await getPool().request()
+        .input('id', sql.Int, id)
+        .input('recordType', sql.VarChar(30), req.params.type)
+        .input('changedBy', sql.NVarChar(256), req.staff?.email || req.staff?.role || 'staff')
+        .input('changes', sql.NVarChar(sql.MAX), JSON.stringify({ deleted: true }))
+        .query(`
+          BEGIN TRY
+            BEGIN TRANSACTION;
+            DELETE FROM dbo.${record.table} WHERE ${record.idColumn} = @id;
+            IF @@ROWCOUNT = 0
+            BEGIN
+              ROLLBACK TRANSACTION;
+              SELECT CAST(0 AS bit) AS deleted;
+              RETURN;
+            END;
+            INSERT INTO dbo.SacramentalRecordAudit
+              (RecordType, RecordId, ActionName, ChangedBy, Changes)
+            VALUES
+              (@recordType, @id, 'Deleted', @changedBy, @changes);
+            COMMIT TRANSACTION;
+            SELECT CAST(1 AS bit) AS deleted;
+          END TRY
+          BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+            THROW;
+          END CATCH
+        `)
+      if (!result.recordset[0]?.deleted) {
+        return res.status(404).json({ message: 'Sacramental record not found.' })
+      }
+      res.json({ message: 'Sacramental record deleted.' })
+    } catch (error) {
+      logError(error, { context: 'deleteSacramentalRecord' })
+      res.status(500).json({ message: 'Unable to delete sacramental record.' })
+    }
+  })
+
   router.post('/api/admin/sacramental/upload-archive', ...recordsAccess, (req, res, next) => {
     if (!uploadArchive || !saveArchiveFile) {
       return res.status(500).json({ message: 'Archive uploads are not configured.' })
@@ -778,18 +822,19 @@ export function createAdminReportingRouter({
 
   router.post('/api/admin/sacramental/archives', ...recordsAccess, async (req, res) => {
     const { sacramentType, bookNumber, pageNumber, registryNumber, fileUrl, notes } = req.body || {}
-    const normalizedRegistryNumber = typeof registryNumber === 'string' ? registryNumber.trim() : ''
+    const normalizedRegistryNumber = typeof registryNumber === 'string' ? registryNumber.trim() || null : null
     const parsedBookNumber = Number(bookNumber)
     const parsedPageNumber = Number(pageNumber)
     if (
       typeof sacramentType !== 'string' || !sacramentTypes.has(sacramentType) ||
       !Number.isSafeInteger(parsedBookNumber) || parsedBookNumber < 1 ||
       !Number.isSafeInteger(parsedPageNumber) || parsedPageNumber < 1 ||
-      !normalizedRegistryNumber || normalizedRegistryNumber.length > 50 ||
+      (registryNumber !== undefined && registryNumber !== null && typeof registryNumber !== 'string') ||
+      (normalizedRegistryNumber !== null && normalizedRegistryNumber.length > 50) ||
       typeof fileUrl !== 'string' || !fileUrl.trim() || fileUrl.length > 1000 ||
       (notes !== undefined && notes !== null && typeof notes !== 'string')
     ) {
-      return res.status(400).json({ message: 'Provide valid archive details and a registry number.' })
+      return res.status(400).json({ message: 'Provide valid archive details.' })
     }
 
     try {
@@ -819,9 +864,14 @@ export function createAdminReportingRouter({
     const id = optionalPositiveInteger(req.params.id)
     const bookNumber = optionalPositiveInteger(req.body?.bookNumber)
     const pageNumber = optionalPositiveInteger(req.body?.pageNumber)
+    const registryNumber = req.body?.registryNumber
+    const registryNumberProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'registryNumber')
+    const normalizedRegistryNumber = typeof registryNumber === 'string' ? registryNumber.trim() || null : null
     const notes = req.body?.notes
     if (
       !id || !bookNumber || !pageNumber ||
+      (registryNumberProvided && registryNumber !== null && typeof registryNumber !== 'string') ||
+      (normalizedRegistryNumber !== null && normalizedRegistryNumber.length > 50) ||
       (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 4000))
     ) {
       return res.status(400).json({ message: 'Provide valid archive details.' })
@@ -832,10 +882,14 @@ export function createAdminReportingRouter({
         .input('id', sql.Int, id)
         .input('bookNumber', sql.Int, bookNumber)
         .input('pageNumber', sql.Int, pageNumber)
+        .input('registryNumber', sql.NVarChar(50), normalizedRegistryNumber)
+        .input('registryNumberProvided', sql.Bit, registryNumberProvided)
         .input('notes', sql.NVarChar(sql.MAX), typeof notes === 'string' ? notes.trim() || null : null)
         .query(`
           UPDATE dbo.SacramentalArchives
-          SET BookNumber = @bookNumber, PageNumber = @pageNumber, Notes = @notes
+          SET BookNumber = @bookNumber, PageNumber = @pageNumber,
+            RegistryNumber = CASE WHEN @registryNumberProvided = 1 THEN @registryNumber ELSE RegistryNumber END,
+            Notes = @notes
           WHERE ArchiveId = @id
         `)
       if (result.rowsAffected?.[0] === 0) return res.status(404).json({ message: 'Archive not found.' })

@@ -142,6 +142,26 @@ describe('AdminEventsPage prayer details', () => {
 })
 
 describe('AdminEventsPage sacramental record details', () => {
+  it('switches between register records and the digital archive within the module', async () => {
+    window.localStorage.setItem('adminToken', 'staff-token')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Admin' } }
+        : url.includes('/api/admin/sacramental/search')
+          ? { records: [], pagination: { total: 0 } }
+          : { archives: [] }
+      return { ok: true, json: async () => body } as Response
+    }))
+
+    render(<AdminEventsPage initialTab="sacramental-ledger" embedded />)
+    expect(await screen.findByText('No sacramental records found matching your criteria.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'Digital Archives' }))
+    expect(await screen.findByRole('heading', { name: 'Archive collection' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'Records' }))
+    expect(await screen.findByText('No sacramental records found matching your criteria.')).toBeTruthy()
+  })
+
   it.each([
     {
       type: 'Baptism',

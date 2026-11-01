@@ -1187,6 +1187,16 @@
   margin: .75rem 0;
   font-size: .875rem;
 }
+.success-message {
+  background: #e8f3e9;
+  color: #31583f;
+  border: 1px solid rgba(49,88,63,.2);
+  border-left: 3px solid #31583f;
+  padding: .7rem 1rem;
+  border-radius: 8px;
+  margin: .75rem 0;
+  font-size: .875rem;
+}
 
 /* ── Login form ── */
 .admin-login-page {
@@ -1498,6 +1508,27 @@
 .sacramental-table tbody tr:hover { background: #f2ede4 }
 .sacramental-table tbody tr:last-child td { border-bottom: none }
 .sacramental-table td:nth-child(3) { font-weight: 600; color: #161c18 }
+
+.sacramental-subtabs {
+  display: flex;
+  gap: .35rem;
+  margin: 0 0 1rem;
+  border-bottom: 1px solid rgba(30,40,34,.12);
+}
+.sacramental-subtab {
+  padding: .65rem 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #536057;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sacramental-subtab:hover { color: #31583f; background: #f8f5ef }
+.sacramental-subtab.active { color: #31583f; border-bottom-color: #b8891e }
+.sacramental-subtab:focus-visible { outline: 2px solid #b8891e; outline-offset: 2px }
 
 .sacrament-badge {
   display: inline-block;
@@ -1893,6 +1924,38 @@
 .archives-list { border-top: 1px solid rgba(30,40,34,.09); padding-top: 1.35rem }
 .archives-list h4 { margin: 0 0 .85rem; color: #161c18; font-size: .95rem; font-weight: 700 }
 .archives-list ul { list-style: none; padding: 0; margin: 0 }
+
+.archive-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.archive-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  color: #3d4840;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.archive-filters input,
+.archive-filters select {
+  min-height: 42px;
+  padding: .55rem .8rem;
+  border: 1px solid rgba(30,40,34,.18);
+  border-radius: 8px;
+  background: #f8f5ef;
+  color: #161c18;
+  font: inherit;
+}
+.archive-filters input:focus,
+.archive-filters select:focus {
+  outline: none;
+  border-color: #b8891e;
+  box-shadow: 0 0 0 3px rgba(184,137,30,.14);
+}
 
 .archive-item {
   display: flex;
