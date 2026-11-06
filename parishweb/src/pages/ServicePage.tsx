@@ -1,7 +1,9 @@
 // ServicePage.tsx
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import '../PagesCSS/ServicePage.css';
-import { API_BASE_URL as API_URL, apiClient } from '../api/client';
+import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client';
+import type { ServicePageContent } from '../content/siteContent';
+import { isValidServicePageContent } from '../service-page-content.js';
 import { isCertificateDateBlocked, isCertificateTimeBlocked, type CertificateBlockedSlot } from '../certificate-availability';
 import { officeHourSlotTimes } from '../../server-rules.js';
 
@@ -68,6 +70,7 @@ type FieldDef = { key: string; label: string; type: string; options?: string[]; 
 export default function ServicePage(): React.JSX.Element {
   const [active, setActive] = useState<string>(() => getInitialTab());
   const [services, setServices] = useState<Service[]>(FALLBACK_SERVICES);
+  const [servicePageContent, setServicePageContent] = useState<ServicePageContent>({});
   const [servicesLoaded, setServicesLoaded] = useState(false);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(true);
@@ -116,8 +119,28 @@ export default function ServicePage(): React.JSX.Element {
 
   const isCertificateTab = active === 'certificate';
   const selectedService = services.find(s => s.id === active) ?? FALLBACK_SERVICES[0];
+  const selectedPageContent = servicePageContent[isCertificateTab ? 'certificate' : String(selectedService.dbId)];
+  const serviceDescription = isCertificateTab
+    ? selectedPageContent?.description ?? 'Request an appointment to claim an official certificate (Baptism, Confirmation, Marriage, or Death) from the parish office. No account needed — you\'ll receive a reference code to track your request.'
+    : selectedPageContent?.description ?? selectedService.description ?? 'Choose a service and book an appointment.';
+  const serviceDetailStyle = selectedPageContent?.backgroundImage
+    ? {
+        backgroundImage: `linear-gradient(rgba(255, 247, 233, .9), rgba(255, 255, 255, .92)), url("${encodeURI(getMediaUrl(selectedPageContent.backgroundImage))}")`,
+      }
+    : undefined;
   const bookableServices = services.filter(s => s.id !== 'certificate');
   const bookingService = bookableServices.find(s => s.id === bookingServiceId);
+
+  useEffect(() => {
+    apiClient.siteContent.get<ServicePageContent>('services')
+      .then(({ content }) => {
+        if (content && !isValidServicePageContent(content)) {
+          throw new Error('The saved service page content has an invalid format.');
+        }
+        setServicePageContent(content ?? {});
+      })
+      .catch(error => console.error('Unable to load saved service page content.', error));
+  }, []);
 
   const loadServices = useCallback(() => {
     fetch(`${API_URL}/api/services`)
@@ -407,13 +430,9 @@ export default function ServicePage(): React.JSX.Element {
         ))}
       </div>
 
-      <div className="service-detail card border-0 shadow-sm p-4 mb-4">
+      <div className="service-detail card border-0 shadow-sm p-4 mb-4" style={serviceDetailStyle}>
         <h2>{isCertificateTab ? 'Certificate Request' : selectedService.name}</h2>
-        <p>
-          {isCertificateTab
-            ? 'Request an appointment to claim an official certificate (Baptism, Confirmation, Marriage, or Death) from the parish office. No account needed — you\'ll receive a reference code to track your request.'
-            : (selectedService.description || 'Choose a service and book an appointment.')}
-        </p>
+        <p>{serviceDescription}</p>
       </div>
 
       {selectedDateRestriction && !isCertificateTab && (

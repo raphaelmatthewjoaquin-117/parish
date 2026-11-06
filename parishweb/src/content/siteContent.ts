@@ -75,6 +75,11 @@ export type NewsContent = {
   }>
 }
 
+export type ServicePageContent = Record<string, {
+  description: string
+  backgroundImage?: string
+}>
+
 export type FooterContent = {
   parishTitle: string
   addressLines: string[]

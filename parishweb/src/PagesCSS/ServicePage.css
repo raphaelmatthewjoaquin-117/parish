@@ -47,6 +47,9 @@
   border: 1px solid rgba(111, 78, 55, 0.18) !important;
   border-radius: 1.5rem;
   background: linear-gradient(135deg, rgba(255, 247, 233, 0.96), rgba(255, 255, 255, 0.99));
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
   box-shadow: 0 16px 36px rgba(41, 26, 14, 0.08);
   transition: box-shadow 0.3s ease;
 }
@@ -64,6 +67,7 @@
   color: #5d4135;
   font-size: 1.05rem;
   line-height: 1.7;
+  white-space: pre-line;
 }
 
 .booking-grid {

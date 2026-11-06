@@ -1,0 +1,12 @@
+.service-page-image-preview {
+  display: grid;
+  justify-items: start;
+  gap: .75rem;
+}
+
+.service-page-image-preview img {
+  width: min(100%, 32rem);
+  max-height: 18rem;
+  border-radius: .45rem;
+  object-fit: cover;
+}

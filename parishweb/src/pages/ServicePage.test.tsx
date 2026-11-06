@@ -11,6 +11,9 @@ describe('ServicePage document uploads', () => {
       const url = String(input)
       let body: unknown = {}
       if (url.endsWith('/api/services')) body = [{ id: 1, name: 'Baptism' }]
+      else if (url.endsWith('/api/site-content/services')) {
+        body = { content: { '1': { description: 'Baptism details from CMS', backgroundImage: '/uploads/baptism.jpg' } } }
+      }
       else if (url.endsWith('/api/services/1/slots')) {
         body = { slots: [{ date: '2026-11-07', time: '09:00', available: true }] }
       } else if (url.endsWith('/api/services/1/fields')) {
@@ -61,5 +64,13 @@ describe('ServicePage document uploads', () => {
     const formData = submission?.[1]?.body as FormData
     expect(formData.get('documentKeys')).toBe('["birthCertificate"]')
     expect(formData.get('documents')).toBe(file)
+  })
+
+  it('uses the saved service description and background image', async () => {
+    render(<ServicePage />)
+
+    expect(await screen.findByText('Baptism details from CMS')).toBeTruthy()
+    const serviceDetail = screen.getByRole('heading', { name: 'Baptism' }).closest('.service-detail')
+    expect(serviceDetail?.getAttribute('style')).toContain('baptism.jpg')
   })
 })

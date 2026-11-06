@@ -4,6 +4,7 @@ import { AdminOperationsPage, type AdminOperationsTab } from './AdminOperationsP
 import { AdminUsersPage } from './AdminUsersPage'
 import { AdminCertificateRequestsPage } from './AdminCertificateRequestsPage'
 import { SiteContentEditorPage } from './SiteContentEditorPage'
+import { ServicePageContentEditor } from './ServicePageContentEditor'
 import { AdminContactMessagesPage } from './AdminContactMessagesPage'
 import { API_BASE_URL as API_URL } from '../api/client'
 import { AdminProfilePage, type StaffProfile } from './AdminProfilePage'
@@ -17,6 +18,7 @@ type AdminSection = (
   | { kind: 'users'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'certificates'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'content'; page: 'about' | 'gallery' | 'contact' | 'footer' | 'news'; label: string; icon: string; group: string; module?: ModuleName }
+  | { kind: 'service-content'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'messages'; label: string; icon: string; group: string; module?: ModuleName }
   | { kind: 'profile'; label: string; icon: string; group: string; module?: ModuleName }
 ) & { roles?: string[] }
@@ -30,6 +32,7 @@ const sections: AdminSection[] = [
   { kind: 'content', page: 'contact', label: 'Contact Page', icon: '☎', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'content', page: 'footer', label: 'Footer', icon: '▤', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'content', page: 'news', label: 'Church News', icon: '▤', group: 'Website Content', module: 'WebsiteContent' },
+  { kind: 'service-content', label: 'Service Pages', icon: '✎', group: 'Website Content', module: 'WebsiteContent' },
   { kind: 'operations', tab: 'schedule', label: 'Schedule', icon: '◷', group: 'Operations', module: 'MassSchedule' },
   { kind: 'events', tab: 'mass-schedule', label: 'Mass Schedule', icon: '☩', group: 'Operations', module: 'MassSchedule' },
   { kind: 'operations', tab: 'intentions', label: 'Mass Intentions', icon: '✦', group: 'Operations', module: 'MassSchedule', roles: ['Admin', 'ParishPriest', 'Secretary', 'Staff'] },
@@ -190,7 +193,9 @@ export function UnifiedAdminPage() {
                     ? <AdminCertificateRequestsPage />
                   : visibleSection.kind === 'content'
                     ? <SiteContentEditorPage key={`content-${visibleSection.page}`} page={visibleSection.page} />
-                    : visibleSection.kind === 'messages'
+                        : visibleSection.kind === 'service-content'
+                          ? <ServicePageContentEditor />
+                        : visibleSection.kind === 'messages'
                       ? <AdminContactMessagesPage canDelete={hasOverride('ContactMessages') ? Boolean(overrides?.ContactMessages?.edit) : ['Admin', 'ParishPriest', 'Secretary'].includes(staffRole)} />
                       : visibleSection.kind === 'profile'
                         ? <AdminProfilePage key={`profile-${profile.userName}-${profile.email}`} profile={profile} onProfileChanged={refreshRole} />

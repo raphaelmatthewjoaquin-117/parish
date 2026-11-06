@@ -49,6 +49,7 @@ import { assertProductionStorageConfiguration, createDatabaseConfig } from './sr
 import { checkDatabaseReadiness } from './src/db/readiness.js';
 import { createCorsOptions } from './src/http/cors-config.js';
 import { isLocalAdminLoginAllowed, isLocalAdminPreviewRequestAllowed } from './src/local-admin-auth.js';
+import { isValidServicePageContent } from './src/service-page-content.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -958,7 +959,7 @@ app.get('/api/certificate-requests/lookup', async (req, res) => {
   }
 });
 
-app.post('/api/admin/uploads', requireAdmin, (req, res, next) => {
+app.post('/api/admin/uploads', requireAdmin, requireRole(['Admin', 'Secretary', 'ParishPriest']), (req, res, next) => {
   upload.single('photo')(req, res, (error) => {
     if (error instanceof multer.MulterError) {
       const message = error.code === 'LIMIT_FILE_SIZE'
@@ -1833,7 +1834,7 @@ app.delete('/api/events/:eventId', requireAdmin, async (req, res) => {
   }
 });
 
-const siteContentPages = new Set(['about', 'gallery', 'contact', 'footer', 'news']);
+const siteContentPages = new Set(['about', 'gallery', 'contact', 'footer', 'news', 'services']);
 
 const isOptionalText = (value, max) => value === undefined || (typeof value === 'string' && value.length <= max);
 
@@ -1920,6 +1921,7 @@ function isSiteContentDocument(page, content) {
   }
 
   if (page === 'news') return isValidNewsContent(content);
+  if (page === 'services') return isValidServicePageContent(content);
   return page === 'gallery' && isValidGalleryContent(content);
 }
 

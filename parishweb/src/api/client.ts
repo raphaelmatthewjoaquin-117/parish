@@ -257,11 +257,11 @@ export const apiClient = {
   },
 
   siteContent: {
-    async get<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news') {
+    async get<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news' | 'services') {
       return apiRequest<{ content: T | null }>(`/api/site-content/${page}`);
     },
 
-    async save<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news', content: T, adminToken: string) {
+    async save<T>(page: 'about' | 'gallery' | 'contact' | 'footer' | 'news' | 'services', content: T, adminToken: string) {
       return apiRequest<{ content: T }>(`/api/admin/site-content/${page}`, {
         method: 'PUT',
         body: { content },
