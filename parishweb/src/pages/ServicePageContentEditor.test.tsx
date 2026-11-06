@@ -38,7 +38,7 @@ describe('ServicePageContentEditor', () => {
     expect(description).toHaveProperty('value', 'Current baptism copy')
     await user.clear(description)
     await user.type(description, 'Updated baptism copy')
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await user.click(screen.getByRole('button', { name: 'Save and publish' }))
 
     await waitFor(() => expect(apiClient.siteContent.save).toHaveBeenCalledWith(
       'services',
@@ -55,7 +55,7 @@ describe('ServicePageContentEditor', () => {
     await user.selectOptions(await screen.findByLabelText('Service page'), '2')
     const description = screen.getByLabelText('Description')
     await user.type(description, 'Marriage information')
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await user.click(screen.getByRole('button', { name: 'Save and publish' }))
 
     await waitFor(() => expect(apiClient.siteContent.save).toHaveBeenCalledWith(
       'services',
@@ -76,5 +76,14 @@ describe('ServicePageContentEditor', () => {
 
     expect(await screen.findByRole('img', { name: 'Baptism background preview' })).toBeTruthy()
     expect(apiClient.siteContent.uploadImage).toHaveBeenCalled()
+  })
+
+  it('links to the public services page in a separate tab', async () => {
+    render(<ServicePageContentEditor />)
+
+    const link = await screen.findByRole('link', { name: 'View page' })
+    expect(link.getAttribute('href')).toBe('/services')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
   })
 })

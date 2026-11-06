@@ -262,7 +262,8 @@
 
 .site-content-editor--contact .site-content-intro,
 .site-content-editor--about .site-content-intro,
-.site-content-editor--gallery .site-content-intro {
+.site-content-editor--gallery .site-content-intro,
+.site-content-editor--services .site-content-intro {
   padding: 1.35rem 1.5rem;
   border: 1px solid #e0d6c2;
   border-radius: .85rem;
@@ -272,7 +273,8 @@
 
 .site-content-editor--contact .site-content-intro h2,
 .site-content-editor--about .site-content-intro h2,
-.site-content-editor--gallery .site-content-intro h2 {
+.site-content-editor--gallery .site-content-intro h2,
+.site-content-editor--services .site-content-intro h2 {
   margin-bottom: .45rem;
   font-size: clamp(1.5rem, 3vw, 2rem);
 }

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { API_BASE_URL, apiClient, getMediaUrl } from '../api/client'
 import type { ServicePageContent } from '../content/siteContent'
 import { isValidServicePageContent } from '../service-page-content.js'
+import { AdminFeedback } from '../components/AdminFeedback'
+import '../PagesCSS/SiteContentEditorPage.css'
 import '../PagesCSS/ServicePageContentEditor.css'
 
 type ServiceOption = { key: string; name: string }
@@ -104,18 +106,22 @@ export function ServicePageContentEditor() {
   }
 
   return (
-    <section className="site-content-editor">
+    <section className="site-content-editor site-content-editor--services">
       <header className="site-content-intro">
-        <p>Website Content</p>
-        <h2>Service Pages</h2>
-        <span>Edit the description and optional background image shown on each service tab.</span>
+        <p>Website content</p>
+        <h2>Edit service pages</h2>
+        <span>Changes are published on the public website when you save.</span>
       </header>
 
       {loading && <p role="status">Loading service pages…</p>}
-      {loadError && <p className="alert alert-danger" role="alert">{loadError}</p>}
+      <AdminFeedback
+        message={success}
+        error={error || loadError}
+        onDismiss={() => { setSuccess(''); setError(''); setLoadError('') }}
+      />
 
       {!loading && !loadError && selectedService && (
-        <form className="site-content-form" onSubmit={saveContent}>
+        <form id="service-page-content-form" className="site-content-form" onSubmit={saveContent}>
           <label htmlFor="service-page-select">Service page</label>
           <select
             id="service-page-select"
@@ -158,14 +164,21 @@ export function ServicePageContentEditor() {
               </button>
             </div>
           )}
-
-          {error && <p className="alert alert-danger" role="alert">{error}</p>}
-          {success && <p className="alert alert-success" role="status">{success}</p>}
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
         </form>
       )}
+      <div className="site-content-save">
+        <a className="btn btn-outline-dark" href="/services" target="_blank" rel="noopener noreferrer">
+          View page
+        </a>
+        <button
+          type="submit"
+          form="service-page-content-form"
+          className="btn btn-dark"
+          disabled={loading || Boolean(loadError) || saving || !selectedService}
+        >
+          {saving ? 'Saving…' : 'Save and publish'}
+        </button>
+      </div>
     </section>
   )
 }
