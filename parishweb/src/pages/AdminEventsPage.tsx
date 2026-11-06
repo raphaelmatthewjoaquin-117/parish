@@ -151,6 +151,7 @@ const initialForm: EventForm = {
 
 const formatServiceRequestStatus = (status: string) => ({
   PendingVerification: 'Pending verification',
+  PendingReview: 'Awaiting staff review',
   VoidedNoShow: 'No-show',
   ConflictVoided: 'Schedule conflict',
 }[status] || status.replace(/([a-z])([A-Z])/g, '$1 $2'))
@@ -640,6 +641,28 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         setError(err instanceof Error ? err.message : 'Unable to confirm request')
       })
       .finally(() => setSaving(false))
+  }
+
+  const downloadServiceDocument = async (requestId: number, fieldKey: string, fileName: string) => {
+    setError(null)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/service-requests/${requestId}/documents/${encodeURIComponent(fieldKey)}`, {
+        headers: { 'x-admin-token': adminToken },
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.message || 'Unable to download document.')
+      }
+
+      const url = window.URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      link.click()
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to download document.')
+    }
   }
 
   const deleteServiceRequest = (requestId: number) => {
@@ -1527,8 +1550,21 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                     <h4>Service Information</h4>
                     {Object.entries(selectedServiceRequest.details).map(([key, value]) => (
                       <div className="detail-row" key={key}>
-                        <label>{detailLabel(key)}:</label>
-                        <span>{detailValue(value)}</span>
+                        {value && typeof value === 'object' && 'fieldKey' in value && 'fileName' in value ? (
+                          <>
+                            <label>{'label' in value && typeof value.label === 'string' ? value.label : detailLabel(key)}:</label>
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() => void downloadServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))}
+                            >Download {String(value.fileName)}</button>
+                          </>
+                        ) : (
+                          <>
+                            <label>{detailLabel(key)}:</label>
+                            <span>{detailValue(value)}</span>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>

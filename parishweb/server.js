@@ -20,10 +20,12 @@ import {
   isNoShowEligible,
   isUnverifiedExpired,
   ALLOWED_REQUEST_STATUSES,
+  shouldDeleteServiceRequestDocuments,
   isAllowedArchiveUpload,
   isAllowedImageUpload,
   hasValidImageSignature,
   hasValidArchiveSignature,
+  validateBookingDocumentUploads,
   isValidGalleryContent,
   isValidNewsContent,
   toCsv,
@@ -175,10 +177,10 @@ async function voidNoShowAppointments() {
   const noShows = normalized.filter(row => isNoShowEligible(row, now));
   const expired = normalized.filter(row => isUnverifiedExpired(row, now));
   for (const row of noShows) {
-    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='VoidedNoShow', AttendanceStatus='NoShow', AttendanceMarkedAt=SYSUTCDATETIME(), VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='Confirmed'`);
+    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='VoidedNoShow', AttendanceStatus='NoShow', AttendanceMarkedAt=SYSUTCDATETIME(), VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='Confirmed'; IF EXISTS (SELECT 1 FROM dbo.ServiceRequest WHERE ServiceRequestId=@id AND Status='VoidedNoShow') DELETE FROM dbo.ServiceRequestDocument WHERE ServiceRequestId=@id;`);
   }
   for (const row of expired) {
-    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='PendingVerification'`);
+    await db.request().input('id', sql.Int, row.id).query(`UPDATE dbo.ServiceRequest SET Status='Voided', VoidedAt=SYSUTCDATETIME() WHERE ServiceRequestId=@id AND Status='PendingVerification'; IF EXISTS (SELECT 1 FROM dbo.ServiceRequest WHERE ServiceRequestId=@id AND Status='Voided') DELETE FROM dbo.ServiceRequestDocument WHERE ServiceRequestId=@id;`);
   }
   if (noShows.length || expired.length) {
     logger.info('Automatic appointment voiding completed', { noShows: noShows.length, expiredUnverified: expired.length });
@@ -1111,7 +1113,7 @@ async function getServicePolicy(pool, serviceId, scheduledDate) {
 }
 
 async function quotaCount(pool, serviceId, scheduledDate) {
-  const result = await pool.request().input('serviceId', sql.Int, serviceId).input('scheduledDate', sql.Date, scheduledDate).query(`SELECT COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND Status IN ('PendingVerification','Confirmed')`);
+  const result = await pool.request().input('serviceId', sql.Int, serviceId).input('scheduledDate', sql.Date, scheduledDate).query(`SELECT COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND Status IN ('PendingVerification','PendingReview','Confirmed')`);
   return Number(result.recordset[0]?.total || 0);
 }
 
@@ -1202,11 +1204,11 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
         SELECT ScheduledDate, ScheduledTime
         FROM dbo.ServiceRequest
         WHERE ServiceId = @serviceId
-          AND Status IN ('PendingVerification', 'Confirmed')
+          AND Status IN ('PendingVerification', 'PendingReview', 'Confirmed')
       `);
 
       if (policy.quota) {
-        const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','Confirmed') GROUP BY ScheduledDate`);
+        const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','PendingReview','Confirmed') GROUP BY ScheduledDate`);
         quotaFullDates = new Set(quotaResult.recordset.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
       }
 
@@ -1331,8 +1333,49 @@ app.get('/api/services/:serviceId/fields', async (req, res) => {
   }
 });
 
-app.post('/api/service-requests', async (req, res) => {
-  const { serviceId, firstName, lastName, email, mobileNumber, address, scheduledDate, scheduledTime, notes, details } = req.body;
+const serviceRequestDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 3, fields: 30, fieldSize: 64 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff'];
+    if (!allowedTypes.includes(file.mimetype)) return callback(new Error('Unsupported document type.'));
+    callback(null, true);
+  },
+});
+
+app.post('/api/service-requests', (req, res, next) => {
+  serviceRequestDocumentUpload.array('documents', 3)(req, res, error => {
+    if (error instanceof multer.MulterError) {
+      const messages = {
+        LIMIT_FILE_SIZE: 'Each document must be 10 MB or smaller.',
+        LIMIT_FILE_COUNT: 'You can upload at most three documents.',
+        LIMIT_UNEXPECTED_FILE: 'Only the configured document fields can be uploaded.',
+        LIMIT_FIELD_COUNT: 'Too many booking fields were submitted.',
+        LIMIT_FIELD_VALUE: 'A booking field is too long.',
+      };
+      const message = messages[error.code] || 'Unable to upload the selected documents.';
+      return res.status(400).json({ message });
+    }
+    if (error) return res.status(400).json({ message: 'Only PDF and image documents are accepted.' });
+    next();
+  });
+}, async (req, res) => {
+  const { serviceId, firstName, lastName, email, mobileNumber, address, scheduledDate, scheduledTime, notes } = req.body;
+  let details = req.body.details;
+  let documentKeys = req.body.documentKeys;
+
+  try {
+    if (typeof details === 'string') details = JSON.parse(details);
+    if (details === undefined) details = {};
+    if (!details || typeof details !== 'object' || Array.isArray(details)) {
+      return res.status(400).json({ message: 'Invalid service details.' });
+    }
+    if (typeof documentKeys === 'string') documentKeys = JSON.parse(documentKeys);
+    if (documentKeys === undefined) documentKeys = [];
+    if (!Array.isArray(documentKeys)) return res.status(400).json({ message: 'Invalid document fields.' });
+  } catch {
+    return res.status(400).json({ message: 'Invalid booking form data.' });
+  }
 
   if (!serviceId || !firstName || !lastName || !email || !scheduledDate || !scheduledTime) {
     return res.status(400).json({ message: 'Missing required booking fields.' });
@@ -1370,13 +1413,22 @@ app.post('/api/service-requests', async (req, res) => {
   try {
     const pool = getPool();
     const policy = await getServicePolicy(pool, numericServiceId, scheduledDate);
+    const documentFieldResult = await pool.request()
+      .input('serviceId', sql.Int, numericServiceId)
+      .query(`SELECT FieldKey, Label, FieldType, IsRequired, IsActive FROM dbo.ServiceFieldDefinition WHERE ServiceId=@serviceId AND FieldType='file' AND IsActive=1`);
+    const validatedDocuments = validateBookingDocumentUploads(
+      documentFieldResult.recordset,
+      documentKeys,
+      Array.isArray(req.files) ? req.files : [],
+    );
+    if (validatedDocuments.error) return res.status(400).json({ message: validatedDocuments.error });
     if (!policy.allowed) return res.status(400).json({ message: policy.message });
     const block = await findBlockedSlot(pool, { date: scheduledDate, time: scheduledTime, serviceId: numericServiceId });
     if (block) return res.status(409).json({ message: blockedMessage(block) });
     if (policy.quota && await quotaCount(pool, numericServiceId, scheduledDate) >= policy.quota) {
       return res.status(409).json({ message: `${policy.quotaLabel} bookings are limited to ${policy.quota} per day.` });
     }
-    const booked = await pool.request().input('serviceId', sql.Int, numericServiceId).input('scheduledDate', sql.Date, scheduledDate).input('scheduledTime', sql.VarChar(10), scheduledTime).query(`SELECT TOP 1 ServiceRequestId FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND ScheduledTime=@scheduledTime AND Status IN ('PendingVerification','Confirmed')`);
+    const booked = await pool.request().input('serviceId', sql.Int, numericServiceId).input('scheduledDate', sql.Date, scheduledDate).input('scheduledTime', sql.VarChar(10), scheduledTime).query(`SELECT TOP 1 ServiceRequestId FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND ScheduledDate=@scheduledDate AND ScheduledTime=@scheduledTime AND Status IN ('PendingVerification','PendingReview','Confirmed')`);
     if (booked.recordset.length) return res.status(409).json({ message: 'That appointment slot is already booked.' });
 
     // Step 1: Check if parishioner exists
@@ -1458,6 +1510,31 @@ app.post('/api/service-requests', async (req, res) => {
 
     const requestId = insertRequest.recordset[0].ServiceRequestId;
     try {
+      for (const document of validatedDocuments.documents) {
+        const fileName = path.basename(document.file.originalname)
+          .replace(/[^\w.-]/g, '_')
+          .slice(0, 255) || 'document';
+        await pool.request()
+          .input('requestId', sql.Int, requestId)
+          .input('fieldKey', sql.VarChar(100), document.key)
+          .input('label', sql.NVarChar(200), document.label)
+          .input('fileName', sql.NVarChar(255), fileName)
+          .input('contentType', sql.VarChar(100), document.file.mimetype)
+          .input('fileData', sql.VarBinary(sql.MAX), document.file.buffer)
+          .query(`
+            INSERT INTO dbo.ServiceRequestDocument
+              (ServiceRequestId, FieldKey, Label, OriginalFileName, ContentType, FileData)
+            VALUES (@requestId, @fieldKey, @label, @fileName, @contentType, @fileData)
+          `);
+      }
+    } catch (error) {
+      await pool.request()
+        .input('requestId', sql.Int, requestId)
+        .query('DELETE FROM dbo.ServiceRequestDocument WHERE ServiceRequestId=@requestId; DELETE FROM dbo.ServiceRequest WHERE ServiceRequestId=@requestId;');
+      throw error;
+    }
+
+    try {
       await saveSacramentDetails(pool, policy.name, requestId, details);
     } catch (error) {
       // Keep the appointment usable when an optional detail-table migration is stale.
@@ -1500,15 +1577,22 @@ app.get('/api/service-requests/verify', async (req, res) => {
     }
 
     const pool = getPool();
-    const request = pool.request().input('requestId', sql.Int, requestId);
-
-    await request.query(`
+    await pool.request().input('requestId', sql.Int, requestId).query(`
       UPDATE dbo.ServiceRequest
-      SET Status = N'Confirmed'
-      WHERE ServiceRequestId = @requestId
+      SET Status = N'PendingReview'
+      WHERE ServiceRequestId = @requestId AND Status = N'PendingVerification'
     `);
 
-    res.json({ message: 'Booking verified and confirmed.' });
+    const result = await pool.request().input('requestId', sql.Int, requestId)
+      .query('SELECT Status FROM dbo.ServiceRequest WHERE ServiceRequestId=@requestId');
+    const status = result.recordset[0]?.Status;
+    if (status === 'PendingReview') {
+      return res.json({ message: 'Email verified. Your request is awaiting parish staff review and confirmation.' });
+    }
+    if (status === 'Confirmed') {
+      return res.json({ message: 'Email verified. Your booking has been confirmed by parish staff.' });
+    }
+    res.status(409).json({ message: 'This request is no longer awaiting email verification.' });
   } catch (error) {
     console.error('Verification error:', error);
     res.status(500).json({ message: 'Unable to verify booking.' });
@@ -2198,7 +2282,9 @@ app.post('/api/admin/reset-password', authRateLimit, async (req, res) => {
 app.get('/api/admin/verify', requireAdmin, async (req, res) => {
   const staff = req.staff;
   let profile = { userName: '', email: '' };
-  if (staff.userId > 0) {
+  if (staff.userId === 0) {
+    profile.userName = process.env.LOCAL_ADMIN_USERNAME || '';
+  } else if (staff.userId > 0) {
     try {
       const result = await getPool().request().input('id', sql.Int, staff.userId)
         .query('SELECT UserName, EmailAddress FROM dbo.AspNetUsers WHERE UserId = @id');
@@ -2773,6 +2859,17 @@ app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest'
       ORDER BY sr.CreatedAt DESC
     `);
 
+    const documentResult = await pool.request().query(`
+      SELECT ServiceRequestId, FieldKey, Label, OriginalFileName
+      FROM dbo.ServiceRequestDocument
+    `);
+    const documentsByRequest = new Map();
+    for (const document of documentResult.recordset) {
+      const requestDocuments = documentsByRequest.get(document.ServiceRequestId) || [];
+      requestDocuments.push(document);
+      documentsByRequest.set(document.ServiceRequestId, requestDocuments);
+    }
+
     const requests = result.recordset.map(row => {
       const details = Object.fromEntries(Object.entries({
         childFirstName: row.ChildFirstName,
@@ -2821,6 +2918,14 @@ app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest'
         }
       }
 
+      for (const document of documentsByRequest.get(row.ServiceRequestId) || []) {
+        details[document.FieldKey] = {
+          fieldKey: document.FieldKey,
+          label: document.Label,
+          fileName: document.OriginalFileName,
+        };
+      }
+
       return {
         id: row.ServiceRequestId,
         parishionerId: row.ParishionerId,
@@ -2844,6 +2949,38 @@ app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest'
   } catch (error) {
     console.error('Service requests lookup error:', error);
     res.status(500).json({ message: 'Unable to load service requests.' });
+  }
+});
+
+app.get('/api/admin/service-requests/:requestId/documents/:fieldKey', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ message: 'Invalid service request ID.' });
+  }
+
+  try {
+    const result = await getPool().request()
+      .input('requestId', sql.Int, requestId)
+      .input('fieldKey', sql.VarChar(100), req.params.fieldKey)
+      .query(`
+        SELECT OriginalFileName, ContentType, FileData
+        FROM dbo.ServiceRequestDocument
+        WHERE ServiceRequestId=@requestId AND FieldKey=@fieldKey
+      `);
+    const document = result.recordset[0];
+    if (!document) return res.status(404).json({ message: 'Document not found.' });
+
+    const fileName = path.basename(document.OriginalFileName).replace(/[^\w.-]/g, '_') || 'document';
+    res.set({
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Type': document.ContentType,
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(document.FileData);
+  } catch (error) {
+    logError(error, { context: 'downloadServiceRequestDocument', requestId });
+    res.status(500).json({ message: 'Unable to download the document.' });
   }
 });
 
@@ -2874,10 +3011,13 @@ app.get('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 
 });
 
 app.post('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
-  const { serviceId, key, label, type, options, required, sortOrder } = req.body;
+  const { serviceId, key, label, type, options, required, sortOrder, active } = req.body;
   const numericServiceId = Number(serviceId);
   if (!Number.isInteger(numericServiceId) || numericServiceId <= 0 || !key || !label) {
     return res.status(400).json({ message: 'Service, field key, and label are required.' });
+  }
+  if (!['text', 'textarea', 'date', 'number', 'select', 'file'].includes(String(type || 'text'))) {
+    return res.status(400).json({ message: 'Unsupported booking field type.' });
   }
   try {
     const result = await getPool().request()
@@ -2888,10 +3028,11 @@ app.post('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest',
       .input('options', sql.NVarChar(sql.MAX), Array.isArray(options) ? JSON.stringify(options) : null)
       .input('required', sql.Bit, !!required)
       .input('sortOrder', sql.Int, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0)
+      .input('active', sql.Bit, active === undefined ? 1 : (active ? 1 : 0))
       .query(`
-        INSERT INTO dbo.ServiceFieldDefinition (ServiceId, FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder)
+        INSERT INTO dbo.ServiceFieldDefinition (ServiceId, FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder, IsActive)
         OUTPUT INSERTED.FieldDefinitionId
-        VALUES (@serviceId, @key, @label, @type, @options, @required, @sortOrder)
+        VALUES (@serviceId, @key, @label, @type, @options, @required, @sortOrder, @active)
       `);
     res.status(201).json({ id: result.recordset[0].FieldDefinitionId });
   } catch (error) {
@@ -2905,6 +3046,9 @@ app.put('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPries
   const { label, type, options, required, sortOrder, active } = req.body;
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ message: 'Invalid field definition ID.' });
+  }
+  if (!['text', 'textarea', 'date', 'number', 'select', 'file'].includes(String(type || 'text'))) {
+    return res.status(400).json({ message: 'Unsupported booking field type.' });
   }
   try {
     await getPool().request()
@@ -2957,23 +3101,44 @@ app.put('/api/admin/service-requests/:requestId', requireAdmin, requireRole(['Pa
     const request = pool.request()
       .input('requestId', sql.Int, requestId)
       .input('status', sql.NVarChar(200), String(status));
+    const documentCleanup = shouldDeleteServiceRequestDocuments(status)
+      ? 'DELETE FROM dbo.ServiceRequestDocument WHERE ServiceRequestId = @requestId;'
+      : '';
 
     if (adminNotes) {
       const timestamp = new Date().toISOString();
       request.input('adminNote', sql.NVarChar(sql.MAX), '\n\n[ADMIN NOTE] ' + timestamp + ': ' + String(adminNotes));
       await request.query(`
-        UPDATE dbo.ServiceRequest
-        SET Status = @status,
-            Notes = CONCAT(ISNULL(Notes, N''), @adminNote),
-            VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
-        WHERE ServiceRequestId = @requestId
+        BEGIN TRY
+          BEGIN TRANSACTION;
+          UPDATE dbo.ServiceRequest
+          SET Status = @status,
+              Notes = CONCAT(ISNULL(Notes, N''), @adminNote),
+              VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+          WHERE ServiceRequestId = @requestId;
+          ${documentCleanup}
+          COMMIT TRANSACTION;
+        END TRY
+        BEGIN CATCH
+          IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+          THROW;
+        END CATCH;
       `);
     } else {
       await request.query(`
-        UPDATE dbo.ServiceRequest
-        SET Status = @status,
-            VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
-        WHERE ServiceRequestId = @requestId
+        BEGIN TRY
+          BEGIN TRANSACTION;
+          UPDATE dbo.ServiceRequest
+          SET Status = @status,
+              VoidedAt = CASE WHEN @status IN ('Voided','VoidedNoShow','Cancelled') THEN SYSUTCDATETIME() ELSE VoidedAt END
+          WHERE ServiceRequestId = @requestId;
+          ${documentCleanup}
+          COMMIT TRANSACTION;
+        END TRY
+        BEGIN CATCH
+          IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+          THROW;
+        END CATCH;
       `);
     }
 
@@ -3161,7 +3326,7 @@ app.get('/api/admin/operations/status', requireAdmin, requireRole(['Admin']), as
   try {
     const result = await getPool().request().query(`
       SELECT
-        (SELECT COUNT(*) FROM dbo.ServiceRequest WHERE Status = 'PendingVerification') AS PendingVerifications,
+        (SELECT COUNT(*) FROM dbo.ServiceRequest WHERE Status IN ('PendingVerification', 'PendingReview')) AS PendingVerifications,
         (SELECT COUNT(*) FROM dbo.ServiceRequest WHERE Status = 'Confirmed') AS ConfirmedRequests,
         (SELECT COUNT(*) FROM dbo.ServiceRequest WHERE Status IN ('Voided', 'VoidedNoShow')) AS VoidedRequests,
         (SELECT COUNT(*) FROM dbo.Parishioners) AS TotalParishioners,

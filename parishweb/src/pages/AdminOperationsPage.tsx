@@ -28,7 +28,7 @@ type ServiceOption = { id: number; name: string }
 type ServiceField = { id: number; serviceId: number; serviceName: string; key: string; label: string; type: string; options?: string[]; required: boolean; sortOrder: number; active: boolean }
 
 const emptySchedule = { title: '', date: '', time: '', location: '', priestUsername: '', notes: '', status: 'Scheduled' }
-const emptyServiceField = { serviceId: '', key: '', label: '', type: 'text', required: false, sortOrder: 0 }
+const emptyServiceField = { serviceId: '', key: '', label: '', type: 'text', required: false, sortOrder: 0, active: true }
 const formatFinanceAmount = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount)
 
 type AdminOperationsPageProps = {
@@ -269,9 +269,10 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
         type: serviceFieldForm.type,
         required: serviceFieldForm.required,
         sortOrder: Number(serviceFieldForm.sortOrder) || 0,
+        active: serviceFieldForm.active,
       }
       if (editingFieldId) {
-        await apiClient.admin.updateServiceField(editingFieldId, { ...payload, active: true }, token)
+        await apiClient.admin.updateServiceField(editingFieldId, payload, token)
         setMessage('Field updated.')
       } else {
         await apiClient.admin.createServiceField(payload, token)
@@ -285,7 +286,7 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
 
   const editServiceField = (field: ServiceField) => {
     setEditingFieldId(field.id)
-    setServiceFieldForm({ serviceId: String(field.serviceId), key: field.key, label: field.label, type: field.type, required: field.required, sortOrder: field.sortOrder })
+    setServiceFieldForm({ serviceId: String(field.serviceId), key: field.key, label: field.label, type: field.type, required: field.required, sortOrder: field.sortOrder, active: field.active })
   }
 
   const toggleServiceFieldActive = (field: ServiceField) => run(async () => {
@@ -567,9 +568,12 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
           <option value="textarea">Text area</option>
           <option value="date">Date</option>
           <option value="number">Number</option>
+          <option value="file">Document upload (PDF or image)</option>
         </select></label>
         <label>Sort order<input type="number" value={serviceFieldForm.sortOrder} onChange={event => setServiceFieldForm({ ...serviceFieldForm, sortOrder: Number(event.target.value) })} /></label>
         <label className="checkbox-label"><input type="checkbox" checked={serviceFieldForm.required} onChange={event => setServiceFieldForm({ ...serviceFieldForm, required: event.target.checked })} /> Required</label>
+        <label className="checkbox-label"><input type="checkbox" checked={serviceFieldForm.active} onChange={event => setServiceFieldForm({ ...serviceFieldForm, active: event.target.checked })} /> Show this field on the client booking form</label>
+        {serviceFieldForm.type === 'file' && <p>Clients can upload PDF or image files up to 10 MB.</p>}
         <button type="submit">{editingFieldId ? 'Save changes' : 'Add field'}</button>
         {editingFieldId && <button type="button" onClick={() => { setEditingFieldId(null); setServiceFieldForm(emptyServiceField) }}>Cancel edit</button>}
       </form>

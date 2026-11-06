@@ -31,8 +31,10 @@ describe('parish email templates', () => {
       verificationLink: 'https://example.test/verify?token=abc',
     })
 
-    expect(email.subject).toBe('Please confirm your service booking')
+    expect(email.subject).toBe('Verify your service request email')
     expect(email.html).toContain('href="https://example.test/verify?token=abc"')
+    expect(email.html).toContain('Parish staff will review your request')
+    expect(email.html).toContain('Verify My Email')
     expect(email.html).toContain('&lt;script&gt;bad&lt;/script&gt;')
     expect(email.html).not.toContain('<script>bad</script>')
   })

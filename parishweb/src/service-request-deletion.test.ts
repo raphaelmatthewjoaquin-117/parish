@@ -26,13 +26,14 @@ describe('deleteServiceRequest', () => {
     const statement = vi.mocked(transaction.request.mock.results[0].value.query).mock.calls[0][0]
     const deletionOrder = [
       'dbo.VerificationTokens',
+      'dbo.ServiceRequestDocument',
       'dbo.BaptismRequestDetail',
       'dbo.MarriageRequestDetail',
       'dbo.ConfirmationRequestDetail',
       'dbo.FuneralRequestDetail',
       'dbo.HouseBlessingRequestDetail',
       'dbo.ServiceRequest',
-    ].map(table => statement.indexOf(`DELETE FROM ${table}`))
+    ].map(table => statement.indexOf(`DELETE FROM ${table} `))
 
     expect(deletionOrder.every(index => index >= 0)).toBe(true)
     expect(deletionOrder).toEqual([...deletionOrder].sort((a, b) => a - b))

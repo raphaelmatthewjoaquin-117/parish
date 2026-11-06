@@ -62,10 +62,16 @@ export function financeActionForStatus(status: string): string;
 export function isNoShowEligible(request: ServiceRequestLike, now?: Date, graceHours?: number): boolean;
 export function isUnverifiedExpired(request: ServiceRequestLike, now?: Date, expireHours?: number): boolean;
 export const ALLOWED_REQUEST_STATUSES: string[];
+export function shouldDeleteServiceRequestDocuments(status: string): boolean;
 export function isAllowedArchiveUpload(originalName: string, mimeType: string, size: number): boolean;
 export function isAllowedImageUpload(originalName: string, mimeType: string, size: number): boolean;
 export function hasValidImageSignature(mimeType: string, bytes: Uint8Array): boolean;
 export function hasValidArchiveSignature(mimeType: string, bytes: unknown): boolean;
+export function validateBookingDocumentUploads(
+  fieldDefinitions: unknown,
+  keys: unknown,
+  files: unknown,
+): { error?: string; documents?: Array<{ key: string; label: string; file: unknown }> };
 export function isValidGalleryContent(content: unknown): boolean;
 export function isValidNewsContent(content: unknown): boolean;
 export function toCsv(rows: Array<Record<string, unknown>>, columns: CsvColumn[]): string;

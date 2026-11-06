@@ -153,14 +153,30 @@ export const apiClient = {
       scheduledDate: string;
       scheduledTime: string;
       notes?: string;
+      details?: Record<string, string>;
+      documents?: Array<{ key: string; file: File }>;
     }) {
+      const body = new FormData();
+      body.append('serviceId', String(data.serviceId));
+      body.append('firstName', data.firstName);
+      body.append('lastName', data.lastName);
+      body.append('email', data.email);
+      body.append('mobileNumber', data.mobileNumber || '');
+      body.append('address', data.address || '');
+      body.append('scheduledDate', data.scheduledDate);
+      body.append('scheduledTime', data.scheduledTime);
+      body.append('notes', data.notes || '');
+      body.append('details', JSON.stringify(data.details || {}));
+      body.append('documentKeys', JSON.stringify((data.documents || []).map(document => document.key)));
+      data.documents?.forEach(document => body.append('documents', document.file));
       return apiRequest<{
         requestId: number;
         status: string;
         verificationLink: string;
+        message?: string;
       }>('/api/service-requests', {
         method: 'POST',
-        body: data,
+        body,
       });
     },
 

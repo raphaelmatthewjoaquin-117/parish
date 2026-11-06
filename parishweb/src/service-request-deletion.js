@@ -9,6 +9,7 @@ export async function deleteServiceRequest(transaction, requestId) {
       .input('requestId', sql.Int, requestId)
       .query(`
         DELETE FROM dbo.VerificationTokens WHERE ServiceRequestId = @requestId;
+        DELETE FROM dbo.ServiceRequestDocument WHERE ServiceRequestId = @requestId;
         DELETE FROM dbo.BaptismRequestDetail WHERE ServiceRequestId = @requestId;
         DELETE FROM dbo.MarriageRequestDetail WHERE ServiceRequestId = @requestId;
         DELETE FROM dbo.ConfirmationRequestDetail WHERE ServiceRequestId = @requestId;

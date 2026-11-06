@@ -26,5 +26,6 @@ describe('UnifiedAdminPage local preview login', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(await screen.findByText(/Local preview sign-in only/)).toBeTruthy()
+    expect(await screen.findByText('Santo Domingo Parish · localadmin')).toBeTruthy()
   })
 })

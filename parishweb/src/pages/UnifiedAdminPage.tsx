@@ -157,7 +157,7 @@ export function UnifiedAdminPage() {
           ))}
         </nav>
         <div className="admin-sidebar-footer">
-          <small>Saint John Parish{staffRole ? ` · ${staffRole}` : ''}</small>
+          <small>Santo Domingo Parish{profile.userName ? ` · ${profile.userName}` : ''}</small>
           <button
             className="admin-sidebar-signout-btn"
             type="button"

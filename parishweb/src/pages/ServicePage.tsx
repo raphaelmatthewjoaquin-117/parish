@@ -90,6 +90,7 @@ export default function ServicePage(): React.JSX.Element {
   const [bookingServiceId, setBookingServiceId] = useState<string>('');
   const [fieldDefs, setFieldDefs] = useState<FieldDef[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [fieldFiles, setFieldFiles] = useState<Record<string, File>>({});
 
   // Certificate-specific state
   const [certType, setCertType] = useState<string>('Baptism');
@@ -206,6 +207,7 @@ export default function ServicePage(): React.JSX.Element {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setFieldValues({});
+      setFieldFiles({});
       if (!bookingService?.dbId) { setFieldDefs([]); return; }
       fetch(`${API_URL}/api/services/${bookingService.dbId}/fields`)
         .then(response => response.ok ? response.json() : Promise.reject())
@@ -279,30 +281,30 @@ export default function ServicePage(): React.JSX.Element {
     if (phoneDigits.length < 10 || phoneDigits.length > 15) { setBookingMessage('Please provide a valid phone number (10-15 digits).'); return; }
     if (!firstName.trim() || !lastName.trim()) { setBookingMessage('First and Last name are required.'); return; }
     if (notes && notes.length > 500) { setBookingMessage('Notes cannot exceed 500 characters.'); return; }
-    const missingField = fieldDefs.find(f => f.required && !fieldValues[f.key]?.trim());
+    const missingField = fieldDefs.find(f => f.type !== 'file' && f.required && !fieldValues[f.key]?.trim());
     if (missingField) { setBookingMessage(`Please fill in "${missingField.label}".`); return; }
+    const missingDocument = fieldDefs.find(f => f.type === 'file' && f.required && !fieldFiles[f.key]);
+    if (missingDocument) { setBookingMessage(`Please upload "${missingDocument.label}".`); return; }
     try {
-      const response = await fetch(`${API_URL}/api/service-requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          serviceId: bookingService.dbId,
-          firstName: sanitizeText(firstName),
-          lastName: sanitizeText(lastName),
-          email,
-          mobileNumber,
-          address: sanitizeText(address),
-          scheduledDate: selectedSlot.split(' ')[0],
-          scheduledTime: selectedSlot.split(' ')[1],
-          notes: sanitizeText(notes),
-          details: fieldValues,
-        }),
+      const data = await apiClient.serviceRequests.create({
+        serviceId: bookingService.dbId,
+        firstName: sanitizeText(firstName),
+        lastName: sanitizeText(lastName),
+        email,
+        mobileNumber,
+        address: sanitizeText(address),
+        scheduledDate: selectedSlot.split(' ')[0],
+        scheduledTime: selectedSlot.split(' ')[1],
+        notes: sanitizeText(notes),
+        details: fieldValues,
+        documents: fieldDefs
+          .filter(field => field.type === 'file' && fieldFiles[field.key])
+          .map(field => ({ key: field.key, file: fieldFiles[field.key] })),
       });
-      const data = await response.json();
-      if (data.requestId) setBookingMessage('Booking created.');
+      if (data.requestId) setBookingMessage('Request submitted. Check your email to verify your address; parish staff will review it before confirming.');
       else setBookingMessage(data.message || 'Unable to book appointment.');
-    } catch {
-      setBookingMessage('Unable to submit booking. Please try again later.');
+    } catch (reason) {
+      setBookingMessage(reason instanceof Error ? reason.message : 'Unable to submit booking. Please try again later.');
     }
   };
 
@@ -766,9 +768,34 @@ export default function ServicePage(): React.JSX.Element {
                     <h4>{bookingService?.name} details</h4>
                     {fieldDefs.map(field => (
                       <label key={field.key}>
-                        <span className="label-text">{field.label}{field.required ? '' : <span className="cert-optional"> (optional)</span>}</span>
+                        <span className="label-text">
+                          {field.label}
+                          {field.type === 'file'
+                            ? <span className="cert-optional">{field.required ? ' (required)' : ' (optional)'}</span>
+                            : !field.required && <span className="cert-optional"> (optional)</span>}
+                        </span>
                         <div className="field-wrap">
-                          {field.type === 'textarea' ? (
+                          {field.type === 'file' ? (
+                            <>
+                              <input
+                                className="form-control"
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/jpeg,image/png,image/tiff"
+                                required={field.required}
+                                aria-describedby={`${field.key}-file-help`}
+                                onChange={event => {
+                                  const file = event.target.files?.[0];
+                                  setFieldFiles(previous => {
+                                    const next = { ...previous };
+                                    if (file) next[field.key] = file;
+                                    else delete next[field.key];
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <small id={`${field.key}-file-help`}>Upload a PDF or image (maximum 10 MB).</small>
+                            </>
+                          ) : field.type === 'textarea' ? (
                             <textarea className="form-control" value={fieldValues[field.key] || ''} required={field.required} onChange={e => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))} />
                           ) : field.type === 'select' ? (
                             <select className="form-select" value={fieldValues[field.key] || ''} required={field.required} onChange={e => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))}>
@@ -803,7 +830,7 @@ export default function ServicePage(): React.JSX.Element {
                       !lastName.trim() ||
                       !email.trim() ||
                       !mobileNumber.trim() ||
-                      fieldDefs.some(f => f.required && !fieldValues[f.key]?.trim())
+                      fieldDefs.some(f => f.required && (f.type === 'file' ? !fieldFiles[f.key] : !fieldValues[f.key]?.trim()))
                     }
                   >Book appointment</button>
                 </div>

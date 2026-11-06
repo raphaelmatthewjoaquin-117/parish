@@ -158,7 +158,12 @@ export function isUnverifiedExpired(request, now = new Date(), expireHours = 48)
 }
 
 /** Whitelisted service-request statuses staff may set. */
-export const ALLOWED_REQUEST_STATUSES = ['PendingVerification', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided', 'VoidedNoShow'];
+export const ALLOWED_REQUEST_STATUSES = ['PendingVerification', 'PendingReview', 'Confirmed', 'Completed', 'Rejected', 'Cancelled', 'Voided', 'VoidedNoShow'];
+
+/** Documents are no longer needed once a booking request reaches a terminal state. */
+export function shouldDeleteServiceRequestDocuments(status) {
+  return ['Completed', 'Rejected', 'Cancelled', 'Voided', 'VoidedNoShow', 'ConflictVoided'].includes(String(status));
+}
 
 /** Validate sacramental archive uploads before they reach disk. */
 export function isAllowedArchiveUpload(originalName, mimeType, size) {
@@ -226,6 +231,42 @@ export function hasValidArchiveSignature(mimeType, bytes) {
         || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a));
   }
   return false;
+}
+
+/** Match client uploads to visible document fields and enforce their requirements. */
+export function validateBookingDocumentUploads(fieldDefinitions, keys, files) {
+  if (!Array.isArray(keys) || !Array.isArray(files) || keys.length !== files.length) {
+    return { error: 'Unable to match the uploaded documents to their fields.' };
+  }
+
+  const definitions = new Map(
+    (Array.isArray(fieldDefinitions) ? fieldDefinitions : [])
+      .filter(field => field.FieldType === 'file' && Boolean(field.IsActive))
+      .map(field => [String(field.FieldKey), field]),
+  );
+  const seen = new Set();
+  const documents = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const key = String(keys[index] || '');
+    const definition = definitions.get(key);
+    if (!definition || seen.has(key)) {
+      return { error: 'A document field is not available for this service.' };
+    }
+
+    const file = files[index];
+    if (!isAllowedArchiveUpload(file.originalname, file.mimetype, file.size)
+      || !hasValidArchiveSignature(file.mimetype, file.buffer)) {
+      return { error: 'Each document must be a valid PDF or image file.' };
+    }
+
+    seen.add(key);
+    documents.push({ key, label: definition.Label, file });
+  }
+
+  const missing = [...definitions.values()].find(field => Boolean(field.IsRequired) && !seen.has(String(field.FieldKey)));
+  if (missing) return { error: `Please upload "${missing.Label}".` };
+  return { documents };
 }
 
 /** Validate the saved gallery shape while accepting legacy single-photo items. */

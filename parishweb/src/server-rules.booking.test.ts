@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeBlockedSlotInput, officeHourSlotTimes } from '../server-rules.js'
+import { ALLOWED_REQUEST_STATUSES, normalizeBlockedSlotInput, officeHourSlotTimes, shouldDeleteServiceRequestDocuments } from '../server-rules.js'
 
 describe('officeHourSlotTimes', () => {
   it('returns hourly appointment starts from 9 AM through 4 PM Tuesday to Saturday', () => {
@@ -7,6 +7,21 @@ describe('officeHourSlotTimes', () => {
       '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00',
     ])
     expect(officeHourSlotTimes('2026-11-07')).toHaveLength(8)
+  })
+
+  describe('service request review statuses', () => {
+    it('allows staff to move email-verified requests into the review queue', () => {
+      expect(ALLOWED_REQUEST_STATUSES).toContain('PendingReview')
+    })
+
+    it('retains documents until a request reaches a terminal status', () => {
+      expect(shouldDeleteServiceRequestDocuments('PendingReview')).toBe(false)
+      expect(shouldDeleteServiceRequestDocuments('Confirmed')).toBe(false)
+      expect(shouldDeleteServiceRequestDocuments('Completed')).toBe(true)
+      expect(shouldDeleteServiceRequestDocuments('Rejected')).toBe(true)
+      expect(shouldDeleteServiceRequestDocuments('Cancelled')).toBe(true)
+      expect(shouldDeleteServiceRequestDocuments('VoidedNoShow')).toBe(true)
+    })
   })
 
   describe('normalizeBlockedSlotInput', () => {

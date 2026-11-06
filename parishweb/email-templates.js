@@ -57,9 +57,9 @@ export function certificateRequestEmail({ firstName, certificateType, referenceC
 
 export function serviceBookingEmail({ firstName, requestId, scheduledDate, scheduledTime, notes, verificationLink }) {
   const noteRow = notes ? [['Notes', escapeHtml(notes)]] : []
-  const html = emailLayout('Confirm Your Service Booking', `
+  const html = emailLayout('Verify Your Service Request', `
     <p>Dear ${escapeHtml(firstName)},</p>
-    <p>We received your service booking. It is pending verification; please review the details and confirm it using the button below.</p>
+    <p>We received your service request. Please verify your email address using the button below. Parish staff will review your request and contact you to confirm the booking.</p>
     ${detailsCard([
       ['Booking ID', escapeHtml(requestId)],
       ['Date', escapeHtml(scheduledDate)],
@@ -67,11 +67,11 @@ export function serviceBookingEmail({ firstName, requestId, scheduledDate, sched
       ...noteRow,
     ])}
     <p style="text-align: center; margin: 28px 0;">
-      <a href="${escapeHtml(verificationLink)}" style="display: inline-block; background-color: #8b1a1a; color: #ffffff; text-decoration: none; font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; padding: 14px 30px; border-radius: 3px;">Confirm My Booking</a>
+      <a href="${escapeHtml(verificationLink)}" style="display: inline-block; background-color: #8b1a1a; color: #ffffff; text-decoration: none; font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; padding: 14px 30px; border-radius: 3px;">Verify My Email</a>
     </p>
-    <p>Your booking will not be finalized until it is verified. If you did not make this booking, you can ignore this email.</p>
+    <p>Your request is not confirmed until parish staff reviews it. If you did not make this request, you can ignore this email.</p>
   `)
-  return { subject: 'Please confirm your service booking', html }
+  return { subject: 'Verify your service request email', html }
 }
 
 export function passwordResetEmail({ userName, resetLink }) {
