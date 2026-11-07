@@ -96,7 +96,7 @@ describe('AdminEventsPage service request status filter', () => {
     expect(within(dialog).getByRole('button', { name: 'Delete Request' })).toBeTruthy()
   })
 
-  it('previews an uploaded service document in the detail modal', async () => {
+  it('opens a layered preview modal with a download action for service documents', async () => {
     vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('about:blank')
     const revokeObjectURL = vi.spyOn(window.URL, 'revokeObjectURL')
     render(<AdminEventsPage initialTab="service-requests" embedded />)
@@ -104,14 +104,25 @@ describe('AdminEventsPage service request status filter', () => {
 
     fireEvent.click(within(requestTable).getByRole('button', { name: 'View request from Taylor Pending' }))
     const dialog = screen.getByRole('dialog', { name: 'Service Request Detail' })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'View birth-certificate.pdf' }))
+    const viewDocumentButton = within(dialog).getByRole('button', { name: 'View birth-certificate.pdf' })
+    fireEvent.click(viewDocumentButton)
 
-    expect(await within(dialog).findByTitle('Preview birth-certificate.pdf')).toBeTruthy()
+    const previewDialog = await screen.findByRole('dialog', { name: 'Preview birth-certificate.pdf' })
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(dialog.getAttribute('aria-hidden')).toBe('true')
+    expect(document.activeElement).toBe(within(previewDialog).getByRole('button', { name: 'Close preview' }))
+    expect(within(previewDialog).getByTitle('Preview birth-certificate.pdf')).toBeTruthy()
+    const downloadLink = within(previewDialog).getByRole('link', { name: 'Download' }) as HTMLAnchorElement
+    expect(downloadLink.download).toBe('birth-certificate.pdf')
+    expect(downloadLink.href).toBe('about:blank')
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/admin/service-requests/12/documents/birthCertificate'),
       expect.objectContaining({ headers: { 'x-admin-token': 'staff-token' } }),
     )
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close preview of birth-certificate.pdf' }))
+    fireEvent.click(within(previewDialog).getByRole('button', { name: 'Close preview' }))
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: 'Service Request Detail' })).toBeTruthy()
+    expect(document.activeElement).toBe(viewDocumentButton)
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('about:blank'))
   })
 

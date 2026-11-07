@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -179,6 +179,8 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   const [serviceRequests, setServiceRequests] = useState<ServiceRequestItem[]>([])
   const [selectedServiceRequest, setSelectedServiceRequest] = useState<ServiceRequestItem | null>(null)
   const [serviceDocumentPreview, setServiceDocumentPreview] = useState<{ fileName: string; url: string } | null>(null)
+  const serviceDocumentPreviewCloseRef = useRef<HTMLButtonElement>(null)
+  const serviceDocumentPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [serviceRequestsLoading, setServiceRequestsLoading] = useState(false)
   const [serviceRequestStatusFilter, setServiceRequestStatusFilter] = useState('All')
   const [adminNotes, setAdminNotes] = useState('')
@@ -221,6 +223,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   }
   useEffect(() => () => {
     if (serviceDocumentPreview) window.URL.revokeObjectURL(serviceDocumentPreview.url)
+  }, [serviceDocumentPreview])
+  useEffect(() => {
+    if (serviceDocumentPreview) serviceDocumentPreviewCloseRef.current?.focus()
+    else serviceDocumentPreviewTriggerRef.current?.focus()
   }, [serviceDocumentPreview])
 
   const [adminToken, setAdminToken] = useState<string>(() => {
@@ -1520,7 +1526,13 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
 
           {selectedServiceRequest && createPortal(
             <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) closeServiceRequestDetails() }}>
-            <div className="admin-service-detail service-request-modal-card" role="dialog" aria-modal="true" aria-labelledby="service-request-detail-title">
+            <div
+              className="admin-service-detail service-request-modal-card"
+              role="dialog"
+              aria-modal="true"
+              aria-hidden={Boolean(serviceDocumentPreview)}
+              aria-labelledby="service-request-detail-title"
+            >
               <div className="detail-header">
                 <h3 id="service-request-detail-title">Service Request Detail</h3>
                 <button
@@ -1586,7 +1598,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                               <button
                                 type="button"
                                 className="secondary-btn"
-                                onClick={() => void viewServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))}
+                                onClick={event => {
+                                  serviceDocumentPreviewTriggerRef.current = event.currentTarget
+                                  void viewServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))
+                                }}
                               >View {String(value.fileName)}</button>
                               <button
                                 type="button"
@@ -1603,25 +1618,6 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                         )}
                       </div>
                     ))}
-                    {serviceDocumentPreview && (
-                      <div className="service-document-preview">
-                        <div className="service-document-preview-header">
-                          <strong>{serviceDocumentPreview.fileName}</strong>
-                          <button
-                            type="button"
-                            className="secondary-btn"
-                            onClick={() => setServiceDocumentPreview(null)}
-                            aria-label={`Close preview of ${serviceDocumentPreview.fileName}`}
-                          >
-                            Close preview
-                          </button>
-                        </div>
-                        <iframe
-                          src={serviceDocumentPreview.url}
-                          title={`Preview ${serviceDocumentPreview.fileName}`}
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
                 <div className="detail-request">
@@ -1665,6 +1661,37 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 </div>
               </div>
             </div>
+            </div>,
+            document.body,
+          )}
+          {serviceDocumentPreview && createPortal(
+            <div
+              className="service-request-modal-overlay service-document-preview-overlay"
+              onClick={event => {
+                if (event.target === event.currentTarget) setServiceDocumentPreview(null)
+              }}
+            >
+              <section className="service-document-preview" role="dialog" aria-modal="true" aria-labelledby="service-document-preview-title">
+                <div className="detail-header service-document-preview-header">
+                  <h3 id="service-document-preview-title">Preview {serviceDocumentPreview.fileName}</h3>
+                  <div className="service-document-preview-actions">
+                    <a className="secondary-btn" href={serviceDocumentPreview.url} download={serviceDocumentPreview.fileName}>Download</a>
+                    <button
+                      ref={serviceDocumentPreviewCloseRef}
+                      type="button"
+                      className="close-btn"
+                      onClick={() => setServiceDocumentPreview(null)}
+                      aria-label="Close preview"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <iframe
+                  src={serviceDocumentPreview.url}
+                  title={`Preview ${serviceDocumentPreview.fileName}`}
+                />
+              </section>
             </div>,
             document.body,
           )}
