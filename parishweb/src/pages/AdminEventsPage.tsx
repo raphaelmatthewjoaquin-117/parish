@@ -1477,26 +1477,6 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                             >
                               View
                             </button>
-                            {request.status !== 'Confirmed' && (
-                              <button
-                                type="button"
-                                onClick={() => confirmServiceRequest(request.id)}
-                                disabled={saving}
-                                className="primary-btn"
-                                aria-label={`Confirm request from ${request.firstName} ${request.lastName}`}
-                              >
-                                Confirm
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => deleteServiceRequest(request.id)}
-                              disabled={saving}
-                              className="danger-btn"
-                              aria-label={`Delete request from ${request.firstName} ${request.lastName}`}
-                            >
-                              Delete
-                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1509,9 +1489,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
 
           {selectedServiceRequest && createPortal(
             <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setSelectedServiceRequest(null) }}>
-            <div className="admin-service-detail service-request-modal-card">
+            <div className="admin-service-detail service-request-modal-card" role="dialog" aria-modal="true" aria-labelledby="service-request-detail-title">
               <div className="detail-header">
-                <h3>Service Request Detail</h3>
+                <h3 id="service-request-detail-title">Service Request Detail</h3>
                 <button
                   type="button"
                   onClick={() => setSelectedServiceRequest(null)}

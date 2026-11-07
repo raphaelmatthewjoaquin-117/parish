@@ -66,6 +66,18 @@ describe('AdminEventsPage service request status filter', () => {
     expect(within(requestTable).getByText('#11')).toBeTruthy()
     expect(within(requestTable).getByText('Alex Confirmed')).toBeTruthy()
     expect(within(requestTable).getByRole('button', { name: 'View request from Alex Confirmed' })).toBeTruthy()
+    expect(within(requestTable).queryAllByRole('button', { name: /Confirm request|Delete request/ })).toHaveLength(0)
+  })
+
+  it('keeps confirm and delete actions in the service request detail modal', async () => {
+    render(<AdminEventsPage initialTab="service-requests" embedded />)
+    const requestTable = await screen.findByRole('table', { name: 'Service requests' })
+
+    fireEvent.click(within(requestTable).getByRole('button', { name: 'View request from Taylor Pending' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Service Request Detail' })
+    expect(within(dialog).getByRole('button', { name: 'Confirm Booking' })).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Delete Request' })).toBeTruthy()
   })
 
   it('shows only requests matching the selected status', async () => {

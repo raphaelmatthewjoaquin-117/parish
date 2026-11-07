@@ -114,9 +114,7 @@ body {
   left: 0;
   right: 0;
   z-index: 1030;
-  background: rgba(218, 145, 0, 0.96);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: #da9100;
   border-bottom: 3px solid var(--Gold);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   transition: background 0.3s ease, box-shadow 0.3s ease;
