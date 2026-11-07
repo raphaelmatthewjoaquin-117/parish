@@ -27,6 +27,7 @@ type StatisticalReport = {
 type ServiceOption = { id: number; name: string }
 type ServiceField = { id: number; serviceId: number; serviceName: string; key: string; label: string; type: string; options?: string[]; required: boolean; sortOrder: number; active: boolean }
 
+const defaultServiceFieldKeys = new Set(['birthCertificate', 'baptismNoRecord', 'permissionLetter'])
 const emptySchedule = { title: '', date: '', time: '', location: '', priestUsername: '', notes: '', status: 'Scheduled' }
 const emptyServiceField = { serviceId: '', key: '', label: '', type: 'text', required: false, sortOrder: 0, active: true }
 const formatFinanceAmount = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount)
@@ -577,7 +578,7 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
         <button type="submit">{editingFieldId ? 'Save changes' : 'Add field'}</button>
         {editingFieldId && <button type="button" onClick={() => { setEditingFieldId(null); setServiceFieldForm(emptyServiceField) }}>Cancel edit</button>}
       </form>
-      <div className="operations-list scrollable">
+      <div className="operations-list scrollable service-fields-list">
         <h2>Sacrament booking fields</h2>
         {serviceOptions.map(service => {
           const fieldsForService = serviceFields.filter(f => f.serviceId === service.id)
@@ -586,9 +587,11 @@ export function AdminOperationsPage({ initialTab = 'schedule', embedded = false,
             <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '1.1rem', padding: '.5rem 0' }}>{service.name} <small>({fieldsForService.length} fields)</small></summary>
             {fieldsForService.map(field => <article key={field.id} style={{ opacity: field.active ? 1 : 0.5 }}>
               <div><strong>{field.label}</strong><span> · {field.type}{field.required ? ' · required' : ''}</span><small>key: {field.key} · order {field.sortOrder} · {field.active ? 'visible' : 'hidden'}</small></div>
-              <button type="button" onClick={() => editServiceField(field)}>Edit</button>
-              <button type="button" onClick={() => toggleServiceFieldActive(field)}>{field.active ? 'Hide' : 'Show'}</button>
-              <button type="button" onClick={() => deleteServiceField(field.id)}>Delete</button>
+              <div className="service-field-actions">
+                <button type="button" onClick={() => editServiceField(field)}>Edit</button>
+                <button type="button" onClick={() => toggleServiceFieldActive(field)}>{field.active ? 'Hide' : 'Show'}</button>
+                {!defaultServiceFieldKeys.has(field.key) && <button type="button" onClick={() => deleteServiceField(field.id)}>Delete</button>}
+              </div>
             </article>)}
           </details>
         })}

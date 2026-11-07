@@ -551,6 +551,38 @@
   color: #155c40;
 }
 
+.booking-result-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1055;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(20, 25, 30, 0.58);
+}
+
+.booking-result-modal {
+  width: min(100%, 30rem);
+  padding: 1.75rem;
+  border-radius: .9rem;
+  background: #fff;
+  color: #1e2a36;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.2);
+}
+
+.booking-result-modal h2 {
+  margin: 0 0 1rem;
+  font-size: 1.35rem;
+}
+
+.booking-result-modal p {
+  line-height: 1.55;
+}
+
+.booking-result-modal .btn {
+  margin-top: .5rem;
+}
+
 .restriction-message {
   border: 1px solid rgba(184, 123, 15, 0.3);
   background: rgba(255, 193, 7, 0.13);

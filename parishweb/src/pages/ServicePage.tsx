@@ -87,7 +87,18 @@ export default function ServicePage(): React.JSX.Element {
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [bookingMessage, setBookingMessage] = useState<string | null>(null);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [bookingResult, setBookingResult] = useState<{
+    success: boolean;
+    message: string;
+    requestId?: number;
+    status?: string;
+  } | null>(null);
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([]);
+  const bookingSubmittingRef = useRef(false);
+  const bookingFirstNameRef = useRef<HTMLInputElement>(null);
+  const bookingResultCloseRef = useRef<HTMLButtonElement>(null);
+  const bookingResultWasOpenRef = useRef(false);
 
   // The booking widget picks its own sacrament via a dropdown; the tabs above are info-only previews.
   const [bookingServiceId, setBookingServiceId] = useState<string>('');
@@ -130,6 +141,12 @@ export default function ServicePage(): React.JSX.Element {
     : undefined;
   const bookableServices = services.filter(s => s.id !== 'certificate');
   const bookingService = bookableServices.find(s => s.id === bookingServiceId);
+
+  useEffect(() => {
+    if (bookingResult) bookingResultCloseRef.current?.focus();
+    else if (bookingResultWasOpenRef.current) bookingFirstNameRef.current?.focus();
+    bookingResultWasOpenRef.current = Boolean(bookingResult);
+  }, [bookingResult]);
 
   useEffect(() => {
     apiClient.siteContent.get<ServicePageContent>('services')
@@ -295,6 +312,7 @@ export default function ServicePage(): React.JSX.Element {
 
   const submitBooking = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (bookingSubmittingRef.current) return;
     setBookingMessage(null);
     if (!servicesLoaded) { setBookingMessage('Unable to create booking: services not loaded. Please refresh the page.'); return; }
     if (!bookingService) { setBookingMessage('Please choose a sacrament to book.'); return; }
@@ -308,6 +326,9 @@ export default function ServicePage(): React.JSX.Element {
     if (missingField) { setBookingMessage(`Please fill in "${missingField.label}".`); return; }
     const missingDocument = fieldDefs.find(f => f.type === 'file' && f.required && !fieldFiles[f.key]);
     if (missingDocument) { setBookingMessage(`Please upload "${missingDocument.label}".`); return; }
+    const form = event.currentTarget;
+    bookingSubmittingRef.current = true;
+    setBookingSubmitting(true);
     try {
       const data = await apiClient.serviceRequests.create({
         serviceId: bookingService.dbId,
@@ -324,10 +345,36 @@ export default function ServicePage(): React.JSX.Element {
           .filter(field => field.type === 'file' && fieldFiles[field.key])
           .map(field => ({ key: field.key, file: fieldFiles[field.key] })),
       });
-      if (data.requestId) setBookingMessage('Request submitted. Check your email to verify your address; parish staff will review it before confirming.');
-      else setBookingMessage(data.message || 'Unable to book appointment.');
+      if (data.requestId) {
+        form.reset();
+        form.querySelectorAll<HTMLInputElement>('input[type="file"]').forEach(input => { input.value = ''; });
+        setFirstName('');
+        setLastName('');
+        setEmail('');
+        setMobileNumber('');
+        setAddress('');
+        setNotes('');
+        setSelectedDate('');
+        setSelectedSlot('');
+        setFieldValues({});
+        setFieldFiles({});
+        setBookingResult({
+          success: true,
+          requestId: data.requestId,
+          status: data.status,
+          message: data.message || 'Check your email to verify your address. Parish staff will review your request before confirming.',
+        });
+      } else {
+        setBookingResult({ success: false, message: data.message || 'Unable to book appointment.' });
+      }
     } catch (reason) {
-      setBookingMessage(reason instanceof Error ? reason.message : 'Unable to submit booking. Please try again later.');
+      setBookingResult({
+        success: false,
+        message: reason instanceof Error ? reason.message : 'Unable to submit booking. Please try again later.',
+      });
+    } finally {
+      bookingSubmittingRef.current = false;
+      setBookingSubmitting(false);
     }
   };
 
@@ -749,7 +796,7 @@ export default function ServicePage(): React.JSX.Element {
                   <label>
                     <span className="label-text">First name</span>
                     <div className="field-wrap">
-                      <input className="form-control" value={firstName} placeholder="First name" onChange={e => setFirstName(e.target.value)} required />
+                      <input ref={bookingFirstNameRef} className="form-control" value={firstName} placeholder="First name" onChange={e => setFirstName(e.target.value)} required />
                     </div>
                   </label>
                   <label>
@@ -843,6 +890,7 @@ export default function ServicePage(): React.JSX.Element {
                     className="btn btn-dark"
                     type="submit"
                     disabled={
+                      bookingSubmitting ||
                       !selectedSlot ||
                       !servicesLoaded ||
                       !firstName.trim() ||
@@ -851,14 +899,50 @@ export default function ServicePage(): React.JSX.Element {
                       !mobileNumber.trim() ||
                       fieldDefs.some(f => f.required && (f.type === 'file' ? !fieldFiles[f.key] : !fieldValues[f.key]?.trim()))
                     }
-                  >Book appointment</button>
+                  >{bookingSubmitting ? 'Submitting…' : 'Book appointment'}</button>
                 </div>
-                {bookingMessage && <div className="booking-message">{bookingMessage}</div>}
+                {bookingMessage && <div className="booking-message" role="alert">{bookingMessage}</div>}
               </div>
 
             </form>
           </div>
-
+        </div>
+      )}
+      {bookingResult && (
+        <div
+          className="booking-result-backdrop"
+          onKeyDown={event => {
+            if (event.key === 'Escape') setBookingResult(null);
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              bookingResultCloseRef.current?.focus();
+            }
+          }}
+        >
+          <div
+            className="booking-result-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="booking-result-title"
+            aria-describedby="booking-result-message"
+          >
+            <h2 id="booking-result-title">
+              {bookingResult.success ? 'Booking request submitted' : 'Booking could not be completed'}
+            </h2>
+            <p id="booking-result-message">{bookingResult.message}</p>
+            {bookingResult.requestId && <p><strong>Request number:</strong> {bookingResult.requestId}</p>}
+            {bookingResult.status && (
+              <p><strong>Status:</strong> {bookingResult.status.replace(/([a-z])([A-Z])/g, '$1 $2')}</p>
+            )}
+            <button
+              ref={bookingResultCloseRef}
+              type="button"
+              className="btn btn-dark"
+              onClick={() => setBookingResult(null)}
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

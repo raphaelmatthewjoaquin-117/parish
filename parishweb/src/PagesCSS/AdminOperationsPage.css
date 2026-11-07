@@ -236,6 +236,14 @@
 .operations-list article strong { color: var(--op-ink); font-weight: 600; line-height: 1.2 }
 .operations-list article span,
 .operations-list article small { color: var(--op-muted); font-size: .82rem; line-height: 1.35 }
+.service-fields-list article > div:first-child { flex: 1 1 auto; min-width: 0 }
+.service-fields-list article .service-field-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-left: auto;
+}
 
 .schedule-list article {
   display: grid;
