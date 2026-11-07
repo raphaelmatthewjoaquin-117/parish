@@ -87,7 +87,7 @@
   display: grid;
   grid-template-columns: 1fr 260px;
   gap: 1.25rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .calendar-col {
@@ -100,6 +100,7 @@
   display: flex;
   flex-direction: column;
   gap: .75rem;
+  min-height: 0;
   border: 1px solid rgba(111, 78, 55, 0.12);
   border-radius: 1.25rem;
   padding: 1rem;
@@ -112,6 +113,10 @@
   display: flex;
   flex-direction: column;
   gap: .6rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .timeslots-heading {
@@ -294,6 +299,15 @@
 .date-picker-days {
   overflow: visible;
   max-height: none;
+}
+
+.calendar-col .date-picker-days {
+  grid-auto-rows: clamp(2.75rem, 6vh, 3.5rem);
+}
+
+.calendar-col .date-picker-day,
+.calendar-col .date-picker-empty {
+  aspect-ratio: auto;
 }
 
 .date-picker-day,
@@ -828,7 +842,8 @@
   }
 
   .slots--vertical {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    flex: initial;
+    max-height: 22rem;
   }
 
   .booking-form-body {
