@@ -63,6 +63,8 @@ describe('AdminEventsPage service request status filter', () => {
     expect(within(requestTable).getByRole('columnheader', { name: 'Status' })).toBeTruthy()
     expect(within(requestTable).getByRole('columnheader', { name: 'Actions' })).toBeTruthy()
     expect(within(requestTable).getByText('Baptism')).toBeTruthy()
+    expect(within(requestTable).getByText('Baptism').className).toContain('service-baptism')
+    expect(within(requestTable).getByText('Marriage').className).toContain('service-marriage')
     expect(within(requestTable).getByText('#11')).toBeTruthy()
     expect(within(requestTable).getByText('Alex Confirmed')).toBeTruthy()
     expect(within(requestTable).getByRole('button', { name: 'View request from Alex Confirmed' })).toBeTruthy()

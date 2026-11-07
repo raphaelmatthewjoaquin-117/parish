@@ -1452,7 +1452,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                     {visibleServiceRequests.map(request => (
                       <tr key={request.id} className={`status-${request.status.toLowerCase()}`}>
                         <td data-label="Service">
-                          <span className="service-request-type">{request.serviceName}</span>
+                          <span className={`service-request-type service-${request.serviceName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>{request.serviceName}</span>
                         </td>
                         <td className="service-request-id" data-label="Request ID">#{request.id}</td>
                         <td className="service-request-name" data-label="Name">{request.firstName} {request.lastName}</td>

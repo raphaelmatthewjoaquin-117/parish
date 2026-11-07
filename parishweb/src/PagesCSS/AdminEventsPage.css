@@ -1023,6 +1023,7 @@
 .service-request-table-scroll::-webkit-scrollbar-thumb { background: #c9941f; border-radius: 99px }
 .service-request-table {
   width: 100%;
+  min-width: 1024px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -1036,13 +1037,13 @@
 .service-request-table th:nth-child(3),
 .service-request-table td:nth-child(3) { width: 17% }
 .service-request-table th:nth-child(4),
-.service-request-table td:nth-child(4) { width: 17% }
+.service-request-table td:nth-child(4) { width: 16% }
 .service-request-table th:nth-child(5),
-.service-request-table td:nth-child(5) { width: 20% }
+.service-request-table td:nth-child(5) { width: 18% }
 .service-request-table th:nth-child(6),
-.service-request-table td:nth-child(6) { width: 10% }
+.service-request-table td:nth-child(6) { width: 17% }
 .service-request-table th:nth-child(7),
-.service-request-table td:nth-child(7) { width: 18% }
+.service-request-table td:nth-child(7) { width: 14% }
 .service-request-table th {
   position: sticky;
   top: 0;
@@ -1079,6 +1080,13 @@
   font-weight: 700;
   white-space: nowrap;
 }
+.service-request-type.service-baptism { background: #e3f0f5; color: #1d4d5c; border-color: rgba(29,77,92,.2) }
+.service-request-type.service-confirmation { background: #f5eedb; color: #6b4a09; border-color: rgba(107,74,9,.2) }
+.service-request-type.service-first-communion { background: #eaf2df; color: #49632b; border-color: rgba(73,99,43,.2) }
+.service-request-type.service-marriage { background: #f5e4ec; color: #6e2340; border-color: rgba(110,35,64,.2) }
+.service-request-type.service-funeral-mass { background: #ebebeb; color: #3e4842; border-color: rgba(62,72,66,.2) }
+.service-request-type.service-house-blessing { background: #e8eaf6; color: #394580; border-color: rgba(57,69,128,.2) }
+.service-request-type.service-certificate { background: #fce8e2; color: #813b2d; border-color: rgba(129,59,45,.2) }
 .service-request-name {
   color: #202a23;
   font-weight: 700;
@@ -1095,7 +1103,7 @@
 .service-request-actions .admin-buttons {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
   width: auto;
   gap: .35rem;
 }
