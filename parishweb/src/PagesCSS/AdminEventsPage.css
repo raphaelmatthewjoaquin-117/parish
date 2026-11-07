@@ -1023,12 +1023,26 @@
 .service-request-table-scroll::-webkit-scrollbar-thumb { background: #c9941f; border-radius: 99px }
 .service-request-table {
   width: 100%;
-  min-width: 1180px;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   color: #39463d;
   font-size: .88rem;
 }
+.service-request-table th:nth-child(1),
+.service-request-table td:nth-child(1) { width: 10% }
+.service-request-table th:nth-child(2),
+.service-request-table td:nth-child(2) { width: 8% }
+.service-request-table th:nth-child(3),
+.service-request-table td:nth-child(3) { width: 17% }
+.service-request-table th:nth-child(4),
+.service-request-table td:nth-child(4) { width: 17% }
+.service-request-table th:nth-child(5),
+.service-request-table td:nth-child(5) { width: 20% }
+.service-request-table th:nth-child(6),
+.service-request-table td:nth-child(6) { width: 10% }
+.service-request-table th:nth-child(7),
+.service-request-table td:nth-child(7) { width: 18% }
 .service-request-table th {
   position: sticky;
   top: 0;
@@ -1045,9 +1059,10 @@
   white-space: nowrap;
 }
 .service-request-table td {
-  padding: .85rem 1rem;
+  padding: .75rem .65rem;
   border-bottom: 1px solid #eceeea;
   vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 .service-request-table tbody tr:nth-child(even) { background: #faf9f6 }
 .service-request-table tbody tr:hover { background: #f5f2eb }
@@ -1065,7 +1080,6 @@
   white-space: nowrap;
 }
 .service-request-name {
-  min-width: 200px;
   color: #202a23;
   font-weight: 700;
 }
@@ -1075,21 +1089,20 @@
   white-space: nowrap;
 }
 .service-request-email {
-  min-width: 210px;
   overflow-wrap: anywhere;
 }
-.service-request-actions { white-space: nowrap }
+.service-request-actions { white-space: normal }
 .service-request-actions .admin-buttons {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: flex-start;
   width: auto;
-  gap: .45rem;
+  gap: .35rem;
 }
 .service-request-actions .admin-buttons button {
-  flex: 0 0 auto;
-  min-width: 76px;
-  padding: .55rem .7rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: .45rem .55rem;
 }
 .service-request-state {
   display: grid;
@@ -1117,6 +1130,84 @@
   .service-requests-list .request-count {
     align-self: flex-start;
     white-space: normal;
+  }
+  .service-request-table-scroll {
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+  .service-request-table,
+  .service-request-table tbody,
+  .service-request-table tr,
+  .service-request-table td {
+    display: block;
+    width: 100%;
+  }
+  .service-request-table {
+    table-layout: auto;
+    min-width: 0;
+  }
+  .service-request-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .service-request-table tbody {
+    display: grid;
+    gap: .65rem;
+  }
+  .service-request-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: .55rem .75rem;
+    padding: .8rem;
+    border: 1px solid #e7e9e4;
+    border-radius: 9px;
+    background: #fff;
+  }
+  .service-request-table tbody tr:nth-child(even) { background: #faf9f6 }
+  .service-request-table tbody tr:hover { background: #f5f2eb }
+  .service-request-table td {
+    display: grid;
+    align-content: start;
+    gap: .2rem;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .service-request-table td::before {
+    content: attr(data-label);
+    color: #718078;
+    font-size: .64rem;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .service-request-table .service-request-name,
+  .service-request-table .service-request-email,
+  .service-request-table .service-request-actions {
+    grid-column: 1 / -1;
+  }
+  .service-request-table td:nth-child(1) { grid-row: 2; grid-column: 1 }
+  .service-request-table td:nth-child(2) { grid-row: 2; grid-column: 2 }
+  .service-request-table .service-request-name { grid-row: 1 }
+  .service-request-table td:nth-child(4) { grid-row: 3; grid-column: 1 }
+  .service-request-table td:nth-child(6) { grid-row: 3; grid-column: 2 }
+  .service-request-table .service-request-email { grid-row: 4 }
+  .service-request-table .service-request-actions { grid-row: 5 }
+  .service-request-table .service-request-actions .admin-buttons {
+    width: 100%;
+  }
+  .service-request-table .service-request-actions .admin-buttons button {
+    flex: 1 1 auto;
   }
 }
 

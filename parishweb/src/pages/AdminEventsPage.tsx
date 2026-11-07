@@ -1451,23 +1451,23 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   <tbody>
                     {visibleServiceRequests.map(request => (
                       <tr key={request.id} className={`status-${request.status.toLowerCase()}`}>
-                        <td>
+                        <td data-label="Service">
                           <span className="service-request-type">{request.serviceName}</span>
                         </td>
-                        <td className="service-request-id">#{request.id}</td>
-                        <td className="service-request-name">{request.firstName} {request.lastName}</td>
-                        <td>
+                        <td className="service-request-id" data-label="Request ID">#{request.id}</td>
+                        <td className="service-request-name" data-label="Name">{request.firstName} {request.lastName}</td>
+                        <td data-label="Scheduled">
                           <time dateTime={request.scheduledDate}>
                             {new Date(request.scheduledDate).toLocaleDateString()} at {request.scheduledTime}
                           </time>
                         </td>
-                        <td className="service-request-email">{request.email}</td>
-                        <td>
+                        <td className="service-request-email" data-label="Email">{request.email}</td>
+                        <td data-label="Status">
                           <span className={`badge status-badge ${request.status === 'Confirmed' ? 'confirmed' : request.status === 'Rejected' ? 'rejected' : 'pending'}`}>
                             {formatServiceRequestStatus(request.status)}
                           </span>
                         </td>
-                        <td className="service-request-actions">
+                        <td className="service-request-actions" data-label="Actions">
                           <div className="admin-buttons">
                             <button
                               type="button"
