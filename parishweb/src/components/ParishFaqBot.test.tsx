@@ -16,6 +16,7 @@ describe('ParishFaqBot', () => {
     renderBot()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open parish FAQ chat' }))
+    expect(screen.queryByText(/Automated answers from a short list/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'How do I book a parish service?' }))
 
     expect(screen.getByText(/Open Services, choose the service you need/)).toBeTruthy()
@@ -33,6 +34,23 @@ describe('ParishFaqBot', () => {
 
     expect(screen.getByText(/I couldn’t find that in the parish FAQs/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Contact Us' }).getAttribute('href')).toBe('/contact')
+    expect(screen.getByRole('button', { name: 'Ask a different question' })).toBeTruthy()
+  })
+
+  it('lets visitors ask another question after an unmatched question', () => {
+    renderBot()
+    fireEvent.click(screen.getByRole('button', { name: 'Open parish FAQ chat' }))
+
+    const input = screen.getByRole('textbox', { name: 'Ask a question' })
+    fireEvent.change(input, { target: { value: 'What is the weather tomorrow?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send question' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask a different question' }))
+
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: 'How do I send a prayer request?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send question' }))
+
+    expect(screen.getByText(/Open Prayer Requests and use the form/)).toBeTruthy()
   })
 
   it('shows the chat in Tagalog when selected', () => {

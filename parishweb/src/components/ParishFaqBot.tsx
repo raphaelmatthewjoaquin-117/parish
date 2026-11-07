@@ -16,7 +16,6 @@ const copy = {
     open: 'Open parish FAQ chat',
     close: 'Close parish FAQ chat',
     title: 'Parish FAQ',
-    description: 'Automated answers from a short list of parish FAQs. Messages stay temporarily in this browser session; they are not sent to an AI service or saved for later.',
     greeting: 'Hello! I can help with service bookings, certificates, request tracking, prayer requests, and parish contact information.',
     suggestions: 'Suggested questions',
     input: 'Ask a question',
@@ -27,12 +26,12 @@ const copy = {
     launcher: 'Ask',
     notFound: 'I couldn’t find that in the parish FAQs. Please check the Contact Us page for help.',
     contact: 'Contact Us',
+    askDifferent: 'Ask a different question',
   },
   tl: {
     open: 'Buksan ang chat ng parokya',
     close: 'Isara ang chat ng parokya',
     title: 'Mga FAQ ng Parokya',
-    description: 'Awtomatikong sagot mula sa mga FAQ ng parokya. Pansamantalang nananatili sa browser session na ito ang mga mensahe; hindi ipinapadala sa AI service o sine-save para sa susunod.',
     greeting: 'Kumusta! Makakatulong ako tungkol sa pag-book ng serbisyo, mga sertipiko, pagsubaybay ng kahilingan, kahilingan sa panalangin, at pakikipag-ugnayan sa parokya.',
     suggestions: 'Mga mungkahing tanong',
     input: 'Magtanong',
@@ -43,6 +42,7 @@ const copy = {
     launcher: 'Tulong',
     notFound: 'Hindi ko makita ang sagot sa mga FAQ ng parokya. Tingnan ang pahina ng Makipag-ugnayan para sa tulong.',
     contact: 'Makipag-ugnayan',
+    askDifferent: 'Magtanong ng iba',
   },
 } satisfies Record<Language, Record<string, string>>
 
@@ -109,7 +109,6 @@ export function ParishFaqBot({ language }: { language: Language }) {
           <header className="parish-faq-header">
             <div>
               <h2>{text.title}</h2>
-              <p>{text.description}</p>
             </div>
             <button
               className="parish-faq-close"
@@ -148,7 +147,19 @@ export function ParishFaqBot({ language }: { language: Language }) {
                   <Link to={message.faq.href}>{message.faq.link[language]}</Link>
                 )}
                 {message.from === 'bot' && !message.faq && (
-                  <Link to="/contact">{text.contact}</Link>
+                  <>
+                    <Link to="/contact">{text.contact}</Link>
+                    <button
+                      className="parish-faq-ask-different"
+                      type="button"
+                      onClick={() => {
+                        setQuestion('')
+                        inputRef.current?.focus()
+                      }}
+                    >
+                      {text.askDifferent}
+                    </button>
+                  </>
                 )}
               </article>
             ))}
