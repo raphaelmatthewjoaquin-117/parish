@@ -2,6 +2,7 @@ import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import './App.css'
 import { apiClient } from './api/client'
+import { ParishFaqBot } from './components/ParishFaqBot'
 import { defaultFooterContent, type FooterContent } from './content/siteContent'
 import logo from './images/SDP logo.png'
 import { observeTranslations, type Language } from './i18n'
@@ -226,6 +227,7 @@ function AppShell() {
           </div>
         </footer>
       )}
+      {!isAdminPage && <ParishFaqBot language={language} />}
     </div>
   )
 }
