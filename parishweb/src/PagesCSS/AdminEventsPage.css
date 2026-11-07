@@ -1809,6 +1809,39 @@
   border: 1px solid rgba(30,40,34,.14);
 }
 .service-request-modal-card .detail-actions .secondary-btn:hover { background: #e8e2d8 }
+.service-document-actions {
+  display: flex;
+  gap: .5rem;
+  min-width: 0;
+}
+.service-document-actions .secondary-btn {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.service-document-preview {
+  grid-column: 1 / -1;
+  margin: .75rem 0 1rem;
+}
+.service-document-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: .5rem;
+}
+.service-document-preview-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.service-document-preview iframe {
+  display: block;
+  width: 100%;
+  height: min(60vh, 36rem);
+  border: 1px solid rgba(30,40,34,.14);
+  border-radius: 8px;
+  background: #f8f5ef;
+}
 
 /* ── Sacramental record form modal ── */
 .sacramental-record-form {

@@ -178,6 +178,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   // Service Request states
   const [serviceRequests, setServiceRequests] = useState<ServiceRequestItem[]>([])
   const [selectedServiceRequest, setSelectedServiceRequest] = useState<ServiceRequestItem | null>(null)
+  const [serviceDocumentPreview, setServiceDocumentPreview] = useState<{ fileName: string; url: string } | null>(null)
   const [serviceRequestsLoading, setServiceRequestsLoading] = useState(false)
   const [serviceRequestStatusFilter, setServiceRequestStatusFilter] = useState('All')
   const [adminNotes, setAdminNotes] = useState('')
@@ -218,6 +219,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     setErrorState(nextError)
     setMessage(null)
   }
+  useEffect(() => () => {
+    if (serviceDocumentPreview) window.URL.revokeObjectURL(serviceDocumentPreview.url)
+  }, [serviceDocumentPreview])
+
   const [adminToken, setAdminToken] = useState<string>(() => {
     if (typeof window === 'undefined') return ''
     return window.localStorage.getItem('adminToken') ?? ''
@@ -634,7 +639,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           throw new Error('Unable to confirm request')
         }
         loadServiceRequests()
-        setSelectedServiceRequest(null)
+        closeServiceRequestDetails()
         setAdminNotes('')
       })
       .catch((err: unknown) => {
@@ -665,6 +670,29 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     }
   }
 
+  const viewServiceDocument = async (requestId: number, fieldKey: string, fileName: string) => {
+    setError(null)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/service-requests/${requestId}/documents/${encodeURIComponent(fieldKey)}`, {
+        headers: { 'x-admin-token': adminToken },
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.message || 'Unable to view document.')
+      }
+
+      const url = window.URL.createObjectURL(await response.blob())
+      setServiceDocumentPreview({ fileName, url })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to view document.')
+    }
+  }
+
+  const closeServiceRequestDetails = () => {
+    setSelectedServiceRequest(null)
+    setServiceDocumentPreview(null)
+  }
+
   const deleteServiceRequest = (requestId: number) => {
     if (!window.confirm('Delete this service request? This cannot be undone.')) return
 
@@ -680,7 +708,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           throw new Error('Unable to delete service request')
         }
         loadServiceRequests()
-        setSelectedServiceRequest(null)
+        closeServiceRequestDetails()
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Unable to delete service request')
@@ -1471,7 +1499,10 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                           <div className="admin-buttons">
                             <button
                               type="button"
-                              onClick={() => setSelectedServiceRequest(request)}
+                              onClick={() => {
+                                setServiceDocumentPreview(null)
+                                setSelectedServiceRequest(request)
+                              }}
                               className="secondary-btn"
                               aria-label={`View request from ${request.firstName} ${request.lastName}`}
                             >
@@ -1488,13 +1519,13 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           </div>
 
           {selectedServiceRequest && createPortal(
-            <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setSelectedServiceRequest(null) }}>
+            <div className="service-request-modal-overlay" onClick={e => { if (e.target === e.currentTarget) closeServiceRequestDetails() }}>
             <div className="admin-service-detail service-request-modal-card" role="dialog" aria-modal="true" aria-labelledby="service-request-detail-title">
               <div className="detail-header">
                 <h3 id="service-request-detail-title">Service Request Detail</h3>
                 <button
                   type="button"
-                  onClick={() => setSelectedServiceRequest(null)}
+                  onClick={closeServiceRequestDetails}
                   className="close-btn"
                 >
                   ✕
@@ -1551,11 +1582,18 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                         {value && typeof value === 'object' && 'fieldKey' in value && 'fileName' in value ? (
                           <>
                             <label>{'label' in value && typeof value.label === 'string' ? value.label : detailLabel(key)}:</label>
-                            <button
-                              type="button"
-                              className="secondary-btn"
-                              onClick={() => void downloadServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))}
-                            >Download {String(value.fileName)}</button>
+                            <div className="service-document-actions">
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => void viewServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))}
+                              >View {String(value.fileName)}</button>
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => void downloadServiceDocument(selectedServiceRequest.id, String(value.fieldKey), String(value.fileName))}
+                              >Download {String(value.fileName)}</button>
+                            </div>
                           </>
                         ) : (
                           <>
@@ -1565,6 +1603,25 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                         )}
                       </div>
                     ))}
+                    {serviceDocumentPreview && (
+                      <div className="service-document-preview">
+                        <div className="service-document-preview-header">
+                          <strong>{serviceDocumentPreview.fileName}</strong>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => setServiceDocumentPreview(null)}
+                            aria-label={`Close preview of ${serviceDocumentPreview.fileName}`}
+                          >
+                            Close preview
+                          </button>
+                        </div>
+                        <iframe
+                          src={serviceDocumentPreview.url}
+                          title={`Preview ${serviceDocumentPreview.fileName}`}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="detail-request">
@@ -1582,7 +1639,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                       type="button"
                       onClick={() => {
                         confirmServiceRequest(selectedServiceRequest.id)
-                        setSelectedServiceRequest(null)
+                        closeServiceRequestDetails()
                       }}
                       disabled={saving}
                       className="primary-btn"
@@ -1600,7 +1657,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedServiceRequest(null)}
+                    onClick={closeServiceRequestDetails}
                     className="secondary-btn"
                   >
                     Close

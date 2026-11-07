@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminEventsPage } from './AdminEventsPage'
 
 const requests = [
@@ -34,14 +34,28 @@ const requests = [
     status: 'PendingVerification',
     notes: '',
     createdAt: '2026-10-02T08:00:00.000Z',
+    details: {
+      birthCertificate: {
+        fieldKey: 'birthCertificate',
+        fileName: 'birth-certificate.pdf',
+        label: 'Birth certificate',
+      },
+    },
   },
 ]
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('AdminEventsPage service request status filter', () => {
   beforeEach(() => {
     window.localStorage.setItem('adminToken', 'staff-token')
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/documents/')) {
+        return { ok: true, blob: async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' }) } as Response
+      }
       const body = url.endsWith('/api/admin/verify')
         ? { user: { role: 'Secretary' } }
         : requests
@@ -80,6 +94,25 @@ describe('AdminEventsPage service request status filter', () => {
     const dialog = screen.getByRole('dialog', { name: 'Service Request Detail' })
     expect(within(dialog).getByRole('button', { name: 'Confirm Booking' })).toBeTruthy()
     expect(within(dialog).getByRole('button', { name: 'Delete Request' })).toBeTruthy()
+  })
+
+  it('previews an uploaded service document in the detail modal', async () => {
+    vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('about:blank')
+    const revokeObjectURL = vi.spyOn(window.URL, 'revokeObjectURL')
+    render(<AdminEventsPage initialTab="service-requests" embedded />)
+    const requestTable = await screen.findByRole('table', { name: 'Service requests' })
+
+    fireEvent.click(within(requestTable).getByRole('button', { name: 'View request from Taylor Pending' }))
+    const dialog = screen.getByRole('dialog', { name: 'Service Request Detail' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'View birth-certificate.pdf' }))
+
+    expect(await within(dialog).findByTitle('Preview birth-certificate.pdf')).toBeTruthy()
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/admin/service-requests/12/documents/birthCertificate'),
+      expect.objectContaining({ headers: { 'x-admin-token': 'staff-token' } }),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close preview of birth-certificate.pdf' }))
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('about:blank'))
   })
 
   it('shows only requests matching the selected status', async () => {
