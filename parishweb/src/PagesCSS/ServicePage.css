@@ -554,33 +554,89 @@
 .booking-result-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1055;
+  z-index: 2100;
   display: grid;
   place-items: center;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
   padding: 1rem;
-  background: rgba(20, 25, 30, 0.58);
+  background: rgba(0, 0, 0, 0.72);
 }
 
 .booking-result-modal {
   width: min(100%, 30rem);
-  padding: 1.75rem;
-  border-radius: .9rem;
-  background: #fff;
-  color: #1e2a36;
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.2);
+  max-height: 100%;
+  overflow-y: auto;
+  border: 1px solid rgba(111, 78, 55, 0.24);
+  border-radius: 1rem;
+  background: #fffdf7;
+  color: #35251c;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.35);
+}
+
+.booking-result-heading {
+  position: relative;
+  padding: 2rem 1.75rem 1.5rem;
+  border-bottom: 1px solid rgba(111, 78, 55, 0.16);
+  background: linear-gradient(135deg, #fff7e6, #f4e7cd);
+  text-align: center;
+}
+
+.booking-result-mark {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto .9rem;
+  place-items: center;
+  border: 2px solid #b8891e;
+  border-radius: 50%;
+  background: #fffdf7;
+  color: #6f4e37;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.booking-result-brand {
+  margin: 0 0 .4rem;
+  color: #76552d;
+  font-size: .75rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
 }
 
 .booking-result-modal h2 {
-  margin: 0 0 1rem;
-  font-size: 1.35rem;
+  margin: 0;
+  color: #35251c;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.55rem;
+  font-weight: 700;
 }
 
-.booking-result-modal p {
+.booking-result-content {
+  padding: 1.5rem 1.75rem 1.75rem;
+}
+
+.booking-result-content p {
+  margin-bottom: 1.25rem;
+  color: #51443b;
   line-height: 1.55;
 }
 
 .booking-result-modal .btn {
-  margin-top: .5rem;
+  min-width: 7rem;
+  border: 1px solid #6f4e37;
+  background: #6f4e37;
+  color: #fff;
+  font-weight: 700;
+}
+
+.booking-result-modal .btn:hover,
+.booking-result-modal .btn:focus-visible {
+  border-color: #493526;
+  background: #493526;
 }
 
 .restriction-message {

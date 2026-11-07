@@ -1,5 +1,6 @@
 // ServicePage.tsx
 import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import '../PagesCSS/ServicePage.css';
 import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client';
 import type { ServicePageContent } from '../content/siteContent';
@@ -91,8 +92,6 @@ export default function ServicePage(): React.JSX.Element {
   const [bookingResult, setBookingResult] = useState<{
     success: boolean;
     message: string;
-    requestId?: number;
-    status?: string;
   } | null>(null);
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([]);
   const bookingSubmittingRef = useRef(false);
@@ -146,6 +145,13 @@ export default function ServicePage(): React.JSX.Element {
     if (bookingResult) bookingResultCloseRef.current?.focus();
     else if (bookingResultWasOpenRef.current) bookingFirstNameRef.current?.focus();
     bookingResultWasOpenRef.current = Boolean(bookingResult);
+  }, [bookingResult]);
+
+  useEffect(() => {
+    if (!bookingResult) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
   }, [bookingResult]);
 
   useEffect(() => {
@@ -360,8 +366,6 @@ export default function ServicePage(): React.JSX.Element {
         setFieldFiles({});
         setBookingResult({
           success: true,
-          requestId: data.requestId,
-          status: data.status,
           message: data.message || 'Check your email to verify your address. Parish staff will review your request before confirming.',
         });
       } else {
@@ -908,7 +912,7 @@ export default function ServicePage(): React.JSX.Element {
           </div>
         </div>
       )}
-      {bookingResult && (
+      {bookingResult && createPortal(
         <div
           className="booking-result-backdrop"
           onKeyDown={event => {
@@ -926,24 +930,29 @@ export default function ServicePage(): React.JSX.Element {
             aria-labelledby="booking-result-title"
             aria-describedby="booking-result-message"
           >
-            <h2 id="booking-result-title">
-              {bookingResult.success ? 'Booking request submitted' : 'Booking could not be completed'}
-            </h2>
-            <p id="booking-result-message">{bookingResult.message}</p>
-            {bookingResult.requestId && <p><strong>Request number:</strong> {bookingResult.requestId}</p>}
-            {bookingResult.status && (
-              <p><strong>Status:</strong> {bookingResult.status.replace(/([a-z])([A-Z])/g, '$1 $2')}</p>
-            )}
-            <button
-              ref={bookingResultCloseRef}
-              type="button"
-              className="btn btn-dark"
-              onClick={() => setBookingResult(null)}
-            >
-              Close
-            </button>
+            <div className="booking-result-heading">
+              <span className="booking-result-mark" aria-hidden="true">
+                {bookingResult.success ? '✓' : '!'}
+              </span>
+              <p className="booking-result-brand">Santo Domingo Parish</p>
+              <h2 id="booking-result-title">
+                {bookingResult.success ? 'Booking request submitted' : 'Booking could not be completed'}
+              </h2>
+            </div>
+            <div className="booking-result-content">
+              <p id="booking-result-message">{bookingResult.message}</p>
+              <button
+                ref={bookingResultCloseRef}
+                type="button"
+                className="btn btn-dark"
+                onClick={() => setBookingResult(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
