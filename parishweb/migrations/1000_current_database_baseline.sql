@@ -1,5 +1,6 @@
 ﻿-- Current clean schema baseline for Santo Domingo Parish Website.
--- Generated from the supplied schema-only export dated 2026-10-19.
+-- Generated from the supplied schema-only export dated 2026-10-19 and reconciled
+-- with the schema changes in numbered migrations 001-027.
 -- Creates the database if needed, then creates schema objects only; no records are included.
 -- Run once using a SQL Server account allowed to create databases, against a new/empty instance.
 -- Do not run against a database containing objects or data you need to keep.
@@ -708,6 +709,7 @@ CREATE TABLE [dbo].[SacramentalArchives](
 	[PageNumber] [int] NOT NULL,
 	[FileUrl] [nvarchar](1000) NOT NULL,
 	[Notes] [nvarchar](max) NULL,
+	[RegistryNumber] [nvarchar](50) NULL,
 	[UploadedAt] [datetime2](7) NOT NULL,
 	[UploadedBy] [nvarchar](256) NOT NULL,
  CONSTRAINT [PK_SacramentalArchives] PRIMARY KEY CLUSTERED
@@ -732,6 +734,26 @@ CREATE TABLE [dbo].[SacramentalRecordAudit](
  CONSTRAINT [PK_SacramentalRecordAudit] PRIMARY KEY CLUSTERED
 (
 	[AuditId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[SecurityAuditLog] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SecurityAuditLog](
+	[SecurityAuditId] [int] IDENTITY(1,1) NOT NULL,
+	[EventType] [varchar](40) NOT NULL,
+	[ActorUserName] [nvarchar](256) NOT NULL,
+	[TargetUserName] [nvarchar](256) NULL,
+	[Reason] [nvarchar](1000) NULL,
+	[ExpiresAt] [datetime2](7) NULL,
+	[CreatedAt] [datetime2](7) NOT NULL,
+	[Details] [nvarchar](max) NULL,
+ CONSTRAINT [PK_SecurityAuditLog] PRIMARY KEY CLUSTERED
+(
+	[SecurityAuditId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
@@ -802,6 +824,31 @@ CREATE TABLE [dbo].[ServiceRequest](
 PRIMARY KEY CLUSTERED
 (
 	[ServiceRequestId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ServiceRequestDocument] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ServiceRequestDocument](
+	[DocumentId] [int] IDENTITY(1,1) NOT NULL,
+	[ServiceRequestId] [int] NOT NULL,
+	[FieldKey] [varchar](100) NOT NULL,
+	[Label] [nvarchar](200) NOT NULL,
+	[OriginalFileName] [nvarchar](255) NOT NULL,
+	[ContentType] [varchar](100) NOT NULL,
+	[FileData] [varbinary](max) NOT NULL,
+	[UploadedAt] [datetime2](7) NOT NULL,
+ CONSTRAINT [PK_ServiceRequestDocument] PRIMARY KEY CLUSTERED
+(
+	[DocumentId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_ServiceRequestDocument_RequestField] UNIQUE NONCLUSTERED
+(
+	[ServiceRequestId] ASC,
+	[FieldKey] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
@@ -889,6 +936,12 @@ CREATE NONCLUSTERED INDEX [IX_ApplicationEditLog_Request] ON [dbo].[ApplicationE
 	[ChangedAt] DESC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
+/****** Object:  Index [IX_SecurityAuditLog_CreatedAt] ******/
+CREATE NONCLUSTERED INDEX [IX_SecurityAuditLog_CreatedAt] ON [dbo].[SecurityAuditLog]
+(
+	[CreatedAt] DESC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
 /****** Object:  Index [IX_AspNetUserRoles_RoleId]    Script Date: 10/19/2026 10:50:42 PM ******/
 CREATE NONCLUSTERED INDEX [IX_AspNetUserRoles_RoleId] ON [dbo].[AspNetUserRoles]
 (
@@ -947,6 +1000,15 @@ CREATE NONCLUSTERED INDEX [IX_CertificateRequests_Appointment] ON [dbo].[Certifi
 	[PreferredTime] ASC,
 	[Status] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_CertificateRequests_EmailRef] ******/
+CREATE NONCLUSTERED INDEX [IX_CertificateRequests_EmailRef] ON [dbo].[CertificateRequests]
+(
+	[ContactEmail] ASC,
+	[ReferenceCode] ASC
+)
+WHERE ([ContactEmail] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
 SET ANSI_PADDING ON
 GO
@@ -1136,6 +1198,13 @@ CREATE NONCLUSTERED INDEX [IX_SacramentalArchives_SacramentType] ON [dbo].[Sacra
 	[SacramentType] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
+/****** Object:  Index [IX_SacramentalArchives_SacramentType_RegistryNumber] ******/
+CREATE NONCLUSTERED INDEX [IX_SacramentalArchives_SacramentType_RegistryNumber] ON [dbo].[SacramentalArchives]
+(
+	[SacramentType] ASC,
+	[RegistryNumber] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
 SET ANSI_PADDING ON
 GO
 /****** Object:  Index [IX_SacramentalRecordAudit_Record]    Script Date: 10/19/2026 10:50:42 PM ******/
@@ -1302,6 +1371,8 @@ ALTER TABLE [dbo].[SacramentalArchives] ADD  CONSTRAINT [DF_SacramentalArchives_
 GO
 ALTER TABLE [dbo].[SacramentalRecordAudit] ADD  CONSTRAINT [DF_SacramentalRecordAudit_ChangedAt]  DEFAULT (sysutcdatetime()) FOR [ChangedAt]
 GO
+ALTER TABLE [dbo].[SecurityAuditLog] ADD  CONSTRAINT [DF_SecurityAuditLog_CreatedAt]  DEFAULT (sysutcdatetime()) FOR [CreatedAt]
+GO
 ALTER TABLE [dbo].[Service] ADD  CONSTRAINT [DF_Service_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 ALTER TABLE [dbo].[ServiceFieldDefinition] ADD  CONSTRAINT [DF_ServiceFieldDefinition_FieldType]  DEFAULT ('text') FOR [FieldType]
@@ -1319,6 +1390,8 @@ GO
 ALTER TABLE [dbo].[ServiceRequest] ADD  DEFAULT ('Pending') FOR [Status]
 GO
 ALTER TABLE [dbo].[ServiceRequest] ADD  DEFAULT (sysutcdatetime()) FOR [CreatedAt]
+GO
+ALTER TABLE [dbo].[ServiceRequestDocument] ADD  CONSTRAINT [DF_ServiceRequestDocument_UploadedAt]  DEFAULT (sysutcdatetime()) FOR [UploadedAt]
 GO
 ALTER TABLE [dbo].[SiteContent] ADD  CONSTRAINT [DF_SiteContent_UpdatedAt]  DEFAULT (sysutcdatetime()) FOR [UpdatedAt]
 GO
@@ -1418,6 +1491,11 @@ ALTER TABLE [dbo].[ServiceRequest]  WITH CHECK ADD  CONSTRAINT [FK_ServiceReques
 REFERENCES [dbo].[Service] ([ServiceId])
 GO
 ALTER TABLE [dbo].[ServiceRequest] CHECK CONSTRAINT [FK_ServiceRequest_Service]
+GO
+ALTER TABLE [dbo].[ServiceRequestDocument]  WITH CHECK ADD  CONSTRAINT [FK_ServiceRequestDocument_ServiceRequest] FOREIGN KEY([ServiceRequestId])
+REFERENCES [dbo].[ServiceRequest] ([ServiceRequestId])
+GO
+ALTER TABLE [dbo].[ServiceRequestDocument] CHECK CONSTRAINT [FK_ServiceRequestDocument_ServiceRequest]
 GO
 ALTER TABLE [dbo].[UserModulePermissions]  WITH CHECK ADD  CONSTRAINT [FK_UserModulePermissions_User] FOREIGN KEY([UserId])
 REFERENCES [dbo].[AspNetUsers] ([UserId])
@@ -1535,15 +1613,44 @@ GO
     BEGIN
         SET NOCOUNT ON;
         UPDATE sr
-        SET ActiveSlotKey = CASE WHEN sr.Status IN ('PendingVerification', 'Confirmed')
+        SET ActiveSlotKey = CASE WHEN sr.Status IN ('PendingVerification', 'PendingReview', 'Confirmed')
             THEN CONVERT(NVARCHAR(20), sr.ServiceId) + N'|' + CONVERT(NVARCHAR(10), sr.ScheduledDate, 23) + N'|' + CONVERT(NVARCHAR(8), sr.ScheduledTime, 108)
             ELSE NULL END
         FROM dbo.ServiceRequest sr
         INNER JOIN inserted i ON i.ServiceRequestId = sr.ServiceRequestId
-        WHERE ISNULL(sr.ActiveSlotKey, N'') <> ISNULL(CASE WHEN sr.Status IN ('PendingVerification', 'Confirmed')
+        WHERE ISNULL(sr.ActiveSlotKey, N'') <> ISNULL(CASE WHEN sr.Status IN ('PendingVerification', 'PendingReview', 'Confirmed')
             THEN CONVERT(NVARCHAR(20), sr.ServiceId) + N'|' + CONVERT(NVARCHAR(10), sr.ScheduledDate, 23) + N'|' + CONVERT(NVARCHAR(8), sr.ScheduledTime, 108)
             ELSE NULL END, N'');
     END;
 GO
 ALTER TABLE [dbo].[ServiceRequest] ENABLE TRIGGER [trg_ServiceRequest_ActiveSlotKey]
+GO
+/****** Object:  Trigger [dbo].[trg_CertificateRequests_ActiveSlot] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TRIGGER [dbo].[trg_CertificateRequests_ActiveSlot]
+ON [dbo].[CertificateRequests]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        INNER JOIN dbo.CertificateRequests existing
+            ON existing.CertificateRequestId <> i.CertificateRequestId
+           AND existing.PreferredDate = i.PreferredDate
+           AND existing.PreferredTime = i.PreferredTime
+           AND existing.Status IN ('Confirmed', 'ReadyForClaim', 'Claimed')
+        WHERE i.Status IN ('Confirmed', 'ReadyForClaim', 'Claimed')
+    )
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 51001, 'Certificate appointment slot is already confirmed.', 1;
+    END;
+END;
+GO
+ALTER TABLE [dbo].[CertificateRequests] ENABLE TRIGGER [trg_CertificateRequests_ActiveSlot]
 GO
