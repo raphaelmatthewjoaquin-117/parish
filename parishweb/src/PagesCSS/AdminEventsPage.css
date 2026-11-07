@@ -1823,6 +1823,7 @@
 .service-document-preview {
   display: flex;
   flex-direction: column;
+  align-items: center;
   width: min(960px, 100%);
   max-height: calc(100vh - 3rem);
   max-height: calc(100dvh - 3rem);
@@ -1858,6 +1859,18 @@
   border-color: #d8d2c5;
   background: #f4f1e9;
   color: #3d3a34;
+}
+.service-document-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 3rem);
+  max-height: min(70dvh, 48rem);
+  object-fit: contain;
+}
+.service-document-preview--image {
+  width: fit-content;
+  max-width: calc(100vw - 3rem);
 }
 .service-document-preview iframe {
   display: block;

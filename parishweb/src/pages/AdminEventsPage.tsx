@@ -178,7 +178,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   // Service Request states
   const [serviceRequests, setServiceRequests] = useState<ServiceRequestItem[]>([])
   const [selectedServiceRequest, setSelectedServiceRequest] = useState<ServiceRequestItem | null>(null)
-  const [serviceDocumentPreview, setServiceDocumentPreview] = useState<{ fileName: string; url: string } | null>(null)
+  const [serviceDocumentPreview, setServiceDocumentPreview] = useState<{ fileName: string; url: string; contentType: string } | null>(null)
   const serviceDocumentPreviewCloseRef = useRef<HTMLButtonElement>(null)
   const serviceDocumentPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [serviceRequestsLoading, setServiceRequestsLoading] = useState(false)
@@ -687,8 +687,9 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
         throw new Error(body?.message || 'Unable to view document.')
       }
 
-      const url = window.URL.createObjectURL(await response.blob())
-      setServiceDocumentPreview({ fileName, url })
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      setServiceDocumentPreview({ fileName, url, contentType: blob.type })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to view document.')
     }
@@ -1671,7 +1672,12 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                 if (event.target === event.currentTarget) setServiceDocumentPreview(null)
               }}
             >
-              <section className="service-document-preview" role="dialog" aria-modal="true" aria-labelledby="service-document-preview-title">
+              <section
+                className={`service-document-preview${serviceDocumentPreview.contentType.startsWith('image/') ? ' service-document-preview--image' : ''}`}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="service-document-preview-title"
+              >
                 <div className="detail-header service-document-preview-header">
                   <h3 id="service-document-preview-title">Preview {serviceDocumentPreview.fileName}</h3>
                   <div className="service-document-preview-actions">
@@ -1687,10 +1693,18 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
                     </button>
                   </div>
                 </div>
-                <iframe
-                  src={serviceDocumentPreview.url}
-                  title={`Preview ${serviceDocumentPreview.fileName}`}
-                />
+                {serviceDocumentPreview.contentType.startsWith('image/') ? (
+                  <img
+                    className="service-document-preview-image"
+                    src={serviceDocumentPreview.url}
+                    alt={`Preview ${serviceDocumentPreview.fileName}`}
+                  />
+                ) : (
+                  <iframe
+                    src={serviceDocumentPreview.url}
+                    title={`Preview ${serviceDocumentPreview.fileName}`}
+                  />
+                )}
               </section>
             </div>,
             document.body,

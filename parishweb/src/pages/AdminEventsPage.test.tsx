@@ -37,7 +37,7 @@ const requests = [
     details: {
       birthCertificate: {
         fieldKey: 'birthCertificate',
-        fileName: 'birth-certificate.pdf',
+        fileName: 'birth-certificate.png',
         label: 'Birth certificate',
       },
     },
@@ -54,7 +54,7 @@ describe('AdminEventsPage service request status filter', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/documents/')) {
-        return { ok: true, blob: async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' }) } as Response
+        return { ok: true, blob: async () => new Blob(['image'], { type: 'image/png' }) } as Response
       }
       const body = url.endsWith('/api/admin/verify')
         ? { user: { role: 'Secretary' } }
@@ -104,16 +104,18 @@ describe('AdminEventsPage service request status filter', () => {
 
     fireEvent.click(within(requestTable).getByRole('button', { name: 'View request from Taylor Pending' }))
     const dialog = screen.getByRole('dialog', { name: 'Service Request Detail' })
-    const viewDocumentButton = within(dialog).getByRole('button', { name: 'View birth-certificate.pdf' })
+    const viewDocumentButton = within(dialog).getByRole('button', { name: 'View birth-certificate.png' })
     fireEvent.click(viewDocumentButton)
 
-    const previewDialog = await screen.findByRole('dialog', { name: 'Preview birth-certificate.pdf' })
+    const previewDialog = await screen.findByRole('dialog', { name: 'Preview birth-certificate.png' })
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(dialog.getAttribute('aria-hidden')).toBe('true')
     expect(document.activeElement).toBe(within(previewDialog).getByRole('button', { name: 'Close preview' }))
-    expect(within(previewDialog).getByTitle('Preview birth-certificate.pdf')).toBeTruthy()
+    expect(previewDialog.className).toContain('service-document-preview--image')
+    const image = within(previewDialog).getByRole('img', { name: 'Preview birth-certificate.png' })
+    expect(image.className).toContain('service-document-preview-image')
     const downloadLink = within(previewDialog).getByRole('link', { name: 'Download' }) as HTMLAnchorElement
-    expect(downloadLink.download).toBe('birth-certificate.pdf')
+    expect(downloadLink.download).toBe('birth-certificate.png')
     expect(downloadLink.href).toBe('about:blank')
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/admin/service-requests/12/documents/birthCertificate'),
