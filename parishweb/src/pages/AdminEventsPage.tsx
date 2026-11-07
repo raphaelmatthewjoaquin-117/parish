@@ -1435,57 +1435,75 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               </div>
             )}
             {!serviceRequestsLoading && visibleServiceRequests.length > 0 && (
-              <ul className="service-request-cards">
-                {visibleServiceRequests.map(request => (
-                  <li
-                    key={request.id}
-                    className={`admin-service-row status-${request.status.toLowerCase()}`}
-                  >
-                    <div className="service-info">
-                      <div className="service-header">
-                        <div>
-                          <strong>{request.firstName} {request.lastName}</strong>
-                          <span className="service-type">{request.serviceName}</span>
-                        </div>
-                        <span className={`badge status-badge ${request.status === 'Confirmed' ? 'confirmed' : request.status === 'Rejected' ? 'rejected' : 'pending'}`}>
-                          {formatServiceRequestStatus(request.status)}
-                        </span>
-                      </div>
-                      <div className="service-details">
-                        <small><span aria-hidden="true">📅</span> {new Date(request.scheduledDate).toLocaleDateString()} at {request.scheduledTime}</small>
-                        <small><span aria-hidden="true">📧</span> {request.email}</small>
-                      </div>
-                    </div>
-                    <div className="admin-buttons">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedServiceRequest(request)}
-                        className="secondary-btn"
-                      >
-                        View
-                      </button>
-                      {request.status !== 'Confirmed' && (
-                        <button
-                          type="button"
-                          onClick={() => confirmServiceRequest(request.id)}
-                          disabled={saving}
-                          className="primary-btn"
-                        >
-                          Confirm
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => deleteServiceRequest(request.id)}
-                        disabled={saving}
-                        className="danger-btn"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <div className="service-request-table-scroll" role="region" aria-label="Service request list" tabIndex={0}>
+                <table className="service-request-table" aria-label="Service requests">
+                  <thead>
+                    <tr>
+                      <th scope="col">Service</th>
+                      <th scope="col">Request ID</th>
+                      <th scope="col">Name</th>
+                      <th scope="col">Scheduled</th>
+                      <th scope="col">Email</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleServiceRequests.map(request => (
+                      <tr key={request.id} className={`status-${request.status.toLowerCase()}`}>
+                        <td>
+                          <span className="service-request-type">{request.serviceName}</span>
+                        </td>
+                        <td className="service-request-id">#{request.id}</td>
+                        <td className="service-request-name">{request.firstName} {request.lastName}</td>
+                        <td>
+                          <time dateTime={request.scheduledDate}>
+                            {new Date(request.scheduledDate).toLocaleDateString()} at {request.scheduledTime}
+                          </time>
+                        </td>
+                        <td className="service-request-email">{request.email}</td>
+                        <td>
+                          <span className={`badge status-badge ${request.status === 'Confirmed' ? 'confirmed' : request.status === 'Rejected' ? 'rejected' : 'pending'}`}>
+                            {formatServiceRequestStatus(request.status)}
+                          </span>
+                        </td>
+                        <td className="service-request-actions">
+                          <div className="admin-buttons">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedServiceRequest(request)}
+                              className="secondary-btn"
+                              aria-label={`View request from ${request.firstName} ${request.lastName}`}
+                            >
+                              View
+                            </button>
+                            {request.status !== 'Confirmed' && (
+                              <button
+                                type="button"
+                                onClick={() => confirmServiceRequest(request.id)}
+                                disabled={saving}
+                                className="primary-btn"
+                                aria-label={`Confirm request from ${request.firstName} ${request.lastName}`}
+                              >
+                                Confirm
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => deleteServiceRequest(request.id)}
+                              disabled={saving}
+                              className="danger-btn"
+                              aria-label={`Delete request from ${request.firstName} ${request.lastName}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 

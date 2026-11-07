@@ -49,17 +49,37 @@ describe('AdminEventsPage service request status filter', () => {
     }))
   })
 
+  it('displays service requests in a table with clear scan-friendly columns', async () => {
+    render(<AdminEventsPage initialTab="service-requests" embedded />)
+
+    const requestTable = await screen.findByRole('table', { name: 'Service requests' })
+
+    expect(within(requestTable).getAllByRole('row')).toHaveLength(3)
+    expect(within(requestTable).getByRole('columnheader', { name: 'Service' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Request ID' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Name' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Scheduled' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Email' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Status' })).toBeTruthy()
+    expect(within(requestTable).getByRole('columnheader', { name: 'Actions' })).toBeTruthy()
+    expect(within(requestTable).getByText('Baptism')).toBeTruthy()
+    expect(within(requestTable).getByText('#11')).toBeTruthy()
+    expect(within(requestTable).getByText('Alex Confirmed')).toBeTruthy()
+    expect(within(requestTable).getByRole('button', { name: 'View request from Alex Confirmed' })).toBeTruthy()
+  })
+
   it('shows only requests matching the selected status', async () => {
     render(<AdminEventsPage initialTab="service-requests" embedded />)
-    const requestList = await screen.findByRole('list')
-    await waitFor(() => expect(within(requestList).getAllByRole('listitem')).toHaveLength(2))
+    const requestTable = await screen.findByRole('table', { name: 'Service requests' })
+    await waitFor(() => expect(within(requestTable).getAllByRole('row')).toHaveLength(3))
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter service requests by status' }), {
       target: { value: 'Confirmed' },
     })
 
-    expect(within(requestList).getByText('Alex Confirmed')).toBeTruthy()
-    expect(within(requestList).queryByText('Taylor Pending')).toBeNull()
+    expect(within(requestTable).getAllByRole('row')).toHaveLength(2)
+    expect(within(requestTable).getByText('Alex Confirmed')).toBeTruthy()
+    expect(within(requestTable).queryByText('Taylor Pending')).toBeNull()
   })
 })
 
