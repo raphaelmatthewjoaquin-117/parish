@@ -19,7 +19,9 @@ interface DatabaseConfig {
 }
 
 export function createDatabaseConfig(env?: Record<string, string | undefined>): DatabaseConfig;
+export function isPostgresOnlyMode(env?: Record<string, string | undefined>): boolean;
 export function assertProductionStorageConfiguration(
   env: Record<string, string | undefined> | undefined,
   azureConfigured: boolean,
+  supabaseStorageConfigured?: boolean,
 ): void;

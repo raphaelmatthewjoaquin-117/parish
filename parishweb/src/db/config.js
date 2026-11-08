@@ -1,3 +1,17 @@
+const postgresProviders = [
+  'IDENTITY_DATABASE',
+  'EVENTS_DATABASE',
+  'CONTENT_DATABASE',
+  'CERTIFICATE_DATABASE',
+  'SERVICE_DATABASE',
+  'OPERATIONS_DATABASE',
+  'SACRAMENTAL_DATABASE',
+];
+
+export function isPostgresOnlyMode(env = process.env) {
+  return postgresProviders.every(setting => env[setting]?.trim().toLowerCase() === 'postgres');
+}
+
 export function createDatabaseConfig(env = process.env) {
   const certificateSetting = env.DB_TRUST_SERVER_CERTIFICATE?.trim().toLowerCase();
   if (certificateSetting && certificateSetting !== 'true' && certificateSetting !== 'false') {
@@ -65,8 +79,15 @@ export function createDatabaseConfig(env = process.env) {
   return config;
 }
 
-export function assertProductionStorageConfiguration(env = process.env, azureConfigured) {
-  if (env.NODE_ENV === 'production' && !azureConfigured) {
-    throw new Error('Azure Blob Storage must be configured in production.');
+export function assertProductionStorageConfiguration(
+  env = process.env,
+  azureConfigured,
+  supabaseStorageConfigured = false,
+) {
+  if (env.NODE_ENV === 'production' && isPostgresOnlyMode(env) && !supabaseStorageConfigured) {
+    throw new Error('Supabase Storage must be configured in PostgreSQL-only production mode.');
+  }
+  if (env.NODE_ENV === 'production' && !azureConfigured && !supabaseStorageConfigured) {
+    throw new Error('Azure Blob Storage or Supabase Storage must be configured in production.');
   }
 }

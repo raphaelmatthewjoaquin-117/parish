@@ -37,6 +37,7 @@ export function createAdminReportingRouter(options: {
     filename: string
   }>
   deleteArchiveFile?: (fileUrl: string) => Promise<void>
+  getPrivateFile?: (fileName: string) => Promise<{ contents: Buffer }>
   postgresCertificatesEnabled?: boolean
   postgresOperationsEnabled?: boolean
   postgresSacramentalEnabled?: boolean

@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { assertProductionStorageConfiguration, createDatabaseConfig } from './config.js'
+import {
+  assertProductionStorageConfiguration,
+  createDatabaseConfig,
+  isPostgresOnlyMode,
+} from './config.js'
 import { checkDatabaseReadiness, checkPostgresReadiness } from './readiness.js'
 
 describe('createDatabaseConfig', () => {
+  it('recognizes PostgreSQL-only mode only when every migrated module is selected', () => {
+    const env = {
+      IDENTITY_DATABASE: 'postgres',
+      EVENTS_DATABASE: 'postgres',
+      CONTENT_DATABASE: 'postgres',
+      CERTIFICATE_DATABASE: 'postgres',
+      SERVICE_DATABASE: 'postgres',
+      OPERATIONS_DATABASE: 'postgres',
+      SACRAMENTAL_DATABASE: 'postgres',
+    }
+
+    expect(isPostgresOnlyMode(env)).toBe(true)
+    expect(isPostgresOnlyMode({ ...env, SERVICE_DATABASE: 'sqlserver' })).toBe(false)
+    expect(isPostgresOnlyMode({ ...env, IDENTITY_DATABASE: undefined })).toBe(false)
+  })
+
   it('validates SQL certificates in production by default', () => {
     const config = createDatabaseConfig({
       NODE_ENV: 'production',
@@ -53,7 +73,31 @@ describe('createDatabaseConfig', () => {
     expect(() => assertProductionStorageConfiguration(
       { NODE_ENV: 'production' },
       false,
-    )).toThrow('Azure Blob Storage must be configured in production.')
+    )).toThrow('Azure Blob Storage or Supabase Storage must be configured in production.')
+  })
+
+  it('accepts Supabase Storage as the configured production upload store', () => {
+    expect(() => assertProductionStorageConfiguration(
+      { NODE_ENV: 'production' },
+      false,
+      true,
+    )).not.toThrow()
+  })
+
+  it('requires Supabase Storage specifically in PostgreSQL-only production mode', () => {
+    const env = {
+      NODE_ENV: 'production',
+      IDENTITY_DATABASE: 'postgres',
+      EVENTS_DATABASE: 'postgres',
+      CONTENT_DATABASE: 'postgres',
+      CERTIFICATE_DATABASE: 'postgres',
+      SERVICE_DATABASE: 'postgres',
+      OPERATIONS_DATABASE: 'postgres',
+      SACRAMENTAL_DATABASE: 'postgres',
+    }
+
+    expect(() => assertProductionStorageConfiguration(env, true, false))
+      .toThrow('Supabase Storage must be configured in PostgreSQL-only production mode.')
   })
 
   it('allows local filesystem uploads outside production', () => {

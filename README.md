@@ -2,7 +2,7 @@
 
 This repository contains the website and administration system for Santo Domingo Parish, National Shrine of La Naval de Manila. Parishioners can find parish information, browse news and events, view the gallery, request services or certificates, contact the parish, and submit prayer requests. Authorized staff use the administration workspace to manage website content and parish operations.
 
-The application is in [`parishweb`](./parishweb/). It has a React/Vite frontend and a separate Express API backed by Microsoft SQL Server.
+The application is in [`parishweb`](./parishweb/). It has a React/Vite frontend and a separate Express API that supports the legacy SQL Server configuration and a PostgreSQL-only Supabase deployment.
 
 ## Technology stack
 
@@ -52,9 +52,9 @@ The baseline is based on the schema-only export of the current database and is r
 
 For a PostgreSQL/Supabase schema, [`supabase/migrations/20261108094830_initial_schema.sql`](./parishweb/supabase/migrations/20261108094830_initial_schema.sql) is adapted from that baseline. It is also schema-only: it does not recover or transfer database records, seed the service catalog, or create a staff account. It enables row-level security without adding client policies; access must go through a secured server-side database role until policies are designed. Apply it only to a new/empty Supabase project.
 
-The Express API can use a server-side `DATABASE_URL` to connect to Supabase PostgreSQL. Keep this value in the ignored `parishweb/.env` and do not give it a `VITE_` prefix. The pool rejects superuser, `BYPASSRLS`, object-owner, database-owner, and role-membership connections; use a dedicated restricted runtime login, never the Supabase owner credential. SQL Server remains the default for each module. Before setting a provider to `postgres`, apply its reviewed access migration using an owner/admin connection and verify it as the restricted runtime role. The identity verifier is `npm run db:verify-identity`; public content uses `npm run db:verify-content`; events use `npm run db:verify-events`; service catalog and bookings use `npm run db:verify-service-catalog`; certificates use `npm run db:verify-certificates`; operations use `npm run db:verify-operations`; sacramental records use `npm run db:verify-sacramental`. The identity and sacramental access checks have been reported as successful. For events, apply `20261108191000_events_access.sql`, run `npm run db:verify-events`, then set `EVENTS_DATABASE=postgres` to test public listing and admin event CRUD. Set each provider to `postgres` only after its access migration and verifier pass; reverting it to `sqlserver` selects the fallback. TLS certificate verification stays enabled; if Node does not trust the Supabase certificate by default, set `DATABASE_SSL_CA_PATH` to the path of the CA PEM from Supabase Database Settings > SSL Configuration (or provide the PEM in `DATABASE_SSL_CA`). `/readyz/postgres` checks PostgreSQL connectivity and the required Events table independently; `/readyz` still represents whole-app readiness and requires SQL Server while legacy routes remain. SQL Server is still needed for unmigrated routes and SQL Server-specific backup/restore. The Supabase schema contains no recovered parish data; use clearly labeled test content when verifying writes.
+The Express API can use a server-side `DATABASE_URL` to connect to Supabase PostgreSQL. Keep this value in the ignored `parishweb/.env` and do not give it a `VITE_` prefix. The pool rejects superuser, `BYPASSRLS`, object-owner, database-owner, and role-membership connections; use a dedicated restricted runtime login, never the Supabase owner credential. SQL Server remains the local/legacy default. Before setting a provider to `postgres`, apply its reviewed access migration using an owner/admin connection and verify it as the restricted runtime role. The identity verifier is `npm run db:verify-identity`; public content uses `npm run db:verify-content`; events use `npm run db:verify-events`; service catalog and bookings use `npm run db:verify-service-catalog`; certificates use `npm run db:verify-certificates`; operations use `npm run db:verify-operations`; sacramental records use `npm run db:verify-sacramental`. In Render's PostgreSQL-only mode, set all seven provider variables to `postgres`; startup then connects only to PostgreSQL, validates the Events table and required Storage buckets, and `/readyz` reports PostgreSQL readiness. The parishioner portal and SQL Server-specific backup, audit, and email-log tools return HTTP 501 in this mode. TLS certificate verification stays enabled; if Node does not trust the Supabase certificate by default, set `DATABASE_SSL_CA_PATH` to the path of the CA PEM from Supabase Database Settings > SSL Configuration (or provide the PEM in `DATABASE_SSL_CA`). The Supabase schema contains no recovered parish data; use clearly labeled test content when verifying writes.
 
-Sacramental archive and register reads have passed the restricted-role verifier. Sacramental search, details, record CRUD/audit, archive CRUD, and statistics now also have opt-in PostgreSQL code paths. Before enabling those writes, apply [`20261108180000_sacramental_register_write_access.sql`](./parishweb/supabase/migrations/20261108180000_sacramental_register_write_access.sql) in Supabase SQL Editor with owner/admin access, then run `npm run db:verify-sacramental` from `parishweb`. Keep `SACRAMENTAL_DATABASE=sqlserver` until this verification passes.
+Sacramental archive and register reads and writes have PostgreSQL code paths. Apply [`20261108180000_sacramental_register_write_access.sql`](./parishweb/supabase/migrations/20261108180000_sacramental_register_write_access.sql) in Supabase SQL Editor with owner/admin access and run `npm run db:verify-sacramental` from `parishweb` before enabling `SACRAMENTAL_DATABASE=postgres`.
 
 The manual owner-only starting point for the restricted role is
 [`supabase/role-setup.sql`](./parishweb/supabase/role-setup.sql). It creates
@@ -157,34 +157,41 @@ in the Render dashboard, not in Git or chat.
 | `PORT` | Let Render provide it |
 | `FRONTEND_URL` | Exact HTTPS origin of the Vercel site, with no path |
 | `ADMIN_TOKEN` | Long, random secret |
-| `DB_AUTH` | `sql` |
-| `DB_SERVER`, `DB_PORT`, `DB_NAME` | Production SQL Server host, port, and database |
-| `DB_USER`, `DB_PASSWORD` | Dedicated SQL login and password |
-| `DB_TRUST_SERVER_CERTIFICATE` | `false`; the SQL Server certificate must validate |
-| `DATABASE_URL` | Optional restricted Supabase runtime login; never the owner role |
+| `ADMIN_TOKEN_SIGNING_SECRET` | Separate random secret of at least 32 characters |
+| `DATABASE_URL` | Restricted PostgreSQL runtime connection string; never the owner role |
 | `DATABASE_SSL_CA_PATH` | Optional path to the trusted Supabase CA PEM |
-| `EVENTS_DATABASE` | Keep `sqlserver` until restricted-role event permissions are verified |
-| `CONTENT_DATABASE` | Keep `sqlserver` until public-content permissions are verified |
-| `AZURE_STORAGE_CONNECTION_STRING` | Rotated Azure Storage connection string |
-| `AZURE_STORAGE_CONTAINER_NAME` | `uploads` (or the configured container) |
+| `IDENTITY_DATABASE`, `EVENTS_DATABASE`, `CONTENT_DATABASE` | Set each to `postgres` |
+| `CERTIFICATE_DATABASE`, `SERVICE_DATABASE`, `OPERATIONS_DATABASE` | Set each to `postgres` |
+| `SACRAMENTAL_DATABASE` | Set to `postgres` |
+| `SUPABASE_URL` | Supabase project API URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only Supabase key; never put it in Vercel or frontend variables |
+| `SUPABASE_PUBLIC_BUCKET` | `parish-public-assets` |
+| `SUPABASE_PRIVATE_BUCKET` | `parish-private-documents` |
 | `RESEND_API_KEY` | Optional; set only if production email is enabled |
 | `RESEND_FROM_EMAIL` | Optional verified sender for Resend |
 
-Production startup requires an HTTPS `FRONTEND_URL`, SQL authentication
-credentials with certificate validation enabled, and Azure Blob Storage.
-Missing settings or a failed database connection stop the API. Render's
-`/readyz` health check verifies the database; `/health` only reports that the
-process is running.
+For PostgreSQL-only deployment, set **all seven** database provider variables
+to `postgres`; a missing or SQL Server provider setting does not silently fall
+back to SQL Server. Use Supabase's Session pooler connection string if Render
+cannot connect over IPv6, and use the restricted runtime login. Startup checks
+the PostgreSQL connection and required Events table. Render's `/readyz` health
+check verifies database readiness; `/health` only reports that the process is
+running.
+
+Create the `parish-public-assets` Storage bucket with public access enabled
+and `parish-private-documents` with public access disabled before deploying.
+The API uses the service key only on the server. Public images are served only
+after the PostgreSQL content references them; archive and certificate files
+remain behind admin authorization.
 
 This API starts scheduled finance, appointment, and token-cleanup jobs inside
 the web process. Keep one running Render instance unless those jobs are moved
 to a separate single worker; multiple instances would run duplicate schedules.
-Confirm that the SQL Server firewall/network allows connections from Render
-before deploying.
 
-Render's local filesystem is not durable storage. Production uploads are
-required to use Azure Blob Storage, and the API refuses to start in production
-without it. Do not use the example/local `uploads/` folder for production data.
+The parishioner portal and SQL Server-only backup, system-audit, and email-log
+admin tools are not available in PostgreSQL-only mode; the API responds with
+HTTP 501 rather than attempting SQL Server access. Render's local filesystem
+is used only for temporary upload processing, not durable storage.
 
 ### Vercel frontend
 

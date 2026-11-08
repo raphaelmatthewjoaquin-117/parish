@@ -16,6 +16,7 @@ function createTestApi(query: (
   requireAdminWithQueryToken?: RequestHandler
   getArchiveFile?: (fileUrl: string) => Promise<{ contents: Buffer; contentType: string; filename: string }>
   deleteArchiveFile?: (fileUrl: string) => Promise<void>
+  getPrivateFile?: (fileName: string) => Promise<{ contents: Buffer }>
   postgresCertificatesEnabled?: boolean
   postgresOperationsEnabled?: boolean
   postgresSacramentalEnabled?: boolean
@@ -55,6 +56,7 @@ function createTestApi(query: (
     requireAdmin: (_req, _res, next) => next(),
     requireRole: () => (_req, _res, next) => next(),
     logError: vi.fn(),
+    uploadDirectory: 'uploads',
     ...extras,
   }))
 
@@ -248,6 +250,34 @@ describe('admin reporting routes', () => {
     ])
     expect(sqlServerQuery).not.toHaveBeenCalled()
     expect(postgresQuery).toHaveBeenCalledOnce()
+  })
+
+  it('streams PostgreSQL certificate documents from private storage after authorization', async () => {
+    const getPrivateFile = vi.fn(async () => ({ contents: Buffer.from('private document') }))
+    const api = createTestApi(async () => ({ recordset: [] }), {
+      postgresCertificatesEnabled: true,
+      getPrivateFile,
+      getPostgresPool: () => ({
+        query: async () => ({
+          rows: [{
+            StoredFileName: 'safe-file.pdf',
+            OriginalFileName: 'baptism record.pdf',
+            MimeType: 'application/pdf',
+          }],
+          rowCount: 1,
+        }),
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/certificate-requests/8/documents/14/file`)
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toBe('private document')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(getPrivateFile).toHaveBeenCalledWith('safe-file.pdf')
   })
 
   it('lists generated finance report snapshots newest first', async () => {

@@ -43,9 +43,14 @@ import {
   isValidPasswordResetToken,
   isValidResetPassword,
 } from './password-reset.js';
-import { assertProductionStorageConfiguration, createDatabaseConfig } from './src/db/config.js';
+import {
+  assertProductionStorageConfiguration,
+  createDatabaseConfig,
+  isPostgresOnlyMode,
+} from './src/db/config.js';
 import { checkDatabaseReadiness, checkPostgresReadiness } from './src/db/readiness.js';
 import { getPostgresPool, initializePostgresPool } from './src/db/postgres-pool.js';
+import { createSupabaseStorage } from './src/storage/supabase-storage.js';
 import { createAdminTokenSigningSecret, createIdentityDatabaseConfig } from './src/auth/config.js';
 import { getStaffAuthorizationState } from './src/auth/postgres-identity.js';
 import { authenticatePostgresStaff } from './src/auth/staff-login.js';
@@ -303,13 +308,18 @@ const handleHealthCheck = (_req, res) => {
 
 const handleReadinessCheck = async (_req, res) => {
   try {
-    if (postgresEventsEnabled) {
+    if (postgresOnlyMode || postgresEventsEnabled) {
       await checkPostgresReadiness(getPostgresPool());
     }
-    await checkDatabaseReadiness(getPool());
+    if (postgresOnlyMode && !supabaseStorageReady) {
+      return res.status(503).json({ status: 'not_ready' });
+    }
+    if (!postgresOnlyMode) await checkDatabaseReadiness(getPool());
     res.json({
       status: 'ready',
-      database: postgresEventsEnabled ? 'postgres-and-sql-server' : 'sql-server',
+      database: postgresOnlyMode
+        ? 'postgres'
+        : postgresEventsEnabled ? 'postgres-and-sql-server' : 'sql-server',
     });
   } catch (error) {
     logError(error, { context: 'readinessCheck' });
@@ -453,6 +463,7 @@ const certificateDatabaseConfig = createCertificateDatabaseConfig(process.env);
 const serviceDatabaseConfig = createServiceDatabaseConfig(process.env);
 const operationsDatabaseConfig = createOperationsDatabaseConfig(process.env);
 const sacramentalDatabaseConfig = createSacramentalDatabaseConfig(process.env);
+const postgresOnlyMode = isPostgresOnlyMode(process.env);
 const postgresEventsEnabled = eventsDatabaseConfig.provider === 'postgres'
   && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
 const postgresContentEnabled = contentDatabaseConfig.provider === 'postgres'
@@ -467,6 +478,7 @@ const postgresSacramentalEnabled = sacramentalDatabaseConfig.provider === 'postg
   && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
 const postgresConnectionEnabled = process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1'
   && eventsDatabaseConfig.postgresConfigured;
+const postgresOnlyUnavailableMessage = 'This SQL Server-only feature is unavailable in PostgreSQL-only mode.';
 
 const app = express();
 const trustProxyHopsValue = process.env.TRUST_PROXY_HOPS ?? '0';
@@ -506,6 +518,13 @@ const azureStorageAccountName = (process.env.AZURE_STORAGE_ACCOUNT_NAME || '').t
 const azureStorageAccountKey = (process.env.AZURE_STORAGE_ACCOUNT_KEY || '').trim();
 const azureStorageContainer = (process.env.AZURE_STORAGE_CONTAINER_NAME || 'uploads').trim();
 const azureStorageConnectionString = (process.env.AZURE_STORAGE_CONNECTION_STRING || '').trim();
+const supabaseStorageConfigured = Boolean(
+  process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+);
+const supabaseStorage = supabaseStorageConfigured
+  ? createSupabaseStorage(process.env)
+  : null;
+let supabaseStorageReady = !postgresOnlyMode || !supabaseStorageConfigured;
 
 function buildPublicUploadUrl(filename) {
   const safeFilename = String(filename || '').trim();
@@ -532,7 +551,11 @@ function isAzureConfigured() {
   );
 }
 
-assertProductionStorageConfiguration(process.env, isAzureConfigured());
+assertProductionStorageConfiguration(
+  process.env,
+  isAzureConfigured(),
+  supabaseStorageConfigured,
+);
 
 function createAzureStorageClient() {
   return azureStorageConnectionString
@@ -543,18 +566,19 @@ function createAzureStorageClient() {
       );
 }
 
-async function uploadFileToAzure(file, fileName) {
-  if (!isAzureConfigured()) {
-    return null;
-  }
-
-  const containerClient = createAzureStorageClient().getContainerClient(azureStorageContainer);
-  await containerClient.createIfNotExists();
-
+async function uploadFile(file, fileName, bucket = 'public') {
   const extension = path.extname(fileName || file.originalname || '').toLowerCase();
   const objectPath = `${randomUUID()}${extension}`;
   const fileBuffer = await fs.promises.readFile(file.path);
 
+  if (supabaseStorage) {
+    await supabaseStorage.upload(bucket, objectPath, fileBuffer, file.mimetype);
+    return `/uploads/${objectPath}`;
+  }
+  if (!isAzureConfigured()) return null;
+
+  const containerClient = createAzureStorageClient().getContainerClient(azureStorageContainer);
+  await containerClient.createIfNotExists();
   const blockBlobClient = containerClient.getBlockBlobClient(objectPath);
   await blockBlobClient.uploadData(fileBuffer, {
     blobHTTPHeaders: {
@@ -575,9 +599,14 @@ async function saveArchiveFile(file) {
       throw error;
     }
 
+    if (supabaseStorage) {
+      await supabaseStorage.upload('private', file.filename, contents, file.mimetype);
+      return `supabase://private/${file.filename}`;
+    }
+
     if (isAzureConfigured()) {
-      const uploadedUrl = await uploadFileToAzure(file, file.originalname);
-      if (!uploadedUrl) throw new Error('Azure archive storage is not available.');
+      const uploadedUrl = await uploadFile(file, file.originalname);
+      if (!uploadedUrl) throw new Error('Configured archive storage is not available.');
       return buildPublicUploadUrl(path.basename(uploadedUrl));
     }
 
@@ -633,6 +662,25 @@ function getArchiveObjectName(fileUrl) {
 }
 
 async function getArchiveFile(fileUrl) {
+  if (typeof fileUrl === 'string' && fileUrl.startsWith('supabase://private/')) {
+    if (!supabaseStorage) throw new Error('Supabase archive storage is not configured.');
+    const filename = fileUrl.slice('supabase://private/'.length);
+    if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      throw new Error('Invalid sacramental archive file name.');
+    }
+    const file = await supabaseStorage.download('private', filename, 20 * 1024 * 1024);
+    const extension = path.extname(filename).toLowerCase();
+    const contentType = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.tif': 'image/tiff',
+      '.tiff': 'image/tiff',
+    }[extension] || file.contentType;
+    return { contents: file.contents, contentType, filename };
+  }
+
   const filename = getArchiveObjectName(fileUrl);
   const localPath = path.join(uploadDirectory, filename);
   let contents;
@@ -666,6 +714,16 @@ async function getArchiveFile(fileUrl) {
 }
 
 async function deleteArchiveFile(fileUrl) {
+  if (typeof fileUrl === 'string' && fileUrl.startsWith('supabase://private/')) {
+    if (!supabaseStorage) throw new Error('Supabase archive storage is not configured.');
+    const filename = fileUrl.slice('supabase://private/'.length);
+    if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      throw new Error('Invalid sacramental archive file name.');
+    }
+    await supabaseStorage.remove('private', filename);
+    return;
+  }
+
   const filename = getArchiveObjectName(fileUrl);
   const localPath = path.join(uploadDirectory, filename);
   if (fs.existsSync(localPath)) {
@@ -717,25 +775,32 @@ app.use(express.json());
 app.use(requestLoggingMiddleware);
 app.use(metricsMiddleware);
 app.use('/api', apiRateLimit);
+if (postgresOnlyMode) {
+  app.use('/api/portal', (_req, res) => {
+    res.status(501).json({ message: 'The parishioner portal is not enabled in this deployment.' });
+  });
+}
 app.get('/health', handleHealthCheck);
 app.get('/readyz', handleReadinessCheck);
 app.get('/readyz/postgres', handlePostgresReadinessCheck);
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-const dbAuth = (process.env.DB_AUTH || '').toLowerCase();
-logger.info('DB startup config:', {
-  authMode: dbAuth || '(default)',
-  server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME || 'ParishDB',
-  user: process.env.DB_USER ? process.env.DB_USER : '(none)'
-});
+if (!postgresOnlyMode) {
+  const dbAuth = (process.env.DB_AUTH || '').toLowerCase();
+  logger.info('DB startup config:', {
+    authMode: dbAuth || '(default)',
+    server: process.env.DB_SERVER || 'localhost',
+    database: process.env.DB_NAME || 'ParishDB',
+    user: process.env.DB_USER ? process.env.DB_USER : '(none)'
+  });
+}
 
 // Build config depending on authentication mode.
 // DB_AUTH: 'sql' for SQL Server authentication (user/password),
 // 'ntlm' for Windows NTLM with explicit credentials,
 // empty/default => integrated authentication (when using msnodesqlv8 driver).
-const config = createDatabaseConfig(process.env);
+const config = postgresOnlyMode ? null : createDatabaseConfig(process.env);
 const identityDatabaseConfig = createIdentityDatabaseConfig(process.env);
 
 const adminSecret = process.env.ADMIN_TOKEN || (process.env.NODE_ENV === 'production' ? '' : 'letmein');
@@ -1066,6 +1131,7 @@ app.post('/api/certificate-requests/:id/documents', (req, res, next) => {
     return res.status(400).json({ message: 'Please select at least one file.' });
   }
 
+  const uploadedCertificateObjects = [];
   try {
     // Verify ownership by matching requestId + referenceCode
     const ownsRequest = postgresCertificatesEnabled
@@ -1081,6 +1147,13 @@ app.post('/api/certificate-requests/:id/documents', (req, res, next) => {
     }
 
     if (postgresCertificatesEnabled) {
+      if (supabaseStorage) {
+        for (const file of req.files) {
+          const contents = await fs.promises.readFile(file.path);
+          await supabaseStorage.upload('private', file.filename, contents, file.mimetype);
+          uploadedCertificateObjects.push(file.filename);
+        }
+      }
       await savePostgresCertificateUploads(getPostgresPool(), requestId, req.files.map(file => ({
         originalName: file.originalname,
         storedName: file.filename,
@@ -1106,8 +1179,37 @@ app.post('/api/certificate-requests/:id/documents', (req, res, next) => {
       }
     }
 
+    if (supabaseStorage && postgresCertificatesEnabled) {
+      for (const file of req.files) {
+        try {
+          await fs.promises.unlink(file.path);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') {
+            logError(cleanupError, { context: 'cleanupCertificateUpload' });
+          }
+        }
+      }
+    }
     res.json({ message: `${req.files.length} document(s) uploaded successfully.` });
   } catch (error) {
+    for (const filename of uploadedCertificateObjects) {
+      try {
+        await supabaseStorage.remove('private', filename);
+      } catch (cleanupError) {
+        logError(cleanupError, { context: 'removeUncommittedCertificateUpload' });
+      }
+    }
+    if (supabaseStorage && postgresCertificatesEnabled && req.files) {
+      for (const file of req.files) {
+        try {
+          await fs.promises.unlink(file.path);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') {
+            logError(cleanupError, { context: 'cleanupCertificateUpload' });
+          }
+        }
+      }
+    }
     logError(error, { context: 'uploadCertificateDocuments' });
     res.status(500).json({ message: 'Unable to save uploaded documents.' });
   }
@@ -1196,17 +1298,24 @@ app.post('/api/admin/uploads', requireAdmin, requireRole(['Admin', 'Secretary', 
 
     let photoUrl = buildPublicUploadUrl(req.file.filename);
 
-    if (isAzureConfigured()) {
+    if (supabaseStorage || isAzureConfigured()) {
       try {
-        photoUrl = await uploadFileToAzure(req.file, req.file.originalname);
+        photoUrl = await uploadFile(req.file, req.file.originalname);
       } catch (error) {
-        logError(error, { context: 'uploadToAzure' });
-        return res.status(500).json({ message: 'Unable to upload the photo to Azure Blob Storage.' });
+        try {
+          await fs.promises.unlink(req.file.path);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') {
+            logError(cleanupError, { context: 'cleanupFailedPhotoUpload' });
+          }
+        }
+        logError(error, { context: 'uploadToStorage' });
+        return res.status(500).json({ message: 'Unable to upload the photo to storage.' });
       }
     }
 
     try {
-      if (isAzureConfigured()) {
+      if (supabaseStorage || isAzureConfigured()) {
         await fs.promises.unlink(req.file.path);
       }
     } catch (error) {
@@ -1228,29 +1337,53 @@ app.get('/uploads/:filename', async (req, res) => {
   }
 
   try {
-    const azurePath = `/${azureStorageContainer}/${filename}`;
-    const result = await getPool().request()
-      .input('url', sql.NVarChar(1000), `/uploads/${filename}`)
-      .input('azurePath', sql.NVarChar(1000), azurePath)
-      .query(`
-        SELECT TOP 1 1 AS found
-        WHERE EXISTS (
-             SELECT 1 FROM dbo.Events
-             WHERE PhotoUrl = @url OR CHARINDEX(@azurePath, PhotoUrl) > 0
-           )
-           OR EXISTS (
-             SELECT 1 FROM dbo.SiteContent
-             WHERE ContentKey IN ('about', 'gallery', 'news')
-               AND (CHARINDEX(@url, ContentJson) > 0 OR CHARINDEX(@azurePath, ContentJson) > 0)
-           )
-      `);
     const filePath = path.join(uploadDirectory, filename);
-    if (result.recordset.length === 0) {
+    let isReferenced = false;
+    if (postgresOnlyMode) {
+      const result = await getPostgresPool().query(`
+        SELECT
+          EXISTS (
+            SELECT 1 FROM "public"."Events" WHERE "PhotoUrl" = $1
+          ) OR EXISTS (
+            SELECT 1 FROM "public"."SiteContent"
+            WHERE "ContentKey" IN ('about', 'gallery', 'news')
+              AND CAST("ContentJson" AS text) LIKE $2
+          ) AS found
+      `, [`/uploads/${filename}`, `%${filename}%`]);
+      isReferenced = Boolean(result.rows[0]?.found);
+    } else {
+      const azurePath = `/${azureStorageContainer}/${filename}`;
+      const result = await getPool().request()
+        .input('url', sql.NVarChar(1000), `/uploads/${filename}`)
+        .input('azurePath', sql.NVarChar(1000), azurePath)
+        .query(`
+          SELECT TOP 1 1 AS found
+          WHERE EXISTS (
+               SELECT 1 FROM dbo.Events
+               WHERE PhotoUrl = @url OR CHARINDEX(@azurePath, PhotoUrl) > 0
+             )
+             OR EXISTS (
+               SELECT 1 FROM dbo.SiteContent
+               WHERE ContentKey IN ('about', 'gallery', 'news')
+                 AND (CHARINDEX(@url, ContentJson) > 0 OR CHARINDEX(@azurePath, ContentJson) > 0)
+             )
+        `);
+      isReferenced = result.recordset.length > 0;
+    }
+
+    if (!isReferenced) {
       return res.status(404).json({ message: 'Photo not found.' });
     }
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     if (fs.existsSync(filePath)) {
       return res.sendFile(filePath);
+    }
+
+    if (supabaseStorage) {
+      const image = await supabaseStorage.download('public', filename, 5 * 1024 * 1024);
+      res.set('Content-Type', image.contentType);
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.send(image.contents);
     }
 
     if (!isAzureConfigured() || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpe?g|png|webp)$/i.test(filename)) {
@@ -3401,6 +3534,9 @@ app.use(createAdminReportingRouter({
   requireAdminWithQueryToken,
   getArchiveFile,
   deleteArchiveFile,
+  getPrivateFile: supabaseStorage
+    ? fileName => supabaseStorage.download('private', fileName, 10 * 1024 * 1024)
+    : undefined,
   postgresCertificatesEnabled,
   postgresOperationsEnabled,
   postgresSacramentalEnabled,
@@ -4107,10 +4243,12 @@ app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Pari
 });
 
 app.get('/api/admin/operations/audit', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   try { const result = await getPool().request().query('SELECT * FROM dbo.SystemAudit ORDER BY EventTime DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'auditLog' }); res.status(500).json({ message: 'Unable to load audit log.' }); }
 });
 
 app.post('/api/admin/operations/audit/clear', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   try {
     await getPool().request().query('DELETE FROM dbo.SystemAudit');
     res.json({ message: 'Audit log cleared.' });
@@ -4159,6 +4297,7 @@ app.get('/api/admin/operations/status', requireAdmin, requireRole(['Admin']), as
 });
 
 app.get('/api/admin/operations/backup', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   try {
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
     const backupFile = `ParishDB_Backup_${timestamp}.bak`;
@@ -4190,6 +4329,7 @@ app.get('/api/admin/operations/backup', requireAdmin, requireRole(['Admin']), as
 });
 
 app.post('/api/admin/operations/restore', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   const { fileName } = req.body;
   if (!fileName || typeof fileName !== 'string') {
     return res.status(400).json({ message: 'A valid backup file name is required.' });
@@ -4212,6 +4352,7 @@ app.post('/api/admin/operations/restore', requireAdmin, requireRole(['Admin']), 
 });
 
 app.get('/api/admin/operations/backup-list', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   try {
     const backupDir = path.join(__dirname, 'backups');
     const files = await fs.promises.readdir(backupDir);
@@ -4232,6 +4373,7 @@ app.get('/api/admin/operations/backup-list', requireAdmin, requireRole(['Admin']
 });
 
 app.delete('/api/admin/operations/backups', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   const { olderThanDays } = req.body;
   if (typeof olderThanDays !== 'number' || olderThanDays < 1) {
     return res.status(400).json({ message: 'Invalid retention period. Specify the number of days.' });
@@ -4282,6 +4424,7 @@ app.get('/api/admin/operations/email-test', requireAdmin, requireRole(['Admin'])
 });
 
 app.get('/api/admin/operations/email-logs', requireAdmin, requireRole(['Admin']), async (_req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   try {
     const result = await getPool().request().query('SELECT * FROM dbo.EmailLogs ORDER BY SentAt DESC');
     res.json(result.recordset);
@@ -4292,6 +4435,7 @@ app.get('/api/admin/operations/email-logs', requireAdmin, requireRole(['Admin'])
 });
 
 app.delete('/api/admin/operations/email-logs', requireAdmin, requireRole(['Admin']), async (req, res) => {
+  if (postgresOnlyMode) return res.status(501).json({ message: postgresOnlyUnavailableMessage });
   const { olderThanDays } = req.body;
   if (typeof olderThanDays !== 'number' || olderThanDays < 1) {
     return res.status(400).json({ message: 'Invalid retention period. Specify the number of days.' });
@@ -4348,6 +4492,28 @@ const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   if (process.env.LOCAL_ADMIN_PREVIEW_ONLY === '1') {
     logger.info('Local preview mode: database startup and scheduled jobs are disabled.');
+    return;
+  }
+  if (postgresOnlyMode) {
+    initializePostgresPool().then(async postgresPool => {
+      await checkPostgresReadiness(postgresPool);
+      if (supabaseStorage) {
+        await Promise.all([
+          supabaseStorage.checkBucket('public', true),
+          supabaseStorage.checkBucket('private', false),
+        ]);
+      }
+      supabaseStorageReady = true;
+      if (postgresOperationsEnabled) startFinanceReportSchedule();
+      if (postgresServicesEnabled) {
+        startNoShowVoidSchedule();
+        startTokenCleanupSchedule();
+        startBlockedSlotCleanupSchedule();
+      }
+    }).catch(err => {
+      console.error('PostgreSQL-only startup failed:', err.code || err.name || 'Error');
+      process.exit(1);
+    });
     return;
   }
   if (postgresConnectionEnabled) {

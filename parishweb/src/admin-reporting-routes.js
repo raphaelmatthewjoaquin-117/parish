@@ -156,6 +156,7 @@ export function createAdminReportingRouter({
   requireAdminWithQueryToken,
   getArchiveFile,
   deleteArchiveFile,
+  getPrivateFile,
   postgresCertificatesEnabled = false,
   postgresOperationsEnabled = false,
   postgresSacramentalEnabled = false,
@@ -927,6 +928,19 @@ export function createAdminReportingRouter({
         if (!document) return res.status(404).json({ message: 'Certificate document not found.' })
 
         const fileName = path.basename(document.StoredFileName || '')
+        if (!/^[A-Za-z0-9._-]+$/.test(fileName) || fileName.includes('..')) {
+          return res.status(404).json({ message: 'Certificate document not found.' })
+        }
+
+        if (getPrivateFile) {
+          const file = await getPrivateFile(fileName)
+          res.type(document.MimeType)
+          res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.OriginalFileName)}`)
+          res.set('Cache-Control', 'private, no-store')
+          res.set('X-Content-Type-Options', 'nosniff')
+          return res.send(file.contents)
+        }
+
         const filePath = path.resolve(uploadDirectory, fileName)
         if (!fileName || filePath !== path.join(path.resolve(uploadDirectory), fileName)) {
           return res.status(404).json({ message: 'Certificate document not found.' })
@@ -970,6 +984,9 @@ export function createAdminReportingRouter({
         }
       })
     } catch (error) {
+      if (error?.statusCode === 404) {
+        return res.status(404).json({ message: 'Certificate document not found.' })
+      }
       logError(error, { context: 'adminCertificateDocumentFile' })
       res.status(500).json({ message: 'Unable to open certificate document.' })
     }
