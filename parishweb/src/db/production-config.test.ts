@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assertProductionStorageConfiguration, createDatabaseConfig } from './config.js'
-import { checkDatabaseReadiness } from './readiness.js'
+import { checkDatabaseReadiness, checkPostgresReadiness } from './readiness.js'
 
 describe('createDatabaseConfig', () => {
   it('validates SQL certificates in production by default', () => {
@@ -85,5 +85,38 @@ describe('checkDatabaseReadiness', () => {
     }
 
     await expect(checkDatabaseReadiness(pool)).rejects.toThrow('Database unavailable')
+  })
+})
+
+describe('checkPostgresReadiness', () => {
+  it('succeeds only after PostgreSQL responds and the Events table exists', async () => {
+    const pool = {
+      query: async (query: string) => {
+        expect(query).toContain('to_regclass');
+        return { rows: [{ events_table: 'public."Events"' }] };
+      },
+    }
+
+    await expect(checkPostgresReadiness(pool)).resolves.toBeUndefined()
+  })
+
+  it('fails when the required Events table is missing', async () => {
+    const pool = {
+      query: async () => ({ rows: [{ events_table: null }] }),
+    }
+
+    await expect(checkPostgresReadiness(pool)).rejects.toThrow(
+      'PostgreSQL readiness check failed: required Events table is missing.',
+    )
+  })
+
+  it('propagates a PostgreSQL query failure', async () => {
+    const pool = {
+      query: async () => {
+        throw new Error('Database unavailable')
+      },
+    }
+
+    await expect(checkPostgresReadiness(pool)).rejects.toThrow('Database unavailable')
   })
 })

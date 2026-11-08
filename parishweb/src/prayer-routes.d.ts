@@ -18,6 +18,13 @@ interface PrayerRouteOptions {
   requireAdmin: RequestHandler
   requireRole(roles: string[]): RequestHandler
   logError(error: unknown, metadata: { context: string }): void
+  postgresEnabled?: boolean
+  getPostgresPool?: () => {
+    query(
+      query: string,
+      values?: unknown[],
+    ): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+  }
 }
 
 export function createPrayerRouter(options: PrayerRouteOptions): Router

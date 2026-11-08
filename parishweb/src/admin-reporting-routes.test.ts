@@ -16,6 +16,18 @@ function createTestApi(query: (
   requireAdminWithQueryToken?: RequestHandler
   getArchiveFile?: (fileUrl: string) => Promise<{ contents: Buffer; contentType: string; filename: string }>
   deleteArchiveFile?: (fileUrl: string) => Promise<void>
+  postgresCertificatesEnabled?: boolean
+  postgresOperationsEnabled?: boolean
+  postgresSacramentalEnabled?: boolean
+  getPostgresPool?: () => {
+    query: (statement: string, values?: unknown[]) =>
+      Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+    connect: () => Promise<{
+      query: (statement: string, values?: unknown[]) =>
+        Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+      release: () => void
+    }>
+  }
 } = {}) {
   const app = express()
   app.use(express.json())
@@ -77,6 +89,131 @@ describe('admin reporting routes', () => {
     })
   })
 
+  it('returns PostgreSQL finance totals with the existing response shape', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/FROM "public"\."FinancialEntries"/)
+      expect(statement).toMatch(/"Status" IN \('Approved', 'Reconciled'\)/)
+      expect(values).toEqual(['2026-01-01', '2026-01-31', 'Expense'])
+      return {
+        rows: [{ EntryType: 'Expense', EntryCount: '2', Total: '75.00' }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresOperationsEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/finance/report?start=2026-01-01&end=2026-01-31&type=Expense`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      totals: [{ EntryType: 'Expense', EntryCount: 2, Total: 75 }],
+    })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
+  it('lists PostgreSQL finance report snapshots newest first', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string) => {
+      expect(statement).toMatch(/FROM "public"\."FinanceReportSnapshots"/)
+      expect(statement).toMatch(/ORDER BY "GeneratedAt" DESC, "FinanceReportSnapshotId" DESC/)
+      return {
+        rows: [{
+          FinanceReportSnapshotId: 3,
+          ReportType: 'Monthly',
+          PeriodStart: '2026-10-01',
+          PeriodEnd: '2026-10-31',
+          TotalIncome: '120.00',
+          TotalExpenses: '45.00',
+          NetTotal: '75.00',
+          GeneratedAt: '2026-11-01T10:00:00Z',
+          GeneratedBy: 'parish@example.org',
+        }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresOperationsEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/finance/reports`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([
+      {
+        FinanceReportSnapshotId: 3,
+        ReportType: 'Monthly',
+        PeriodStart: '2026-10-01',
+        PeriodEnd: '2026-10-31',
+        TotalIncome: 120,
+        TotalExpenses: 45,
+        NetTotal: 75,
+        GeneratedAt: '2026-11-01T10:00:00Z',
+        GeneratedBy: 'parish@example.org',
+      },
+    ])
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
+  it('lists PostgreSQL finance audit records with entry details newest first', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string) => {
+      expect(statement).toMatch(/FROM "public"\."FinancialEntryAudit" audit/)
+      expect(statement).toMatch(/LEFT JOIN "public"\."FinancialEntries" entry/)
+      expect(statement).toMatch(/ORDER BY audit\."ChangedAt" DESC, audit\."AuditId" DESC/)
+      return {
+        rows: [{
+          AuditId: 21,
+          FinancialEntryId: 4,
+          ActionName: 'Approved',
+          EntryType: 'Donation',
+          Description: 'Sunday offering',
+          ChangedBy: 'parish@example.org',
+          ChangedAt: '2026-10-30T12:00:00Z',
+          Details: null,
+        }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresOperationsEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/finance/audit`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([{
+      AuditId: 21,
+      FinancialEntryId: 4,
+      ActionName: 'Approved',
+      EntryType: 'Donation',
+      Description: 'Sunday offering',
+      ChangedBy: 'parish@example.org',
+      ChangedAt: '2026-10-30T12:00:00Z',
+      Details: null,
+    }])
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
   it('rejects invalid finance report filters before querying', async () => {
     const query = vi.fn(async () => ({ recordset: [] }))
     const api = createTestApi(query)
@@ -85,6 +222,32 @@ describe('admin reporting routes', () => {
 
     expect(response.status).toBe(400)
     expect(query).not.toHaveBeenCalled()
+  })
+
+  it('lists certificate requests from PostgreSQL when that provider is enabled', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async () => ({
+      rows: [{ CertificateRequestId: 7, DocumentCount: '2' }],
+      rowCount: 1,
+    }))
+    const api = createTestApi(sqlServerQuery, {
+      postgresCertificatesEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/certificate-requests`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([
+      { CertificateRequestId: 7, DocumentCount: 2 },
+    ])
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+    expect(postgresQuery).toHaveBeenCalledOnce()
   })
 
   it('lists generated finance report snapshots newest first', async () => {
@@ -164,6 +327,84 @@ describe('admin reporting routes', () => {
         deaths: 1,
       }],
     })
+  })
+
+  it('returns PostgreSQL sacramental statistics with the existing response shape', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(values).toEqual([2026])
+      if (statement.includes('generate_series')) {
+        return {
+          rows: [{
+            month: 1,
+            monthName: 'January',
+            baptisms: '2',
+            confirmations: '1',
+            marriages: '0',
+            deaths: '1',
+          }],
+          rowCount: 1,
+        }
+      }
+
+      expect(statement).toMatch(/FROM "Records"/)
+      expect(statement).toMatch(/"DateOfBaptism"/)
+      expect(statement).toMatch(/"DateOfConfirmation"/)
+      expect(statement).toMatch(/"DateOfMarriage"/)
+      expect(statement).toMatch(/"DateOfDeath"/)
+      return {
+        rows: [{
+          totalBaptisms: '2',
+          totalConfirmations: '1',
+          totalMarriages: '0',
+          totalDeaths: '1',
+          InfantsUnder1Yr: '1',
+          ChildrenOver1Yr: '1',
+          AvgGroomAge: null,
+          AvgBrideAge: null,
+          Under25: '0',
+          Age25To35: '0',
+          Over35: '0',
+          AvgDeceasedAge: '74',
+          Under18: '0',
+          Age18To59: '0',
+          Senior60Plus: '1',
+        }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/operations/statistics?year=2026`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      targetYear: 2026,
+      summary: { totalBaptisms: 2, totalConfirmations: 1, totalMarriages: 0, totalDeaths: 1 },
+      demographics: {
+        baptisms: { InfantsUnder1Yr: 1, ChildrenOver1Yr: 1 },
+        marriages: { AvgGroomAge: null, AvgBrideAge: null, Under25: 0, Age25To35: 0, Over35: 0 },
+        deaths: { AvgDeceasedAge: 74, Under18: 0, Age18To59: 0, Senior60Plus: 1 },
+      },
+      monthlyBreakdown: [{
+        month: 1,
+        monthName: 'January',
+        baptisms: 2,
+        confirmations: 1,
+        marriages: 0,
+        deaths: 1,
+      }],
+    })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+    expect(postgresQuery).toHaveBeenCalledTimes(2)
   })
 
   it('rejects invalid sacramental statistics years before querying', async () => {
@@ -329,6 +570,125 @@ describe('admin reporting routes', () => {
     })
   })
 
+  it('searches PostgreSQL sacramental records with parameterized filters and pagination', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/"public"\."BaptismRecords"/)
+      expect(statement).toMatch(/"public"\."ConfirmationRecords"/)
+      expect(statement).toMatch(/"public"\."MarriageRecords"/)
+      expect(statement).toMatch(/"public"\."DeathRecords"/)
+      expect(values?.slice(0, 5)).toEqual([
+        'baptism',
+        '%Maria%',
+        '2020-01-01',
+        '2020-12-31',
+        '%Fr. Ben%',
+      ])
+      if (statement.includes('COUNT(*)')) return { rows: [{ total: '1' }], rowCount: 1 }
+      expect(values?.slice(5)).toEqual([10, 10])
+      return {
+        rows: [{
+          RecordType: 'baptism',
+          Id: 2,
+          RegistryNumber: 'B-002',
+          Name: 'Maria Santos',
+          RecordDate: '2020-06-01',
+          Priest: 'Fr. Ben',
+          ScannedDocumentUrl: null,
+        }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/search?type=baptism&q=Maria&startDate=2020-01-01&endDate=2020-12-31&priest=Fr.%20Ben&page=2&limit=10`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      records: [{
+        RecordType: 'baptism',
+        Id: 2,
+        RegistryNumber: 'B-002',
+        Name: 'Maria Santos',
+        RecordDate: '2020-06-01',
+        Priest: 'Fr. Ben',
+        ScannedDocumentUrl: null,
+      }],
+      pagination: { page: 2, limit: 10, total: 1 },
+    })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+    expect(postgresQuery).toHaveBeenCalledTimes(2)
+  })
+
+  it('loads PostgreSQL sacramental record details by validated record type and ID', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/FROM "public"\."BaptismRecords"\s+WHERE "BaptismId" = \$1/)
+      expect(values).toEqual([2])
+      return {
+        rows: [{ BaptismId: 2, RegistryNumber: 'B-002', ChildFirstName: 'Maria' }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/2`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      BaptismId: 2,
+      RegistryNumber: 'B-002',
+      ChildFirstName: 'Maria',
+    })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
+  it('loads PostgreSQL sacramental record audit history', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/FROM "public"\."SacramentalRecordAudit"/)
+      expect(statement).toMatch(/ORDER BY "ChangedAt" DESC, "AuditId" DESC/)
+      expect(values).toEqual(['baptism', 2])
+      return {
+        rows: [{ AuditId: 1, ActionName: 'Updated', ChangedBy: 'staff@example.org' }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/2/audit`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([
+      { AuditId: 1, ActionName: 'Updated', ChangedBy: 'staff@example.org' },
+    ])
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
   it('lists sacramental archives filtered by registry number', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/FROM dbo\.SacramentalArchives/i)
@@ -355,6 +715,51 @@ describe('admin reporting routes', () => {
     })
   })
 
+  it('lists PostgreSQL sacramental archives with validated filters and file routes', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/FROM "public"\."SacramentalArchives"/)
+      expect(statement).toMatch(/"RegistryNumber" = \$4/)
+      expect(statement).toMatch(/ORDER BY "UploadedAt" DESC, "ArchiveId" DESC/)
+      expect(values).toEqual(['marriage', 2, 6, 'M-100'])
+      return {
+        rows: [{
+          ArchiveId: 11,
+          SacramentType: 'marriage',
+          BookNumber: 2,
+          PageNumber: 6,
+          RegistryNumber: 'M-100',
+          FileUrl: 'private/archive.pdf',
+        }],
+        rowCount: 1,
+      }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives?sacramentType=marriage&bookNumber=2&pageNumber=6&registryNumber=M-100`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      archives: [{
+        ArchiveId: 11,
+        SacramentType: 'marriage',
+        BookNumber: 2,
+        PageNumber: 6,
+        RegistryNumber: 'M-100',
+        FileUrl: '/api/admin/sacramental/archives/11/file',
+      }],
+    })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
   it('saves an archive with a validated registry number', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/INSERT INTO dbo\.SacramentalArchives/i)
@@ -377,6 +782,41 @@ describe('admin reporting routes', () => {
 
     expect(response.status).toBe(201)
     await expect(response.json()).resolves.toEqual({ id: 17 })
+  })
+
+  it('creates PostgreSQL sacramental archives using bound values', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (statement: string, values?: unknown[]) => {
+      expect(statement).toMatch(/INSERT INTO "public"\."SacramentalArchives"/)
+      expect(values).toEqual(['baptism', 1, 5, 'B-005', 'private/scan.pdf', 'Old register', 'staff'])
+      return { rows: [{ id: 17 }], rowCount: 1 }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sacramentType: 'baptism',
+        bookNumber: 1,
+        pageNumber: 5,
+        registryNumber: ' B-005 ',
+        fileUrl: ' private/scan.pdf ',
+        notes: ' Old register ',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({ id: 17 })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
   })
 
   it('saves a standalone archive without a registry number', async () => {
@@ -445,6 +885,36 @@ describe('admin reporting routes', () => {
     expect(getArchiveFile).toHaveBeenCalledWith('/uploads/scan.pdf')
   })
 
+  it('serves PostgreSQL archive scans through the protected file route', async () => {
+    const getArchiveFile = vi.fn(async () => ({
+      contents: Buffer.from('scan'),
+      contentType: 'application/pdf',
+      filename: 'scan.pdf',
+    }))
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async () => ({
+      rows: [{ FileUrl: 'private/scan.pdf' }],
+      rowCount: 1,
+    }))
+    const api = createTestApi(sqlServerQuery, {
+      getArchiveFile,
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives/7/file?token=test-token`)
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toBe('scan')
+    expect(getArchiveFile).toHaveBeenCalledWith('private/scan.pdf')
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
   it('updates archive book, page, and notes', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/UPDATE dbo\.SacramentalArchives/)
@@ -464,6 +934,84 @@ describe('admin reporting routes', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ message: 'Archive entry updated.' })
+  })
+
+  it('updates PostgreSQL archive metadata and reports missing IDs', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (_statement: string, values?: unknown[]) => {
+      expect(values).toEqual([7, 2, 8, false, null, 'Updated notes'])
+      return { rows: [], rowCount: 0 }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives/7`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookNumber: 2, pageNumber: 8, notes: ' Updated notes ' }),
+    })
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ message: 'Archive not found.' })
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
+  it('updates PostgreSQL archive metadata when the archive exists', async () => {
+    const postgresQuery = vi.fn(async () => ({ rows: [], rowCount: 1 }))
+    const api = createTestApi(async () => ({ recordset: [] }), {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives/7`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookNumber: 2, pageNumber: 8, notes: 'Updated notes' }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Archive entry updated.' })
+  })
+
+  it('deletes the PostgreSQL archive and its stored file', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ FileUrl: 'private/archive.pdf' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+    const deleteArchiveFile = vi.fn(async () => undefined)
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      deleteArchiveFile,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/archives/7`, { method: 'DELETE' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Archive entry and file deleted.' })
+    expect(deleteArchiveFile).toHaveBeenCalledWith('private/archive.pdf')
+    expect(postgresQuery).toHaveBeenLastCalledWith(
+      expect.stringMatching(/DELETE FROM "public"\."SacramentalArchives"/),
+      [7],
+    )
+    expect(sqlServerQuery).not.toHaveBeenCalled()
   })
 
   it('links an existing archive to a registry entry when updated', async () => {
@@ -537,6 +1085,44 @@ describe('admin reporting routes', () => {
     await expect(response.json()).resolves.toEqual({ id: 5 })
   })
 
+  it('creates a PostgreSQL baptism record with bound values and a generated ID', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async (_statement: string, values?: unknown[]) => {
+      expect(values).toEqual([
+        'B-005', 'Ana', null, 'Santos', '2024-01-02', null, '2024-02-03',
+        null, null, 'Fr. Jose', null, null, 'staff',
+      ])
+      return { rows: [{ id: 5 }], rowCount: 1 }
+    })
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: postgresQuery,
+        connect: async () => {
+          throw new Error('Unexpected transaction connection')
+        },
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        registryNumber: 'B-005',
+        childFirstName: 'Ana',
+        childLastName: 'Santos',
+        dateOfBirth: '2024-01-02',
+        dateOfBaptism: '2024-02-03',
+        ministerName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({ id: 5 })
+    expect(postgresQuery.mock.calls[0][0]).toMatch(/INSERT INTO "public"\."BaptismRecords"/)
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
   it('updates a baptism record and records the changed fields', async () => {
     const api = createTestApi(async (statement, inputs) => {
       expect(statement).toMatch(/UPDATE dbo\.BaptismRecords/)
@@ -564,6 +1150,66 @@ describe('admin reporting routes', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ message: 'Sacramental record updated.' })
+  })
+
+  it('updates a PostgreSQL sacramental record and writes its audit row in one transaction', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const clientQuery = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+    const release = vi.fn()
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: vi.fn(),
+        connect: async () => ({ query: clientQuery, release }),
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        RegistryNumber: 'B-001',
+        ChildFirstName: 'Ana',
+        ChildLastName: 'Santos',
+        DateOfBirth: '2024-01-02',
+        DateOfBaptism: '2024-02-03',
+        MinisterName: 'Fr. Jose',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record updated.' })
+    expect(clientQuery.mock.calls.map(([statement]) => statement)).toEqual([
+      'BEGIN',
+      expect.stringMatching(/UPDATE "public"\."BaptismRecords"/),
+      expect.stringMatching(/INSERT INTO "public"\."SacramentalRecordAudit"/),
+      'COMMIT',
+    ])
+    expect(clientQuery.mock.calls[2][1]).toEqual([
+      'baptism',
+      1,
+      'staff',
+      JSON.stringify({
+        RegistryNumber: true,
+        ChildFirstName: true,
+        ChildMiddleName: true,
+        ChildLastName: true,
+        DateOfBirth: true,
+        PlaceOfBirth: true,
+        DateOfBaptism: true,
+        FatherFullName: true,
+        MotherFullName: true,
+        MinisterName: true,
+        Sponsors: true,
+        Remarks: true,
+      }),
+    ])
+    expect(release).toHaveBeenCalledOnce()
+    expect(sqlServerQuery).not.toHaveBeenCalled()
   })
 
   it('returns not found when updating a missing sacramental record', async () => {
@@ -622,6 +1268,62 @@ describe('admin reporting routes', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ message: 'Sacramental record deleted.' })
+  })
+
+  it('deletes a PostgreSQL sacramental record and audit row atomically', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const clientQuery = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+    const release = vi.fn()
+    const api = createTestApi(sqlServerQuery, {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: vi.fn(),
+        connect: async () => ({ query: clientQuery, release }),
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, { method: 'DELETE' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: 'Sacramental record deleted.' })
+    expect(clientQuery.mock.calls.map(([statement]) => statement)).toEqual([
+      'BEGIN',
+      expect.stringMatching(/DELETE FROM "public"\."BaptismRecords"/),
+      expect.stringMatching(/INSERT INTO "public"\."SacramentalRecordAudit"/),
+      'COMMIT',
+    ])
+    expect(clientQuery.mock.calls[2][1]).toEqual(['baptism', 1, 'staff', '{"deleted":true}'])
+    expect(release).toHaveBeenCalledOnce()
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+  })
+
+  it('rolls back a PostgreSQL sacramental delete if its audit write fails', async () => {
+    const clientQuery = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockRejectedValueOnce(new Error('audit unavailable'))
+      .mockResolvedValueOnce({ rows: [], rowCount: null })
+    const api = createTestApi(async () => ({ recordset: [] }), {
+      postgresSacramentalEnabled: true,
+      getPostgresPool: () => ({
+        query: vi.fn(),
+        connect: async () => ({ query: clientQuery, release: vi.fn() }),
+      }),
+    })
+
+    const response = await fetch(`${api}/api/admin/sacramental/baptism/1`, { method: 'DELETE' })
+
+    expect(response.status).toBe(500)
+    expect(clientQuery.mock.calls.map(([statement]) => statement)).toEqual([
+      'BEGIN',
+      expect.stringMatching(/DELETE FROM "public"\."BaptismRecords"/),
+      expect.stringMatching(/INSERT INTO "public"\."SacramentalRecordAudit"/),
+      'ROLLBACK',
+    ])
   })
 
   it('returns not found when deleting a missing sacramental record', async () => {

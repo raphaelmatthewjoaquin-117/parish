@@ -5,3 +5,6 @@ interface DatabaseReadinessPool {
 }
 
 export function checkDatabaseReadiness(pool: DatabaseReadinessPool): Promise<void>;
+export function checkPostgresReadiness(pool: {
+  query(query: string): Promise<{ rows: Array<{ events_table: string | null }> }>;
+}): Promise<void>;

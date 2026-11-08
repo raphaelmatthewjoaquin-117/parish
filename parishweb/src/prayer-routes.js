@@ -1,12 +1,29 @@
 import express from 'express'
+import {
+  approvePostgresPrayer,
+  createPostgresPrayer,
+  listPostgresPublicPrayers,
+} from './content/postgres-content.js'
 
 const prayerCategories = new Set(['healing', 'thanksgiving', 'guidance', 'family', 'deceased', 'other'])
 
-export function createPrayerRouter({ getPool, sql, requireAdmin, requireRole, logError }) {
+export function createPrayerRouter({
+  getPool,
+  sql,
+  requireAdmin,
+  requireRole,
+  logError,
+  postgresEnabled = false,
+  getPostgresPool,
+}) {
   const router = express.Router()
 
   router.get('/api/prayers', async (_req, res) => {
     try {
+      if (postgresEnabled) {
+        return res.json(await listPostgresPublicPrayers(getPostgresPool()))
+      }
+
       const result = await getPool().request().query(`
         SELECT PrayerId, Name, Category, Request, Anonymous, CreatedAt
         FROM dbo.PrayerRequests
@@ -40,6 +57,17 @@ export function createPrayerRouter({ getPool, sql, requireAdmin, requireRole, lo
     }
 
     try {
+      if (postgresEnabled) {
+        const id = await createPostgresPrayer(getPostgresPool(), {
+          name: name.trim(),
+          category,
+          request: request.trim(),
+          anonymous: anonymous ?? false,
+          shareWithCommunity: shareWithCommunity ?? false,
+        })
+        return res.status(201).json({ id, message: 'Prayer request received.' })
+      }
+
       const result = await getPool().request()
         .input('name', sql.NVarChar(255), name.trim())
         .input('category', sql.NVarChar(50), category)
@@ -70,6 +98,13 @@ export function createPrayerRouter({ getPool, sql, requireAdmin, requireRole, lo
     }
 
     try {
+      if (postgresEnabled) {
+        if (!await approvePostgresPrayer(getPostgresPool(), prayerId)) {
+          return res.status(404).json({ message: 'Prayer request not found.' })
+        }
+        return res.json({ success: true })
+      }
+
       const result = await getPool().request()
         .input('prayerId', sql.Int, prayerId)
         .query(`

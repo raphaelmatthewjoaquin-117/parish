@@ -1,7 +1,15 @@
 import express from 'express'
 import { normalizeBlockedSlotInput } from '../server-rules.js'
 
-export async function cleanupExpiredBlockedSlots(getPool) {
+export async function cleanupExpiredBlockedSlots(getPool, getPostgresPool = null) {
+  if (getPostgresPool) {
+    const result = await getPostgresPool().query(`
+      DELETE FROM "public"."BlockedSlots"
+      WHERE "BlockDate" < timezone('Asia/Manila', now())::date
+    `)
+    return result.rowCount ?? 0
+  }
+
   const result = await getPool().request().query(`
     DELETE FROM dbo.BlockedSlots
     -- Parish booking dates use Manila time (UTC+08:00), regardless of DB host timezone.
@@ -10,13 +18,36 @@ export async function cleanupExpiredBlockedSlots(getPool) {
   return result.rowsAffected?.[0] ?? 0
 }
 
-export function createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRole, logError }) {
+export function createBlockedSlotsRouter({
+  getPool,
+  getPostgresPool,
+  postgresEnabled = false,
+  sql,
+  requireAdmin,
+  requireRole,
+  logError,
+}) {
   const router = express.Router()
   const availabilityAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary'])]
 
   router.get('/api/admin/blocked-slots', ...availabilityAccess, async (_req, res) => {
     try {
-      await cleanupExpiredBlockedSlots(getPool)
+      await cleanupExpiredBlockedSlots(getPool, postgresEnabled ? getPostgresPool : null)
+      if (postgresEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT block."BlockedSlotId" AS id,
+            to_char(block."BlockDate", 'YYYY-MM-DD') AS date,
+            block."BlockTime" AS time, block."Scope" AS scope,
+            block."ServiceId" AS "serviceId", service."Name" AS "serviceName",
+            block."Reason" AS reason
+          FROM "public"."BlockedSlots" AS block
+          LEFT JOIN "public"."Service" AS service
+            ON service."ServiceId" = block."ServiceId"
+          ORDER BY block."BlockDate", block."BlockTime", block."BlockedSlotId"
+        `)
+        return res.json(result.rows)
+      }
+
       const result = await getPool().request().query(`
         SELECT b.BlockedSlotId, CONVERT(varchar(10), b.BlockDate, 23) AS BlockDate,
           b.BlockTime, b.Scope, b.ServiceId, s.Name AS ServiceName, b.Reason
@@ -52,6 +83,16 @@ export function createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRo
     }
 
     try {
+      if (postgresEnabled) {
+        const result = await getPostgresPool().query(`
+          INSERT INTO "public"."BlockedSlots"
+            ("BlockDate", "BlockTime", "Scope", "ServiceId", "Reason", "CreatedAt")
+          VALUES ($1, $2, $3, $4, $5, timezone('UTC', now()))
+          RETURNING "BlockedSlotId" AS id
+        `, [block.date, block.time, block.scope, block.serviceId, block.reason])
+        return res.status(201).json({ id: result.rows[0].id })
+      }
+
       const result = await getPool().request()
         .input('date', sql.Date, block.date)
         .input('time', sql.VarChar(5), block.time)
@@ -77,6 +118,18 @@ export function createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRo
     }
 
     try {
+      if (postgresEnabled) {
+        const result = await getPostgresPool().query(`
+          DELETE FROM "public"."BlockedSlots"
+          WHERE "BlockedSlotId" = $1
+          RETURNING "BlockedSlotId"
+        `, [id])
+        if (result.rows.length === 0) {
+          return res.status(404).json({ message: 'Blocked booking time not found.' })
+        }
+        return res.json({ success: true })
+      }
+
       const result = await getPool().request()
         .input('id', sql.Int, id)
         .query(`

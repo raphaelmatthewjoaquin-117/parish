@@ -5,8 +5,17 @@ interface BlockedSlotRequest {
   query(statement: string): Promise<{ recordset: Array<Record<string, unknown>>; rowsAffected?: number[] }>
 }
 
+interface PostgresBlockedSlotPool {
+  query(
+    statement: string,
+    values?: unknown[],
+  ): Promise<{ rows: Array<Record<string, unknown>>; rowCount: number | null }>
+}
+
 interface BlockedSlotsRouteOptions {
   getPool: () => { request: () => BlockedSlotRequest }
+  getPostgresPool?: () => PostgresBlockedSlotPool
+  postgresEnabled?: boolean
   sql: {
     Date: unknown
     Int: unknown
@@ -19,4 +28,7 @@ interface BlockedSlotsRouteOptions {
 }
 
 export function createBlockedSlotsRouter(options: BlockedSlotsRouteOptions): Router
-export function cleanupExpiredBlockedSlots(getPool: () => { request: () => BlockedSlotRequest }): Promise<number>
+export function cleanupExpiredBlockedSlots(
+  getPool: () => { request: () => BlockedSlotRequest },
+  getPostgresPool?: () => PostgresBlockedSlotPool,
+): Promise<number>

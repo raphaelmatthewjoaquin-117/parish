@@ -11,7 +11,7 @@ The application is in [`parishweb`](./parishweb/). It has a React/Vite frontend 
 | Frontend | React 19, TypeScript 6, Vite 8 |
 | Navigation and UI | React Router 7, Bootstrap 5, FullCalendar |
 | Backend API | Node.js (ES modules), Express 5 |
-| Database | Microsoft SQL Server, accessed with `mssql` |
+| Database | Microsoft SQL Server (existing routes) and optional Supabase PostgreSQL |
 | Authentication and security | Staff roles and module permissions, Helmet, CORS, rate limiting |
 | Email and file handling | Resend for email (optional local configuration), Multer for uploads |
 | Tests and checks | Vitest, Testing Library, Happy DOM, ESLint, TypeScript |
@@ -49,6 +49,27 @@ You can start with a **new, empty database** on the new laptop; the old laptop's
 5. Set `DB_SERVER`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` in the API terminal to match that SQL Server instance. The example assumes SQL Server accepts TCP connections at `localhost:1433`. SQL Server Express may use a different or dynamic port; enable TCP/IP and configure a static port in SQL Server Configuration Manager, restart the SQL Server service, and set `DB_PORT` to that port. A default instance often uses port 1433, but verify the configured port rather than assuming it.
 
 The baseline is based on the schema-only export of the current database and is reconciled with schema changes through migration `027`. It creates 42 tables, 20 foreign keys, and 6 triggers, plus defaults, indexes, and other constraints. It contains no parish records, does not create the old SQL login, and does not use the old laptop's physical database-file paths. The numbered `001`–`027` SQL files are historical incremental migrations; do not replay them on top of this baseline. Migration `003` is a legacy-data migration and is intentionally not part of this empty-database baseline.
+
+For a PostgreSQL/Supabase schema, [`supabase/migrations/20261108094830_initial_schema.sql`](./parishweb/supabase/migrations/20261108094830_initial_schema.sql) is adapted from that baseline. It is also schema-only: it does not recover or transfer database records, seed the service catalog, or create a staff account. It enables row-level security without adding client policies; access must go through a secured server-side database role until policies are designed. Apply it only to a new/empty Supabase project.
+
+The Express API can use a server-side `DATABASE_URL` to connect to Supabase PostgreSQL. Keep this value in the ignored `parishweb/.env` and do not give it a `VITE_` prefix. The pool rejects superuser, `BYPASSRLS`, object-owner, database-owner, and role-membership connections; use a dedicated restricted runtime login, never the Supabase owner credential. SQL Server remains the default for each module. Before setting a provider to `postgres`, apply its reviewed access migration using an owner/admin connection and verify it as the restricted runtime role. The identity verifier is `npm run db:verify-identity`; public content uses `npm run db:verify-content`; events use `npm run db:verify-events`; service catalog and bookings use `npm run db:verify-service-catalog`; certificates use `npm run db:verify-certificates`; operations use `npm run db:verify-operations`; sacramental records use `npm run db:verify-sacramental`. The identity and sacramental access checks have been reported as successful. For events, apply `20261108191000_events_access.sql`, run `npm run db:verify-events`, then set `EVENTS_DATABASE=postgres` to test public listing and admin event CRUD. Set each provider to `postgres` only after its access migration and verifier pass; reverting it to `sqlserver` selects the fallback. TLS certificate verification stays enabled; if Node does not trust the Supabase certificate by default, set `DATABASE_SSL_CA_PATH` to the path of the CA PEM from Supabase Database Settings > SSL Configuration (or provide the PEM in `DATABASE_SSL_CA`). `/readyz/postgres` checks PostgreSQL connectivity and the required Events table independently; `/readyz` still represents whole-app readiness and requires SQL Server while legacy routes remain. SQL Server is still needed for unmigrated routes and SQL Server-specific backup/restore. The Supabase schema contains no recovered parish data; use clearly labeled test content when verifying writes.
+
+Sacramental archive and register reads have passed the restricted-role verifier. Sacramental search, details, record CRUD/audit, archive CRUD, and statistics now also have opt-in PostgreSQL code paths. Before enabling those writes, apply [`20261108180000_sacramental_register_write_access.sql`](./parishweb/supabase/migrations/20261108180000_sacramental_register_write_access.sql) in Supabase SQL Editor with owner/admin access, then run `npm run db:verify-sacramental` from `parishweb`. Keep `SACRAMENTAL_DATABASE=sqlserver` until this verification passes.
+
+The manual owner-only starting point for the restricted role is
+[`supabase/role-setup.sql`](./parishweb/supabase/role-setup.sql). It creates
+the role without a password or application-table grants and prints a
+read-only privilege/ownership check. Run it only after confirming the role
+name is unused or reviewing the existing role. Set its password interactively
+with `psql`'s `\password parish_app_runtime` command, or run
+`npm run db:configure-runtime` from `parishweb`. The helper asks for the new
+password without echoing it, sets it through the existing private owner
+connection, and changes only `DATABASE_URL` in the ignored `.env` to the
+restricted login. No password is printed. The helper requires the current
+owner/admin URL in that local `.env` and replaces it; keep owner credentials
+separate for future migrations. Do not use the owner URL as the app's runtime
+URL; feature-specific grants and RLS policies are separate and must be
+reviewed before enabling a feature.
 
 The baseline also does not populate service-catalog entries or create a staff account. Run [`scripts/seed-service-catalog.sql`](./parishweb/scripts/seed-service-catalog.sql) to add the initial services, and use [`create_admin_user.sql`](./parishweb/create_admin_user.sql) only for a private local development database if you need a staff login.
 
@@ -140,6 +161,10 @@ in the Render dashboard, not in Git or chat.
 | `DB_SERVER`, `DB_PORT`, `DB_NAME` | Production SQL Server host, port, and database |
 | `DB_USER`, `DB_PASSWORD` | Dedicated SQL login and password |
 | `DB_TRUST_SERVER_CERTIFICATE` | `false`; the SQL Server certificate must validate |
+| `DATABASE_URL` | Optional restricted Supabase runtime login; never the owner role |
+| `DATABASE_SSL_CA_PATH` | Optional path to the trusted Supabase CA PEM |
+| `EVENTS_DATABASE` | Keep `sqlserver` until restricted-role event permissions are verified |
+| `CONTENT_DATABASE` | Keep `sqlserver` until public-content permissions are verified |
 | `AZURE_STORAGE_CONNECTION_STRING` | Rotated Azure Storage connection string |
 | `AZURE_STORAGE_CONTAINER_NAME` | `uploads` (or the configured container) |
 | `RESEND_API_KEY` | Optional; set only if production email is enabled |

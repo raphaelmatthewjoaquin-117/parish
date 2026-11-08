@@ -38,7 +38,10 @@ function parishDate(offsetDays = 0) {
   return date.toISOString().slice(0, 10)
 }
 
-async function startApi(initialRows: Record<string, unknown>[] = []) {
+async function startApi(
+  initialRows: Record<string, unknown>[] = [],
+  options: { postgresPool?: { query: (statement: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }> } } = {},
+) {
   const rows = [...initialRows]
   let nextId = 1
   const sql = {
@@ -50,6 +53,8 @@ async function startApi(initialRows: Record<string, unknown>[] = []) {
   const app = express()
   app.use(express.json())
   app.use(createBlockedSlotsRouter({
+    postgresEnabled: Boolean(options.postgresPool),
+    getPostgresPool: () => options.postgresPool!,
     sql,
     getPool: () => ({
       request: () => {
@@ -155,5 +160,52 @@ describe('admin blocked slots API', () => {
     })
     expect(response.status).toBe(400)
     expect(rows).toHaveLength(0)
+  })
+
+  it('lists, creates, and deletes blocked slots through PostgreSQL when enabled', async () => {
+    const date = nextOfficeDate()
+    const postgresPool = {
+      query: async (statement: string) => {
+        if (statement.includes('"BlockDate" <')) return { rows: [], rowCount: 0 }
+        if (statement.includes('INSERT INTO')) return { rows: [{ id: 17 }], rowCount: 1 }
+        if (statement.includes('DELETE') && statement.includes('RETURNING')) return { rows: [{ id: 17 }], rowCount: 1 }
+        return {
+          rows: [{
+            id: 17,
+            date,
+            time: '09:00',
+            scope: 'All',
+            serviceId: null,
+            serviceName: null,
+            reason: 'Parish event',
+          }],
+          rowCount: 1,
+        }
+      },
+    }
+    const { baseUrl } = await startApi([], { postgresPool })
+
+    const listed = await fetch(baseUrl)
+    expect(await listed.json()).toEqual([{
+      id: 17,
+      date,
+      time: '09:00',
+      scope: 'All',
+      serviceId: null,
+      serviceName: null,
+      reason: 'Parish event',
+    }])
+
+    const created = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, time: '09:00', scope: 'All', reason: 'Parish event' }),
+    })
+    expect(created.status).toBe(201)
+    expect(await created.json()).toEqual({ id: 17 })
+
+    const deleted = await fetch(`${baseUrl}/17`, { method: 'DELETE' })
+    expect(deleted.status).toBe(200)
+    expect(await deleted.json()).toEqual({ success: true })
   })
 })

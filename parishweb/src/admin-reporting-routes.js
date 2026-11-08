@@ -1,5 +1,12 @@
 import express from 'express'
 import path from 'node:path'
+import {
+  deletePostgresCertificateRequest,
+  getPostgresCertificateDocument,
+  listPostgresCertificateRequests,
+  listPostgresCertificateUploads,
+  setPostgresCertificateRequestStatus,
+} from './certificates/postgres-certificates.js'
 
 const sacramentTypes = new Set(['baptism', 'confirmation', 'marriage', 'death'])
 const financeTypes = new Set(['StoleFee', 'MassOffering', 'Donation', 'Rental', 'OtherIncome', 'Expense'])
@@ -79,6 +86,28 @@ const recordQuery = `
   FROM dbo.DeathRecords
 `
 
+const postgresRecordQuery = `
+  SELECT 'baptism' AS "RecordType", "BaptismId" AS "Id", "RegistryNumber",
+    CONCAT("ChildFirstName", ' ', "ChildLastName") AS "Name", "DateOfBaptism" AS "RecordDate",
+    "MinisterName" AS "Priest", "ScannedDocumentUrl"
+  FROM "public"."BaptismRecords"
+  UNION ALL
+  SELECT 'confirmation', "ConfirmationId", "RegistryNumber",
+    CONCAT("CandidateFirstName", ' ', "CandidateLastName"), "DateOfConfirmation",
+    "BishopOrMinister", "ScannedDocumentUrl"
+  FROM "public"."ConfirmationRecords"
+  UNION ALL
+  SELECT 'marriage', "MarriageId", "RegistryNumber",
+    CONCAT("GroomFirstName", ' ', "GroomLastName", ' / ', "BrideFirstName", ' ', "BrideLastName"),
+    "DateOfMarriage", "SolemnizingPriest", "ScannedDocumentUrl"
+  FROM "public"."MarriageRecords"
+  UNION ALL
+  SELECT 'death', "DeathId", "RegistryNumber",
+    CONCAT("DeceasedFirstName", ' ', "DeceasedLastName"), "DateOfDeath",
+    "OfficiatingPriest", "ScannedDocumentUrl"
+  FROM "public"."DeathRecords"
+`
+
 const sacramentalStatisticsQuery = `
   SELECT 'baptism' AS RecordType, DateOfBaptism AS RecordDate,
     DATEDIFF(YEAR, DateOfBirth, DateOfBaptism)
@@ -127,11 +156,38 @@ export function createAdminReportingRouter({
   requireAdminWithQueryToken,
   getArchiveFile,
   deleteArchiveFile,
+  postgresCertificatesEnabled = false,
+  postgresOperationsEnabled = false,
+  postgresSacramentalEnabled = false,
+  getPostgresPool,
 }) {
   const router = express.Router()
   const financeAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper'])]
   const recordsAccess = [requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff'])]
   const archiveFileAccess = [requireAdminWithQueryToken || requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff'])]
+
+  async function withPostgresTransaction(operation) {
+    const client = await getPostgresPool().connect()
+    let transactionStarted = false
+    try {
+      await client.query('BEGIN')
+      transactionStarted = true
+      const result = await operation(client)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await client.query('ROLLBACK')
+        } catch (rollbackError) {
+          logError(rollbackError, { context: 'sacramentalTransactionRollback' })
+        }
+      }
+      throw error
+    } finally {
+      client.release()
+    }
+  }
 
   router.post('/api/admin/sacramental/:type', ...recordsAccess, async (req, res, next) => {
     const record = sacramentRecords[req.params.type]
@@ -187,6 +243,18 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresSacramentalEnabled) {
+        const createdBy = req.staff?.email || req.staff?.role || 'staff'
+        const result = await getPostgresPool().query(`
+          INSERT INTO "public"."${record.table}"
+            (${columns.map(column => `"${column}"`).join(', ')}, "CreatedBy")
+          VALUES (${inputs.map((_, index) => `$${index + 1}`).join(', ')}, $${inputs.length + 1})
+          RETURNING "${record.idColumn}" AS id
+        `, [...inputs.map(([, , value]) => value), createdBy])
+        if (!result.rows[0]) throw new Error('Sacramental record insert returned no ID.')
+        return res.status(201).json(result.rows[0])
+      }
+
       const request = getPool().request()
       for (const [parameter, type, value] of inputs) request.input(parameter, type, value)
       request.input('createdBy', sql.NVarChar(256), req.staff?.email || req.staff?.role || 'staff')
@@ -256,6 +324,34 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresSacramentalEnabled) {
+        const values = inputs.map(([, , value]) => value)
+        const assignments = record.fields.map((field, index) => `"${field.column}" = $${index + 1}`)
+        assignments.push('"UpdatedAt" = timezone(\'UTC\', now())')
+        const result = await withPostgresTransaction(async client => {
+          const updated = await client.query(`
+            UPDATE "public"."${record.table}"
+            SET ${assignments.join(', ')}
+            WHERE "${record.idColumn}" = $${values.length + 1}
+          `, [...values, id])
+          if (updated.rowCount === 0) return false
+
+          await client.query(`
+            INSERT INTO "public"."SacramentalRecordAudit"
+              ("RecordType", "RecordId", "ActionName", "ChangedBy", "Changes")
+            VALUES ($1, $2, 'Updated', $3, $4)
+          `, [
+            req.params.type,
+            id,
+            req.staff?.email || req.staff?.role || 'staff',
+            JSON.stringify(Object.fromEntries(record.fields.map(field => [field.column, true]))),
+          ])
+          return true
+        })
+        if (!result) return res.status(404).json({ message: 'Sacramental record not found.' })
+        return res.json({ message: 'Sacramental record updated.' })
+      }
+
       const request = getPool().request()
       for (const [parameter, type, value] of inputs) request.input(parameter, type, value)
       request.input('id', sql.Int, id)
@@ -305,6 +401,29 @@ export function createAdminReportingRouter({
     if (!id) return res.status(400).json({ message: 'A valid sacramental record ID is required.' })
 
     try {
+      if (postgresSacramentalEnabled) {
+        const deleted = await withPostgresTransaction(async client => {
+          const result = await client.query(`
+            DELETE FROM "public"."${record.table}" WHERE "${record.idColumn}" = $1
+          `, [id])
+          if (result.rowCount === 0) return false
+
+          await client.query(`
+            INSERT INTO "public"."SacramentalRecordAudit"
+              ("RecordType", "RecordId", "ActionName", "ChangedBy", "Changes")
+            VALUES ($1, $2, 'Deleted', $3, $4)
+          `, [
+            req.params.type,
+            id,
+            req.staff?.email || req.staff?.role || 'staff',
+            JSON.stringify({ deleted: true }),
+          ])
+          return true
+        })
+        if (!deleted) return res.status(404).json({ message: 'Sacramental record not found.' })
+        return res.json({ message: 'Sacramental record deleted.' })
+      }
+
       const result = await getPool().request()
         .input('id', sql.Int, id)
         .input('recordType', sql.VarChar(30), req.params.type)
@@ -374,12 +493,18 @@ export function createAdminReportingRouter({
     if (!getArchiveFile) return res.status(500).json({ message: 'Archive file storage is not configured.' })
 
     try {
-      const archive = await getPool().request()
-        .input('id', sql.Int, id)
-        .query('SELECT FileUrl FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
-      if (!archive.recordset[0]) return res.status(404).json({ message: 'Archive not found.' })
+      const archive = postgresSacramentalEnabled
+        ? await getPostgresPool().query(`
+            SELECT "FileUrl" FROM "public"."SacramentalArchives"
+            WHERE "ArchiveId" = $1
+          `, [id])
+        : await getPool().request()
+          .input('id', sql.Int, id)
+          .query('SELECT FileUrl FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
+      const fileUrl = postgresSacramentalEnabled ? archive.rows[0]?.FileUrl : archive.recordset[0]?.FileUrl
+      if (!fileUrl) return res.status(404).json({ message: 'Archive not found.' })
 
-      const file = await getArchiveFile(archive.recordset[0].FileUrl)
+      const file = await getArchiveFile(fileUrl)
       res.set('Content-Type', file.contentType)
       res.set('Content-Disposition', `inline; filename="${file.filename.replace(/["\\]/g, '')}"`)
       res.set('Cache-Control', 'private, no-store')
@@ -405,6 +530,26 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresOperationsEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT "EntryType", COUNT(*) AS "EntryCount", SUM("Amount") AS "Total"
+          FROM "public"."FinancialEntries"
+          WHERE "Status" IN ('Approved', 'Reconciled')
+            AND ($1::date IS NULL OR "EntryDate" >= $1::date)
+            AND ($2::date IS NULL OR "EntryDate" <= $2::date)
+            AND ($3::varchar IS NULL OR "EntryType" = $3::varchar)
+          GROUP BY "EntryType"
+          ORDER BY "EntryType"
+        `, [start, end, type])
+        return res.json({
+          totals: result.rows.map(row => ({
+            ...row,
+            EntryCount: Number(row.EntryCount),
+            Total: Number(row.Total),
+          })),
+        })
+      }
+
       const result = await getPool().request()
         .input('start', sql.Date, start)
         .input('end', sql.Date, end)
@@ -428,6 +573,22 @@ export function createAdminReportingRouter({
 
   router.get('/api/admin/operations/finance/reports', ...financeAccess, async (_req, res) => {
     try {
+      if (postgresOperationsEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT "FinanceReportSnapshotId", "ReportType", "PeriodStart", "PeriodEnd",
+            "TotalIncome", "TotalExpenses", "NetTotal", "GeneratedAt", "GeneratedBy"
+          FROM "public"."FinanceReportSnapshots"
+          ORDER BY "GeneratedAt" DESC, "FinanceReportSnapshotId" DESC
+          LIMIT 100
+        `)
+        return res.json(result.rows.map(row => ({
+          ...row,
+          TotalIncome: Number(row.TotalIncome),
+          TotalExpenses: Number(row.TotalExpenses),
+          NetTotal: Number(row.NetTotal),
+        })))
+      }
+
       const result = await getPool().request().query(`
         SELECT TOP 100 FinanceReportSnapshotId, ReportType, PeriodStart, PeriodEnd,
           TotalIncome, TotalExpenses, NetTotal, GeneratedAt, GeneratedBy
@@ -443,6 +604,21 @@ export function createAdminReportingRouter({
 
   router.get('/api/admin/operations/finance/audit', ...financeAccess, async (_req, res) => {
     try {
+      if (postgresOperationsEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT audit."AuditId", audit."FinancialEntryId", audit."ActionName",
+            COALESCE(entry."EntryType", 'Unknown') AS "EntryType",
+            COALESCE(entry."Description", 'Entry no longer exists') AS "Description",
+            audit."ChangedBy", audit."ChangedAt", audit."Details"
+          FROM "public"."FinancialEntryAudit" audit
+          LEFT JOIN "public"."FinancialEntries" entry
+            ON entry."FinancialEntryId" = audit."FinancialEntryId"
+          ORDER BY audit."ChangedAt" DESC, audit."AuditId" DESC
+          LIMIT 200
+        `)
+        return res.json(result.rows)
+      }
+
       const result = await getPool().request().query(`
         SELECT TOP 200 audit.AuditId, audit.FinancialEntryId, audit.ActionName,
           COALESCE(entry.EntryType, 'Unknown') AS EntryType,
@@ -471,6 +647,121 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresSacramentalEnabled) {
+        const summaryResult = await getPostgresPool().query(`
+          WITH "Records" AS (
+            SELECT 'baptism' AS "RecordType", "DateOfBaptism" AS "RecordDate",
+              EXTRACT(YEAR FROM age("DateOfBaptism", "DateOfBirth")) AS "PersonAge",
+              NULL::integer AS "GroomAge", NULL::integer AS "BrideAge",
+              NULL::numeric AS "MarriageAge"
+            FROM "public"."BaptismRecords"
+            UNION ALL
+            SELECT 'confirmation', "DateOfConfirmation", NULL, NULL, NULL, NULL
+            FROM "public"."ConfirmationRecords"
+            UNION ALL
+            SELECT 'marriage', "DateOfMarriage", NULL, "GroomAge", "BrideAge",
+              COALESCE(
+                ("GroomAge" + "BrideAge") / 2.0,
+                "GroomAge"::numeric,
+                "BrideAge"::numeric
+              )
+            FROM "public"."MarriageRecords"
+            UNION ALL
+            SELECT 'death', "DateOfDeath", "Age", NULL, NULL, NULL
+            FROM "public"."DeathRecords"
+          )
+          SELECT
+            COUNT(*) FILTER (WHERE "RecordType" = 'baptism') AS "totalBaptisms",
+            COUNT(*) FILTER (WHERE "RecordType" = 'confirmation') AS "totalConfirmations",
+            COUNT(*) FILTER (WHERE "RecordType" = 'marriage') AS "totalMarriages",
+            COUNT(*) FILTER (WHERE "RecordType" = 'death') AS "totalDeaths",
+            COUNT(*) FILTER (WHERE "RecordType" = 'baptism' AND "PersonAge" < 1) AS "InfantsUnder1Yr",
+            COUNT(*) FILTER (WHERE "RecordType" = 'baptism' AND "PersonAge" >= 1) AS "ChildrenOver1Yr",
+            AVG("GroomAge") FILTER (WHERE "RecordType" = 'marriage') AS "AvgGroomAge",
+            AVG("BrideAge") FILTER (WHERE "RecordType" = 'marriage') AS "AvgBrideAge",
+            COUNT(*) FILTER (WHERE "RecordType" = 'marriage' AND "MarriageAge" < 25) AS "Under25",
+            COUNT(*) FILTER (WHERE "RecordType" = 'marriage' AND "MarriageAge" BETWEEN 25 AND 35) AS "Age25To35",
+            COUNT(*) FILTER (WHERE "RecordType" = 'marriage' AND "MarriageAge" > 35) AS "Over35",
+            AVG("PersonAge") FILTER (WHERE "RecordType" = 'death') AS "AvgDeceasedAge",
+            COUNT(*) FILTER (WHERE "RecordType" = 'death' AND "PersonAge" < 18) AS "Under18",
+            COUNT(*) FILTER (WHERE "RecordType" = 'death' AND "PersonAge" BETWEEN 18 AND 59) AS "Age18To59",
+            COUNT(*) FILTER (WHERE "RecordType" = 'death' AND "PersonAge" >= 60) AS "Senior60Plus"
+          FROM "Records"
+          WHERE "RecordDate" >= make_date($1::integer, 1, 1)
+            AND "RecordDate" < make_date($1::integer + 1, 1, 1)
+        `, [year])
+
+        const monthlyResult = await getPostgresPool().query(`
+          WITH "Records" AS (
+            SELECT 'baptism' AS "RecordType", "DateOfBaptism" AS "RecordDate" FROM "public"."BaptismRecords"
+            UNION ALL
+            SELECT 'confirmation', "DateOfConfirmation" FROM "public"."ConfirmationRecords"
+            UNION ALL
+            SELECT 'marriage', "DateOfMarriage" FROM "public"."MarriageRecords"
+            UNION ALL
+            SELECT 'death', "DateOfDeath" FROM "public"."DeathRecords"
+          ),
+          "MonthlyCounts" AS (
+            SELECT EXTRACT(MONTH FROM "RecordDate")::integer AS "MonthNumber",
+              COUNT(*) FILTER (WHERE "RecordType" = 'baptism') AS baptisms,
+              COUNT(*) FILTER (WHERE "RecordType" = 'confirmation') AS confirmations,
+              COUNT(*) FILTER (WHERE "RecordType" = 'marriage') AS marriages,
+              COUNT(*) FILTER (WHERE "RecordType" = 'death') AS deaths
+            FROM "Records"
+            WHERE "RecordDate" >= make_date($1::integer, 1, 1)
+              AND "RecordDate" < make_date($1::integer + 1, 1, 1)
+            GROUP BY EXTRACT(MONTH FROM "RecordDate")::integer
+          )
+          SELECT months.month_number AS month,
+            to_char(make_date($1::integer, months.month_number, 1), 'FMMonth') AS "monthName",
+            COALESCE(counts.baptisms, 0) AS baptisms,
+            COALESCE(counts.confirmations, 0) AS confirmations,
+            COALESCE(counts.marriages, 0) AS marriages,
+            COALESCE(counts.deaths, 0) AS deaths
+          FROM generate_series(1, 12) AS months(month_number)
+          LEFT JOIN "MonthlyCounts" counts ON counts."MonthNumber" = months.month_number
+          ORDER BY months.month_number
+        `, [year])
+
+        const summary = summaryResult.rows[0] || {}
+        const numeric = value => value === null || value === undefined ? null : Number(value)
+        return res.json({
+          targetYear: year,
+          summary: {
+            totalBaptisms: Number(summary.totalBaptisms || 0),
+            totalConfirmations: Number(summary.totalConfirmations || 0),
+            totalMarriages: Number(summary.totalMarriages || 0),
+            totalDeaths: Number(summary.totalDeaths || 0),
+          },
+          demographics: {
+            baptisms: {
+              InfantsUnder1Yr: Number(summary.InfantsUnder1Yr || 0),
+              ChildrenOver1Yr: Number(summary.ChildrenOver1Yr || 0),
+            },
+            marriages: {
+              AvgGroomAge: numeric(summary.AvgGroomAge),
+              AvgBrideAge: numeric(summary.AvgBrideAge),
+              Under25: Number(summary.Under25 || 0),
+              Age25To35: Number(summary.Age25To35 || 0),
+              Over35: Number(summary.Over35 || 0),
+            },
+            deaths: {
+              AvgDeceasedAge: numeric(summary.AvgDeceasedAge),
+              Under18: Number(summary.Under18 || 0),
+              Age18To59: Number(summary.Age18To59 || 0),
+              Senior60Plus: Number(summary.Senior60Plus || 0),
+            },
+          },
+          monthlyBreakdown: monthlyResult.rows.map(row => ({
+            ...row,
+            baptisms: Number(row.baptisms),
+            confirmations: Number(row.confirmations),
+            marriages: Number(row.marriages),
+            deaths: Number(row.deaths),
+          })),
+        })
+      }
+
       const summaryResult = await getPool().request()
         .input('year', sql.Int, year)
         .query(`
@@ -565,6 +856,9 @@ export function createAdminReportingRouter({
 
   router.get('/api/admin/certificate-requests', ...recordsAccess, async (_req, res) => {
     try {
+      if (postgresCertificatesEnabled) {
+        return res.json(await listPostgresCertificateRequests(getPostgresPool()))
+      }
       const result = await getPool().request().query(`
         SELECT request.CertificateRequestId, request.CertificateType,
           request.FirstName, request.LastName, request.ContactEmail AS EmailAddress,
@@ -594,6 +888,13 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresCertificatesEnabled) {
+        const documents = await listPostgresCertificateUploads(getPostgresPool(), requestId)
+        return res.json(documents.map(document => ({
+          ...document,
+          FileUrl: `/api/admin/certificate-requests/${requestId}/documents/${document.CertificateRequestDocumentId}/file`,
+        })))
+      }
       const result = await getPool().request()
         .input('requestId', sql.Int, requestId)
         .query(`
@@ -621,6 +922,26 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresCertificatesEnabled) {
+        const document = await getPostgresCertificateDocument(getPostgresPool(), requestId, documentId)
+        if (!document) return res.status(404).json({ message: 'Certificate document not found.' })
+
+        const fileName = path.basename(document.StoredFileName || '')
+        const filePath = path.resolve(uploadDirectory, fileName)
+        if (!fileName || filePath !== path.join(path.resolve(uploadDirectory), fileName)) {
+          return res.status(404).json({ message: 'Certificate document not found.' })
+        }
+
+        res.type(document.MimeType)
+        res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.OriginalFileName)}`)
+        return res.sendFile(filePath, error => {
+          if (error && !res.headersSent) {
+            if (error.code === 'ENOENT') return res.status(404).json({ message: 'Certificate document not found.' })
+            logError(error, { context: 'adminCertificateDocumentFile' })
+            res.status(500).json({ message: 'Unable to open certificate document.' })
+          }
+        })
+      }
       const result = await getPool().request()
         .input('requestId', sql.Int, requestId)
         .input('documentId', sql.Int, documentId)
@@ -663,6 +984,12 @@ export function createAdminReportingRouter({
     }
 
     try {
+      if (postgresCertificatesEnabled) {
+        if (!await setPostgresCertificateRequestStatus(getPostgresPool(), requestId, status)) {
+          return res.status(404).json({ message: 'Certificate request not found.' })
+        }
+        return res.json({ message: 'Certificate request updated.' })
+      }
       const result = await getPool().request()
         .input('requestId', sql.Int, requestId)
         .input('status', sql.VarChar(30), status)
@@ -685,6 +1012,12 @@ export function createAdminReportingRouter({
     if (!requestId) return res.status(400).json({ message: 'Invalid certificate request ID.' })
 
     try {
+      if (postgresCertificatesEnabled) {
+        if (!await deletePostgresCertificateRequest(getPostgresPool(), requestId)) {
+          return res.status(404).json({ message: 'Certificate request not found.' })
+        }
+        return res.json({ message: 'Certificate request deleted.' })
+      }
       const result = await getPool().request()
         .input('requestId', sql.Int, requestId)
         .query(`
@@ -751,6 +1084,38 @@ export function createAdminReportingRouter({
       .input('priest', sql.NVarChar(202), priest ? `%${priest}%` : null)
 
     try {
+      if (postgresSacramentalEnabled) {
+        const values = [
+          type,
+          q ? `%${q}%` : null,
+          start,
+          end,
+          priest ? `%${priest}%` : null,
+        ]
+        const where = `
+          WHERE ($1::varchar IS NULL OR "RecordType" = $1::varchar)
+            AND ($2::varchar IS NULL OR "RegistryNumber" ILIKE $2::varchar OR "Name" ILIKE $2::varchar)
+            AND ($3::date IS NULL OR "RecordDate" >= $3::date)
+            AND ($4::date IS NULL OR "RecordDate" <= $4::date)
+            AND ($5::varchar IS NULL OR "Priest" ILIKE $5::varchar)
+        `
+        const count = await getPostgresPool().query(`
+          WITH "Records" AS (${postgresRecordQuery})
+          SELECT COUNT(*) AS "total" FROM "Records" ${where}
+        `, values)
+        const result = await getPostgresPool().query(`
+          WITH "Records" AS (${postgresRecordQuery})
+          SELECT "RecordType", "Id", "RegistryNumber", "Name", "RecordDate", "Priest", "ScannedDocumentUrl"
+          FROM "Records" ${where}
+          ORDER BY "RecordDate" DESC, "Id" DESC
+          OFFSET $6::integer LIMIT $7::integer
+        `, [...values, offset, limit])
+        return res.json({
+          records: result.rows,
+          pagination: { page, limit, total: Number(count.rows[0]?.total || 0) },
+        })
+      }
+
       const count = await bindFilters(getPool().request()).query(`
         WITH Records AS (${recordQuery})
         SELECT COUNT(*) AS total FROM Records ${where}
@@ -792,24 +1157,36 @@ export function createAdminReportingRouter({
     }
 
     try {
-      const result = await getPool().request()
-        .input('sacramentType', sql.VarChar(30), sacramentType)
-        .input('bookNumber', sql.Int, bookNumber)
-        .input('pageNumber', sql.Int, pageNumber)
-        .input('registryNumber', sql.NVarChar(50), registryNumber || null)
-        .query(`
-          SELECT ArchiveId, SacramentType, BookNumber, PageNumber, RegistryNumber,
-            FileUrl, Notes,
-            UploadedAt, UploadedBy
-          FROM dbo.SacramentalArchives
-          WHERE (@sacramentType IS NULL OR SacramentType = @sacramentType)
-            AND (@bookNumber IS NULL OR BookNumber = @bookNumber)
-            AND (@pageNumber IS NULL OR PageNumber = @pageNumber)
-            AND (@registryNumber IS NULL OR RegistryNumber = @registryNumber)
-          ORDER BY UploadedAt DESC, ArchiveId DESC
-        `)
+      const result = postgresSacramentalEnabled
+        ? await getPostgresPool().query(`
+            SELECT "ArchiveId", "SacramentType", "BookNumber", "PageNumber",
+              "RegistryNumber", "FileUrl", "Notes", "UploadedAt", "UploadedBy"
+            FROM "public"."SacramentalArchives"
+            WHERE ($1::varchar IS NULL OR "SacramentType" = $1::varchar)
+              AND ($2::integer IS NULL OR "BookNumber" = $2::integer)
+              AND ($3::integer IS NULL OR "PageNumber" = $3::integer)
+              AND ($4::varchar IS NULL OR "RegistryNumber" = $4::varchar)
+            ORDER BY "UploadedAt" DESC, "ArchiveId" DESC
+          `, [sacramentType, bookNumber, pageNumber, registryNumber || null])
+        : await getPool().request()
+          .input('sacramentType', sql.VarChar(30), sacramentType)
+          .input('bookNumber', sql.Int, bookNumber)
+          .input('pageNumber', sql.Int, pageNumber)
+          .input('registryNumber', sql.NVarChar(50), registryNumber || null)
+          .query(`
+            SELECT ArchiveId, SacramentType, BookNumber, PageNumber, RegistryNumber,
+              FileUrl, Notes,
+              UploadedAt, UploadedBy
+            FROM dbo.SacramentalArchives
+            WHERE (@sacramentType IS NULL OR SacramentType = @sacramentType)
+              AND (@bookNumber IS NULL OR BookNumber = @bookNumber)
+              AND (@pageNumber IS NULL OR PageNumber = @pageNumber)
+              AND (@registryNumber IS NULL OR RegistryNumber = @registryNumber)
+            ORDER BY UploadedAt DESC, ArchiveId DESC
+          `)
+      const archives = postgresSacramentalEnabled ? result.rows : result.recordset
       res.json({
-        archives: result.recordset.map(archive => ({
+        archives: archives.map(archive => ({
           ...archive,
           FileUrl: `/api/admin/sacramental/archives/${archive.ArchiveId}/file`,
         })),
@@ -838,22 +1215,40 @@ export function createAdminReportingRouter({
     }
 
     try {
-      const result = await getPool().request()
-        .input('sacramentType', sql.VarChar(30), sacramentType)
-        .input('bookNumber', sql.Int, parsedBookNumber)
-        .input('pageNumber', sql.Int, parsedPageNumber)
-        .input('registryNumber', sql.NVarChar(50), normalizedRegistryNumber)
-        .input('fileUrl', sql.NVarChar(1000), fileUrl.trim())
-        .input('notes', sql.NVarChar(sql.MAX), notes?.trim() || null)
-        .input('uploadedBy', sql.NVarChar(256), req.staff?.email || req.staff?.role || 'staff')
-        .query(`
-          INSERT INTO dbo.SacramentalArchives
-            (SacramentType, BookNumber, PageNumber, RegistryNumber, FileUrl, Notes, UploadedBy)
-          OUTPUT INSERTED.ArchiveId AS id
-          VALUES
-            (@sacramentType, @bookNumber, @pageNumber, @registryNumber, @fileUrl, @notes, @uploadedBy)
-        `)
-      res.status(201).json({ id: result.recordset[0].id })
+      const uploadedBy = req.staff?.email || req.staff?.role || 'staff'
+      const result = postgresSacramentalEnabled
+        ? await getPostgresPool().query(`
+            INSERT INTO "public"."SacramentalArchives"
+              ("SacramentType", "BookNumber", "PageNumber", "RegistryNumber", "FileUrl", "Notes", "UploadedBy")
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING "ArchiveId" AS id
+          `, [
+            sacramentType,
+            parsedBookNumber,
+            parsedPageNumber,
+            normalizedRegistryNumber,
+            fileUrl.trim(),
+            notes?.trim() || null,
+            uploadedBy,
+          ])
+        : await getPool().request()
+          .input('sacramentType', sql.VarChar(30), sacramentType)
+          .input('bookNumber', sql.Int, parsedBookNumber)
+          .input('pageNumber', sql.Int, parsedPageNumber)
+          .input('registryNumber', sql.NVarChar(50), normalizedRegistryNumber)
+          .input('fileUrl', sql.NVarChar(1000), fileUrl.trim())
+          .input('notes', sql.NVarChar(sql.MAX), notes?.trim() || null)
+          .input('uploadedBy', sql.NVarChar(256), uploadedBy)
+          .query(`
+            INSERT INTO dbo.SacramentalArchives
+              (SacramentType, BookNumber, PageNumber, RegistryNumber, FileUrl, Notes, UploadedBy)
+            OUTPUT INSERTED.ArchiveId AS id
+            VALUES
+              (@sacramentType, @bookNumber, @pageNumber, @registryNumber, @fileUrl, @notes, @uploadedBy)
+          `)
+      const id = postgresSacramentalEnabled ? result.rows[0]?.id : result.recordset[0]?.id
+      if (!id) throw new Error('Sacramental archive insert returned no ID.')
+      res.status(201).json({ id })
     } catch (error) {
       logError(error, { context: 'createSacramentalArchive' })
       res.status(500).json({ message: 'Unable to save sacramental archive.' })
@@ -878,21 +1273,32 @@ export function createAdminReportingRouter({
     }
 
     try {
-      const result = await getPool().request()
-        .input('id', sql.Int, id)
-        .input('bookNumber', sql.Int, bookNumber)
-        .input('pageNumber', sql.Int, pageNumber)
-        .input('registryNumber', sql.NVarChar(50), normalizedRegistryNumber)
-        .input('registryNumberProvided', sql.Bit, registryNumberProvided)
-        .input('notes', sql.NVarChar(sql.MAX), typeof notes === 'string' ? notes.trim() || null : null)
-        .query(`
-          UPDATE dbo.SacramentalArchives
-          SET BookNumber = @bookNumber, PageNumber = @pageNumber,
-            RegistryNumber = CASE WHEN @registryNumberProvided = 1 THEN @registryNumber ELSE RegistryNumber END,
-            Notes = @notes
-          WHERE ArchiveId = @id
-        `)
-      if (result.rowsAffected?.[0] === 0) return res.status(404).json({ message: 'Archive not found.' })
+      const normalizedNotes = typeof notes === 'string' ? notes.trim() || null : null
+      const result = postgresSacramentalEnabled
+        ? await getPostgresPool().query(`
+            UPDATE "public"."SacramentalArchives"
+            SET "BookNumber" = $2, "PageNumber" = $3,
+              "RegistryNumber" = CASE WHEN $4::boolean THEN $5::varchar ELSE "RegistryNumber" END,
+              "Notes" = $6
+            WHERE "ArchiveId" = $1
+          `, [id, bookNumber, pageNumber, registryNumberProvided, normalizedRegistryNumber, normalizedNotes])
+        : await getPool().request()
+          .input('id', sql.Int, id)
+          .input('bookNumber', sql.Int, bookNumber)
+          .input('pageNumber', sql.Int, pageNumber)
+          .input('registryNumber', sql.NVarChar(50), normalizedRegistryNumber)
+          .input('registryNumberProvided', sql.Bit, registryNumberProvided)
+          .input('notes', sql.NVarChar(sql.MAX), normalizedNotes)
+          .query(`
+            UPDATE dbo.SacramentalArchives
+            SET BookNumber = @bookNumber, PageNumber = @pageNumber,
+              RegistryNumber = CASE WHEN @registryNumberProvided = 1 THEN @registryNumber ELSE RegistryNumber END,
+              Notes = @notes
+            WHERE ArchiveId = @id
+          `)
+      if (postgresSacramentalEnabled ? result.rowCount === 0 : result.rowsAffected?.[0] === 0) {
+        return res.status(404).json({ message: 'Archive not found.' })
+      }
       res.json({ message: 'Archive entry updated.' })
     } catch (error) {
       logError(error, { context: 'updateSacramentalArchive' })
@@ -906,15 +1312,27 @@ export function createAdminReportingRouter({
     if (!deleteArchiveFile) return res.status(500).json({ message: 'Archive file storage is not configured.' })
 
     try {
-      const archive = await getPool().request()
-        .input('id', sql.Int, id)
-        .query('SELECT FileUrl FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
-      if (!archive.recordset[0]) return res.status(404).json({ message: 'Archive not found.' })
+      const archive = postgresSacramentalEnabled
+        ? await getPostgresPool().query(`
+            SELECT "FileUrl" FROM "public"."SacramentalArchives"
+            WHERE "ArchiveId" = $1
+          `, [id])
+        : await getPool().request()
+          .input('id', sql.Int, id)
+          .query('SELECT FileUrl FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
+      const fileUrl = postgresSacramentalEnabled ? archive.rows[0]?.FileUrl : archive.recordset[0]?.FileUrl
+      if (!fileUrl) return res.status(404).json({ message: 'Archive not found.' })
 
-      await deleteArchiveFile(archive.recordset[0].FileUrl)
-      await getPool().request()
-        .input('id', sql.Int, id)
-        .query('DELETE FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
+      await deleteArchiveFile(fileUrl)
+      if (postgresSacramentalEnabled) {
+        await getPostgresPool().query(`
+          DELETE FROM "public"."SacramentalArchives" WHERE "ArchiveId" = $1
+        `, [id])
+      } else {
+        await getPool().request()
+          .input('id', sql.Int, id)
+          .query('DELETE FROM dbo.SacramentalArchives WHERE ArchiveId = @id')
+      }
       res.json({ message: 'Archive entry and file deleted.' })
     } catch (error) {
       logError(error, { context: 'deleteSacramentalArchive' })
@@ -928,6 +1346,16 @@ export function createAdminReportingRouter({
     if (!record || !id) return res.status(400).json({ message: 'Invalid sacramental record.' })
 
     try {
+      if (postgresSacramentalEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT "AuditId", "ActionName", "ChangedBy", "ChangedAt", "Changes"
+          FROM "public"."SacramentalRecordAudit"
+          WHERE "RecordType" = $1 AND "RecordId" = $2
+          ORDER BY "ChangedAt" DESC, "AuditId" DESC
+        `, [req.params.type, id])
+        return res.json(result.rows)
+      }
+
       const result = await getPool().request()
         .input('recordType', sql.VarChar(30), req.params.type)
         .input('recordId', sql.Int, id)
@@ -950,6 +1378,15 @@ export function createAdminReportingRouter({
     if (!record || !id) return res.status(400).json({ message: 'Invalid sacramental record.' })
 
     try {
+      if (postgresSacramentalEnabled) {
+        const result = await getPostgresPool().query(`
+          SELECT * FROM "public"."${record.table}"
+          WHERE "${record.idColumn}" = $1
+        `, [id])
+        if (!result.rows[0]) return res.status(404).json({ message: 'Sacramental record not found.' })
+        return res.json(result.rows[0])
+      }
+
       const result = await getPool().request()
         .input('id', sql.Int, id)
         .query(`SELECT * FROM dbo.${record.table} WHERE ${record.idColumn} = @id`)

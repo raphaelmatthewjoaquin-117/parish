@@ -15,8 +15,6 @@ import {
   officeHourSlotTimes,
   findScheduleConflict,
   findIntentionConflict,
-  financeActionForStatus,
-  financeTransition,
   isNoShowEligible,
   isUnverifiedExpired,
   ALLOWED_REQUEST_STATUSES,
@@ -46,10 +44,123 @@ import {
   isValidResetPassword,
 } from './password-reset.js';
 import { assertProductionStorageConfiguration, createDatabaseConfig } from './src/db/config.js';
-import { checkDatabaseReadiness } from './src/db/readiness.js';
+import { checkDatabaseReadiness, checkPostgresReadiness } from './src/db/readiness.js';
+import { getPostgresPool, initializePostgresPool } from './src/db/postgres-pool.js';
+import { createAdminTokenSigningSecret, createIdentityDatabaseConfig } from './src/auth/config.js';
+import { getStaffAuthorizationState } from './src/auth/postgres-identity.js';
+import { authenticatePostgresStaff } from './src/auth/staff-login.js';
+import { changePostgresStaffPassword } from './src/auth/postgres-password-change.js';
+import {
+  createPostgresPasswordReset,
+  findPostgresStaffForPasswordReset,
+  invalidatePostgresPasswordReset,
+  resetPostgresStaffPassword,
+} from './src/auth/postgres-password-reset.js';
+import { createSacramentalDatabaseConfig } from './src/sacramental/config.js';
+import {
+  createPostgresStaffUser,
+  deletePostgresStaffUser,
+  getPostgresStaffUsers,
+  getPostgresUserPermissions,
+  listPostgresUserManagementAudit,
+  updatePostgresStaffProfile,
+  updatePostgresStaffUser,
+  updatePostgresUserPermissions,
+} from './src/auth/postgres-staff-management.js';
+import { createStaffToken, parseStaffToken } from './src/auth/staff-token.js';
+import {
+  createPostgresEvent,
+  deletePostgresEvent,
+  listPostgresEvents,
+  updatePostgresEvent,
+} from './src/events/postgres-events.js';
+import { createEventsDatabaseConfig } from './src/events/config.js';
 import { createCorsOptions } from './src/http/cors-config.js';
 import { isLocalAdminLoginAllowed, isLocalAdminPreviewRequestAllowed } from './src/local-admin-auth.js';
+import { createCertificateDatabaseConfig } from './src/certificates/config.js';
+import {
+  createPostgresCertificateRequest,
+  deletePostgresCertificateRequest,
+  findPostgresCertificateBlock,
+  getPostgresCertificateDocument,
+  getPostgresCertificateRequest,
+  getPostgresCertificateRequestForUpload,
+  getPostgresCertificateSlots,
+  listPostgresCertificateRequests,
+  listPostgresCertificateUploads,
+  savePostgresCertificateUploads,
+  setPostgresCertificateRequestStatus,
+} from './src/certificates/postgres-certificates.js';
+import { createContentDatabaseConfig } from './src/content/config.js';
+import {
+  approvePostgresPrayer,
+  createPostgresContactMessage,
+  deletePostgresContactMessage,
+  deletePostgresPrayer,
+  getPostgresAdminPrayers,
+  getPostgresSiteContent,
+  listPostgresContactMessages,
+  savePostgresSiteContent,
+  setPostgresContactMessageRead,
+} from './src/content/postgres-content.js';
 import { isValidServicePageContent } from './src/service-page-content.js';
+import { createServiceDatabaseConfig } from './src/services/config.js';
+import { createOperationsDatabaseConfig } from './src/operations/config.js';
+import {
+  createPostgresSchedule,
+  deletePostgresSchedule,
+  listPostgresScheduleSlots,
+  listPostgresSchedules,
+  updatePostgresSchedule,
+} from './src/operations/postgres-schedules.js';
+import {
+  getPostgresAdminHealth,
+  getPostgresAdminStatus,
+  getPostgresAdminSystemInfo,
+} from './src/operations/postgres-admin-system.js';
+import {
+  createPostgresMassIntention,
+  listPostgresIntentionSlots,
+  listPostgresMassIntentions,
+  updatePostgresMassIntentionStatus,
+} from './src/operations/postgres-mass-intentions.js';
+import {
+  createPostgresFinanceEntry,
+  deletePostgresFinanceEntry,
+  listPostgresFinanceEntries,
+  transitionPostgresFinanceEntry,
+  updatePostgresFinanceEntry,
+} from './src/operations/postgres-finance-entries.js';
+import {
+  generatePostgresFinanceSnapshots,
+  previousCompletedFinancePeriods,
+} from './src/operations/finance-snapshots.js';
+import {
+  createFinanceWorkflowRouter,
+  transitionSqlServerFinanceEntry,
+} from './src/operations/finance-workflow-router.js';
+import {
+  createPostgresServiceField,
+  deletePostgresServiceField,
+  listPostgresAdminServiceFields,
+  listPostgresServiceFields,
+  listPostgresServices,
+  updatePostgresServiceField,
+} from './src/services/postgres-service-catalog.js';
+import { getPostgresServiceAvailability } from './src/services/postgres-service-availability.js';
+import {
+  createPostgresServiceVerificationToken,
+  createPostgresServiceBooking,
+  savePostgresSacramentDetails,
+  verifyPostgresServiceBookingToken,
+} from './src/services/postgres-service-booking.js';
+import { cleanupPostgresServiceRequests } from './src/services/postgres-service-cleanup.js';
+import {
+  deletePostgresAdminServiceRequest,
+  getPostgresServiceRequestDocument,
+  listPostgresAdminServiceRequests,
+  updatePostgresAdminServiceRequest,
+} from './src/services/postgres-admin-service-requests.js';
 
 // Connection pool - simple implementation
 let pool = null;
@@ -85,6 +196,7 @@ const logger = {
   warn: (msg, data) => console.warn('[WARN]', msg, data || ''),
   error: (msg, data) => console.error('[ERROR]', msg, data || ''),
 };
+const scheduledJobs = [];
 
 const requestLoggingMiddleware = (req, res, next) => {
   const start = Date.now();
@@ -105,30 +217,13 @@ const metricsMiddleware = (_req, _res, next) => {
   next();
 };
 
-function dateOnly(value) {
-  return value.toISOString().slice(0, 10);
-}
-
-function previousCompletedPeriods(now = new Date()) {
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const day = today.getUTCDay() || 7;
-  const currentMonday = new Date(today);
-  currentMonday.setUTCDate(today.getUTCDate() - day + 1);
-  const weekStart = new Date(currentMonday);
-  weekStart.setUTCDate(weekStart.getUTCDate() - 7);
-  const weekEnd = new Date(currentMonday);
-  weekEnd.setUTCDate(weekEnd.getUTCDate() - 1);
-  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
-  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
-  return [
-    { type: 'Weekly', start: dateOnly(weekStart), end: dateOnly(weekEnd) },
-    { type: 'Monthly', start: dateOnly(monthStart), end: dateOnly(monthEnd) },
-  ];
-}
-
 async function generateFinanceSnapshots() {
+  if (postgresOperationsEnabled) {
+    await generatePostgresFinanceSnapshots(getPostgresPool());
+    return;
+  }
   const db = getPool();
-  for (const period of previousCompletedPeriods()) {
+  for (const period of previousCompletedFinancePeriods()) {
     const totals = await db.request()
       .input('start', sql.Date, period.start)
       .input('end', sql.Date, period.end)
@@ -150,7 +245,7 @@ async function generateFinanceSnapshots() {
 function startFinanceReportSchedule(intervalHours = 6) {
   const run = () => generateFinanceSnapshots().catch(error => logError(error, { context: 'financeReportSchedule' }));
   run();
-  setInterval(run, intervalHours * 60 * 60 * 1000);
+  scheduledJobs.push(setInterval(run, intervalHours * 60 * 60 * 1000));
 }
 
 /**
@@ -160,6 +255,14 @@ function startFinanceReportSchedule(intervalHours = 6) {
  * trigger clears the slot lock for non-active statuses).
  */
 async function voidNoShowAppointments() {
+  if (postgresServicesEnabled) {
+    const result = await cleanupPostgresServiceRequests(getPostgresPool());
+    if (result.noShows || result.expiredUnverified) {
+      logger.info('Automatic appointment voiding completed', result);
+    }
+    return;
+  }
+
   const db = getPool();
   const now = new Date();
   const candidates = await db.request().query(`
@@ -191,7 +294,7 @@ async function voidNoShowAppointments() {
 function startNoShowVoidSchedule(intervalMinutes = 60) {
   const run = () => voidNoShowAppointments().catch(error => logError(error, { context: 'noShowVoidSchedule' }));
   run();
-  setInterval(run, intervalMinutes * 60 * 1000);
+  scheduledJobs.push(setInterval(run, intervalMinutes * 60 * 1000));
 }
 
 const handleHealthCheck = (_req, res) => {
@@ -200,10 +303,30 @@ const handleHealthCheck = (_req, res) => {
 
 const handleReadinessCheck = async (_req, res) => {
   try {
+    if (postgresEventsEnabled) {
+      await checkPostgresReadiness(getPostgresPool());
+    }
     await checkDatabaseReadiness(getPool());
-    res.json({ status: 'ready' });
+    res.json({
+      status: 'ready',
+      database: postgresEventsEnabled ? 'postgres-and-sql-server' : 'sql-server',
+    });
   } catch (error) {
     logError(error, { context: 'readinessCheck' });
+    res.status(503).json({ status: 'not_ready' });
+  }
+};
+
+const handlePostgresReadinessCheck = async (_req, res) => {
+  try {
+    if (!postgresConnectionEnabled) {
+      res.status(503).json({ status: 'not_ready' });
+      return;
+    }
+    await checkPostgresReadiness(getPostgresPool());
+    res.json({ status: 'ready', database: 'postgres' });
+  } catch (error) {
+    logError(error, { context: 'postgresReadinessCheck' });
     res.status(503).json({ status: 'not_ready' });
   }
 };
@@ -215,9 +338,14 @@ const handleMetricsRequest = (_req, res) => {
 // Token management - using database storage for persistence across restarts
 const createVerificationToken = async (requestId) => {
   try {
-    const pool = getPool();
     // Generate a secure random token
     const token = randomUUID().replace(/-/g, '');
+    if (postgresServicesEnabled) {
+      await createPostgresServiceVerificationToken(getPostgresPool(), requestId, token);
+      return token;
+    }
+
+    const pool = getPool();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
     await pool.request()
@@ -231,13 +359,16 @@ const createVerificationToken = async (requestId) => {
     return token;
   } catch (error) {
     logError(error, { context: 'createVerificationToken' });
-    // Fallback to random string if DB fails (shouldn't happen in production)
-    return Math.random().toString(36).substring(2, 15);
+    throw error;
   }
 };
 
 const verifyToken = async (token) => {
   try {
+    if (postgresServicesEnabled) {
+      return await verifyPostgresServiceBookingToken(getPostgresPool(), token);
+    }
+
     const pool = getPool();
     const result = await pool.request()
       .input('token', sql.VarChar(64), token)
@@ -272,8 +403,17 @@ const verifyToken = async (token) => {
 };
 
 const startTokenCleanupSchedule = (intervalMinutes = 60) => {
-  setInterval(async () => {
+  scheduledJobs.push(setInterval(async () => {
     try {
+      if (postgresServicesEnabled) {
+        await getPostgresPool().query(`
+          DELETE FROM "public"."VerificationTokens"
+          WHERE "ExpiresAt" < timezone('UTC', now())
+        `);
+        logger.info('Expired verification tokens cleaned up');
+        return;
+      }
+
       const pool = getPool();
       await pool.request().query(`
         DELETE FROM dbo.VerificationTokens
@@ -283,26 +423,50 @@ const startTokenCleanupSchedule = (intervalMinutes = 60) => {
     } catch (error) {
       logError(error, { context: 'tokenCleanup' });
     }
-  }, intervalMinutes * 60 * 1000);
+  }, intervalMinutes * 60 * 1000));
 };
 
 const startBlockedSlotCleanupSchedule = (intervalMinutes = 60) => {
   const run = async () => {
     try {
-      const deletedCount = await cleanupExpiredBlockedSlots(getPool);
+      const deletedCount = await cleanupExpiredBlockedSlots(
+        getPool,
+        postgresServicesEnabled ? getPostgresPool : undefined,
+      );
       if (deletedCount > 0) logger.info('Expired booking blocks cleaned up', { deletedCount });
     } catch (error) {
       logError(error, { context: 'blockedSlotCleanup' });
     }
   };
   void run();
-  setInterval(run, intervalMinutes * 60 * 1000);
+  scheduledJobs.push(setInterval(run, intervalMinutes * 60 * 1000));
 };
 
 dotenv.config({ quiet: true });
 if (process.env.NODE_ENV === 'development') {
   dotenv.config({ path: '.env.local', override: true, quiet: true });
 }
+
+const eventsDatabaseConfig = createEventsDatabaseConfig(process.env);
+const contentDatabaseConfig = createContentDatabaseConfig(process.env);
+const certificateDatabaseConfig = createCertificateDatabaseConfig(process.env);
+const serviceDatabaseConfig = createServiceDatabaseConfig(process.env);
+const operationsDatabaseConfig = createOperationsDatabaseConfig(process.env);
+const sacramentalDatabaseConfig = createSacramentalDatabaseConfig(process.env);
+const postgresEventsEnabled = eventsDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresContentEnabled = contentDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresCertificatesEnabled = certificateDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresServicesEnabled = serviceDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresOperationsEnabled = operationsDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresSacramentalEnabled = sacramentalDatabaseConfig.provider === 'postgres'
+  && process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1';
+const postgresConnectionEnabled = process.env.LOCAL_ADMIN_PREVIEW_ONLY !== '1'
+  && eventsDatabaseConfig.postgresConfigured;
 
 const app = express();
 const trustProxyHopsValue = process.env.TRUST_PROXY_HOPS ?? '0';
@@ -555,6 +719,7 @@ app.use(metricsMiddleware);
 app.use('/api', apiRateLimit);
 app.get('/health', handleHealthCheck);
 app.get('/readyz', handleReadinessCheck);
+app.get('/readyz/postgres', handlePostgresReadinessCheck);
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -571,13 +736,16 @@ logger.info('DB startup config:', {
 // 'ntlm' for Windows NTLM with explicit credentials,
 // empty/default => integrated authentication (when using msnodesqlv8 driver).
 const config = createDatabaseConfig(process.env);
+const identityDatabaseConfig = createIdentityDatabaseConfig(process.env);
 
 const adminSecret = process.env.ADMIN_TOKEN || (process.env.NODE_ENV === 'production' ? '' : 'letmein');
 if (process.env.NODE_ENV === 'production' && !adminSecret) {
   throw new Error('ADMIN_TOKEN must be configured in production.');
 }
-const staffTokenLifetimeMs = 8 * 60 * 60 * 1000;
-
+const adminTokenSigningSecret = createAdminTokenSigningSecret(
+  process.env,
+  randomBytes(32).toString('base64url'),
+);
 async function sendEmail(to, subject, html) {
   if (!resend) {
     logger.warn('RESEND_API_KEY not configured, skipping email send');
@@ -618,26 +786,11 @@ function formatTime(date) {
   return date.toISOString().slice(11, 16);
 }
 
-function createStaffToken(userId, role, expiresAt = Date.now() + staffTokenLifetimeMs) {
-  return `${adminSecret}.${userId}.${role}.${expiresAt}`;
-}
-
-function parseStaffToken(token) {
-  if (!token) return null;
-  const parts = token.split('.');
-  if (parts.length !== 4 || parts[0] !== adminSecret) return null;
-  const userId = Number(parts[1]);
-  const role = String(parts[2] || '');
-  const expiresAt = Number(parts[3]);
-  if (!Number.isInteger(userId) || !role || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-  return { userId, role, email: null, expiresAt };
-}
-
 const staffRolePriority = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
 
 async function requireAdmin(req, res, next) {
   const token = String(req.headers['x-admin-token'] ?? '')
-  const staff = parseStaffToken(token);
+  const staff = parseStaffToken(token, adminTokenSigningSecret);
   if (staff?.userId === 0 && !isLocalAdminPreviewRequestAllowed({
     nodeEnv: process.env.NODE_ENV || '',
     remoteAddress: req.socket.remoteAddress || '',
@@ -646,28 +799,37 @@ async function requireAdmin(req, res, next) {
     return res.status(403).json({ message: 'Local preview access is limited to localhost sign-in verification.' });
   }
   if (staff && staff.userId > 0) {
-    // Roles can change after sign-in, so use the current database role instead of the one baked into the token.
-    try {
-      const result = await getPool().request().input('id', sql.Int, staff.userId)
-        .query('SELECT r.Name FROM dbo.AspNetUserRoles ur INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId WHERE ur.UserId = @id');
-      const names = result.recordset.map(row => row.Name);
-      const current = staffRolePriority.find(name => names.includes(name));
-      if (!current) return res.status(403).json({ message: 'Admin token is required.' });
-      staff.role = current;
-    } catch (error) {
-      logError(error, { context: 'requireAdminRoleRefresh' });
-    }
-    try {
-      const [overrides, account] = await Promise.all([
-        getPool().request().input('id', sql.Int, staff.userId)
-          .query('SELECT ModuleName, CanView, CanEdit FROM dbo.UserModulePermissions WHERE UserId = @id'),
-        getPool().request().input('id', sql.Int, staff.userId)
-          .query('SELECT MustChangePassword FROM dbo.AspNetUsers WHERE UserId = @id'),
-      ]);
-      staff.overrides = Object.fromEntries(overrides.recordset.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }]));
-      staff.mustChangePassword = Boolean(account.recordset[0]?.MustChangePassword);
-    } catch (error) {
-      logError(error, { context: 'requireAdminPermissionRefresh' });
+    if (identityDatabaseConfig.provider === 'postgres') {
+      try {
+        const current = await getStaffAuthorizationState(getPostgresPool(), staff.userId);
+        if (!current) return res.status(403).json({ message: 'Admin token is required.' });
+        Object.assign(staff, current);
+      } catch (error) {
+        logError(error, { context: 'requireAdminPostgresAuthorizationRefresh' });
+        return res.status(503).json({ message: 'Staff authorization is temporarily unavailable.' });
+      }
+    } else {
+      try {
+        const [roles, overrides, account] = await Promise.all([
+          getPool().request().input('id', sql.Int, staff.userId)
+            .query('SELECT r.Name FROM dbo.AspNetUserRoles ur INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId WHERE ur.UserId = @id'),
+          getPool().request().input('id', sql.Int, staff.userId)
+            .query('SELECT ModuleName, CanView, CanEdit FROM dbo.UserModulePermissions WHERE UserId = @id'),
+          getPool().request().input('id', sql.Int, staff.userId)
+            .query('SELECT MustChangePassword FROM dbo.AspNetUsers WHERE UserId = @id'),
+        ]);
+        const names = roles.recordset.map(row => row.Name);
+        const current = staffRolePriority.find(name => names.includes(name));
+        if (!current || !account.recordset.length) {
+          return res.status(403).json({ message: 'Admin token is required.' });
+        }
+        staff.role = current;
+        staff.overrides = Object.fromEntries(overrides.recordset.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }]));
+        staff.mustChangePassword = Boolean(account.recordset[0].MustChangePassword);
+      } catch (error) {
+        logError(error, { context: 'requireAdminSqlServerAuthorizationRefresh' });
+        return res.status(503).json({ message: 'Staff authorization is temporarily unavailable.' });
+      }
     }
     if (staff.mustChangePassword && !passwordChangeExemptPaths.includes(req.path)) {
       return res.status(403).json({ message: 'You must change your password before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
@@ -728,7 +890,6 @@ function verifyAspNetPassword(password, storedHash) {
   }
 }
 
-// Parishioner portal authentication is not yet implemented; reject until a real session/token check exists.
 async function requirePortal(req, res, next) {
   const token = String(req.headers['x-portal-token'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ message: 'Portal sign-in is required.' });
@@ -793,6 +954,9 @@ const certUpload = multer({
 
 app.get('/api/certificate-availability', async (_req, res) => {
   try {
+    if (postgresCertificatesEnabled) {
+      return res.json({ blockedSlots: await getPostgresCertificateSlots(getPostgresPool()) });
+    }
     const result = await getPool().request().query(`
       SELECT CONVERT(varchar(10), BlockDate, 23) AS date, BlockTime AS time
       FROM dbo.BlockedSlots
@@ -826,9 +990,24 @@ app.post('/api/certificate-requests', async (req, res) => {
   const referenceCode = randomBytes(3).toString('hex').toUpperCase();
 
   try {
-    const block = await findBlockedSlot(getPool(), { date: preferredDate, time: preferredTime, certificate: true });
+    const block = postgresCertificatesEnabled
+      ? await findPostgresCertificateBlock(getPostgresPool(), preferredDate, preferredTime)
+      : await findBlockedSlot(getPool(), { date: preferredDate, time: preferredTime, certificate: true });
     if (block) return res.status(409).json({ message: blockedMessage(block) });
-    const result = await getPool().request()
+    const request = {
+      certificateType,
+      preferredDate,
+      preferredTime,
+      notes: notes ? sanitizeText(notes) : null,
+      firstName: sanitizeText(firstName),
+      lastName: sanitizeText(lastName),
+      email: String(email).trim().toLowerCase(),
+      phone: sanitizeText(phone),
+      referenceCode,
+    };
+    const requestId = postgresCertificatesEnabled
+      ? await createPostgresCertificateRequest(getPostgresPool(), request)
+      : (await getPool().request()
       .input('certificateType', sql.VarChar(30), certificateType)
       .input('preferredDate', sql.Date, preferredDate)
       .input('preferredTime', sql.VarChar(10), preferredTime)
@@ -846,9 +1025,7 @@ app.post('/api/certificate-requests', async (req, res) => {
         VALUES
           (@certificateType, @preferredDate, @preferredTime, @notes,
            @firstName, @lastName, @email, @phone, @referenceCode)
-      `);
-
-    const requestId = result.recordset[0].CertificateRequestId;
+      `)).recordset[0].CertificateRequestId;
 
     // Send confirmation email if configured
     const { subject, html } = certificateRequestEmail({
@@ -891,29 +1068,42 @@ app.post('/api/certificate-requests/:id/documents', (req, res, next) => {
 
   try {
     // Verify ownership by matching requestId + referenceCode
-    const check = await getPool().request()
-      .input('id', sql.Int, requestId)
-      .input('ref', sql.VarChar(10), referenceCode)
-      .query(`SELECT CertificateRequestId FROM dbo.CertificateRequests WHERE CertificateRequestId = @id AND ReferenceCode = @ref`);
+    const ownsRequest = postgresCertificatesEnabled
+      ? await getPostgresCertificateRequestForUpload(getPostgresPool(), requestId, referenceCode)
+      : (await getPool().request()
+        .input('id', sql.Int, requestId)
+        .input('ref', sql.VarChar(10), referenceCode)
+        .query(`SELECT CertificateRequestId FROM dbo.CertificateRequests WHERE CertificateRequestId = @id AND ReferenceCode = @ref`))
+        .recordset[0];
 
-    if (check.recordset.length === 0) {
+    if (!ownsRequest) {
       return res.status(403).json({ message: 'Reference code does not match this request.' });
     }
 
-    const db = getPool();
-    for (const file of req.files) {
-      await db.request()
-        .input('requestId', sql.Int, requestId)
-        .input('originalName', sql.NVarChar(255), file.originalname)
-        .input('storedName', sql.NVarChar(255), file.filename)
-        .input('fileUrl', sql.NVarChar(500), `/uploads/${file.filename}`)
-        .input('mimeType', sql.VarChar(100), file.mimetype)
-        .input('fileSize', sql.Int, file.size)
-        .query(`
-          INSERT INTO dbo.CertificateRequestDocuments
-            (CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes)
-          VALUES (@requestId, @originalName, @storedName, @fileUrl, @mimeType, @fileSize)
-        `);
+    if (postgresCertificatesEnabled) {
+      await savePostgresCertificateUploads(getPostgresPool(), requestId, req.files.map(file => ({
+        originalName: file.originalname,
+        storedName: file.filename,
+        fileUrl: `/uploads/${file.filename}`,
+        mimeType: file.mimetype,
+        size: file.size,
+      })));
+    } else {
+      const db = getPool();
+      for (const file of req.files) {
+        await db.request()
+          .input('requestId', sql.Int, requestId)
+          .input('originalName', sql.NVarChar(255), file.originalname)
+          .input('storedName', sql.NVarChar(255), file.filename)
+          .input('fileUrl', sql.NVarChar(500), `/uploads/${file.filename}`)
+          .input('mimeType', sql.VarChar(100), file.mimetype)
+          .input('fileSize', sql.Int, file.size)
+          .query(`
+            INSERT INTO dbo.CertificateRequestDocuments
+              (CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes)
+            VALUES (@requestId, @originalName, @storedName, @fileUrl, @mimeType, @fileSize)
+          `);
+      }
     }
 
     res.json({ message: `${req.files.length} document(s) uploaded successfully.` });
@@ -932,6 +1122,19 @@ app.get('/api/certificate-requests/lookup', async (req, res) => {
   }
 
   try {
+    if (postgresCertificatesEnabled) {
+      const request = await getPostgresCertificateRequest(getPostgresPool(), email, ref);
+      if (!request) {
+        return res.status(404).json({ message: 'No request found. Check your email and reference code.' });
+      }
+      return res.json({
+        certificateType: request.certificateType,
+        preferredDate: request.preferredDate,
+        preferredTime: request.preferredTime,
+        status: request.status,
+        notes: request.notes,
+      });
+    }
     const result = await getPool().request()
       .input('email', sql.VarChar(255), email)
       .input('ref', sql.VarChar(10), ref)
@@ -1153,6 +1356,10 @@ function escapeHtml(text) {
 
 app.get('/api/services', async (_req, res) => {
   try {
+    if (postgresServicesEnabled) {
+      return res.json(await listPostgresServices(getPostgresPool()));
+    }
+
     const pool = getPool();
     const request = pool.request();
 
@@ -1195,36 +1402,48 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
 
   try {
     if (useServiceId) {
-      const pool = getPool();
-      policy = await getServicePolicy(pool, numericServiceId, requestedDate.toISOString().slice(0, 10));
-      const request = pool.request();
+      if (postgresServicesEnabled) {
+        const availability = await getPostgresServiceAvailability(getPostgresPool(), numericServiceId);
+        policy = { name: availability.name, ...servicePolicy(availability.name, requestedDate.toISOString().slice(0, 10)) };
+        if (policy.quota) {
+          quotaFullDates = new Set(availability.bookings
+            .filter(row => row.total >= policy.quota)
+            .map(row => row.date));
+        }
+        blocks = availability.blocks;
+        bookedSet = new Set(availability.bookings.map(row => `${row.date}|${row.time}`));
+      } else {
+        const pool = getPool();
+        policy = await getServicePolicy(pool, numericServiceId, requestedDate.toISOString().slice(0, 10));
+        const request = pool.request();
 
-      const bookedResult = await request
-        .input('serviceId', sql.Int, numericServiceId)
-        .query(`
-        SELECT ScheduledDate, ScheduledTime
-        FROM dbo.ServiceRequest
-        WHERE ServiceId = @serviceId
-          AND Status IN ('PendingVerification', 'PendingReview', 'Confirmed')
-      `);
+        const bookedResult = await request
+          .input('serviceId', sql.Int, numericServiceId)
+          .query(`
+          SELECT ScheduledDate, ScheduledTime
+          FROM dbo.ServiceRequest
+          WHERE ServiceId = @serviceId
+            AND Status IN ('PendingVerification', 'PendingReview', 'Confirmed')
+        `);
 
-      if (policy.quota) {
-        const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','PendingReview','Confirmed') GROUP BY ScheduledDate`);
-        quotaFullDates = new Set(quotaResult.recordset.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
+        if (policy.quota) {
+          const quotaResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM dbo.ServiceRequest WHERE ServiceId=@serviceId AND Status IN ('PendingVerification','PendingReview','Confirmed') GROUP BY ScheduledDate`);
+          quotaFullDates = new Set(quotaResult.recordset.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
+        }
+
+        const blockResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS blockDate, BlockTime, Reason FROM dbo.BlockedSlots WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date) AND (Scope='All' OR (Scope='Service' AND ServiceId=@serviceId))`);
+        blocks = blockResult.recordset;
+
+        bookedSet = new Set(bookedResult.recordset.map((row) => {
+          const timeText = row.ScheduledTime instanceof Date
+            ? formatTime(row.ScheduledTime)
+            : String(row.ScheduledTime).slice(0, 5);
+          const dateText = row.ScheduledDate instanceof Date
+            ? row.ScheduledDate.toISOString().slice(0, 10)
+            : String(row.ScheduledDate).slice(0, 10);
+          return `${dateText}|${timeText}`;
+        }));
       }
-
-      const blockResult = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS blockDate, BlockTime, Reason FROM dbo.BlockedSlots WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date) AND (Scope='All' OR (Scope='Service' AND ServiceId=@serviceId))`);
-      blocks = blockResult.recordset;
-
-      bookedSet = new Set(bookedResult.recordset.map((row) => {
-        const timeText = row.ScheduledTime instanceof Date
-          ? formatTime(row.ScheduledTime)
-          : String(row.ScheduledTime).slice(0, 5);
-        const dateText = row.ScheduledDate instanceof Date
-          ? row.ScheduledDate.toISOString().slice(0, 10)
-          : String(row.ScheduledDate).slice(0, 10);
-        return `${dateText}|${timeText}`;
-      }));
     }
 
     const slots = [];
@@ -1313,6 +1532,10 @@ app.get('/api/services/:serviceId/fields', async (req, res) => {
     return res.status(400).json({ message: 'Invalid service ID.' });
   }
   try {
+    if (postgresServicesEnabled) {
+      return res.json(await listPostgresServiceFields(getPostgresPool(), numericServiceId));
+    }
+
     const pool = getPool();
     const result = await pool.request().input('serviceId', sql.Int, numericServiceId).query(`
       SELECT FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder
@@ -1412,6 +1635,77 @@ app.post('/api/service-requests', (req, res, next) => {
   }
 
   try {
+    if (postgresServicesEnabled) {
+      const postgresPool = getPostgresPool();
+      const availability = await getPostgresServiceAvailability(postgresPool, numericServiceId);
+      const policy = {
+        name: availability.name,
+        ...servicePolicy(availability.name, scheduledDate),
+      };
+      const fieldResult = await postgresPool.query(`
+        SELECT "FieldKey", "Label", "FieldType", "IsRequired", "IsActive"
+        FROM "public"."ServiceFieldDefinition"
+        WHERE "ServiceId" = $1 AND "FieldType" = 'file' AND "IsActive" = TRUE
+      `, [numericServiceId]);
+      const validatedDocuments = validateBookingDocumentUploads(
+        fieldResult.rows,
+        documentKeys,
+        Array.isArray(req.files) ? req.files : [],
+      );
+      if (validatedDocuments.error) return res.status(400).json({ message: validatedDocuments.error });
+      if (!policy.allowed) return res.status(400).json({ message: policy.message });
+
+      const date = String(scheduledDate).slice(0, 10);
+      const time = String(scheduledTime).slice(0, 5);
+      const block = availability.blocks.find(item =>
+        item.blockDate === date && (!item.BlockTime || item.BlockTime === time));
+      if (block) return res.status(409).json({ message: blockedMessage(block) });
+      if (policy.quota && availability.bookings.filter(item => item.date === date).length >= policy.quota) {
+        return res.status(409).json({ message: `${policy.quotaLabel} bookings are limited to ${policy.quota} per day.` });
+      }
+      if (availability.bookings.some(item => item.date === date && item.time === time)) {
+        return res.status(409).json({ message: 'That appointment slot is already booked.' });
+      }
+
+      const verificationToken = randomUUID().replace(/-/g, '');
+      const requestId = await createPostgresServiceBooking(postgresPool, {
+        serviceId: numericServiceId,
+        scheduledDate,
+        scheduledTime,
+        notes: notes || null,
+        firstName,
+        lastName,
+        email,
+        mobileNumber: mobileNumber || null,
+        address: address || null,
+        documents: validatedDocuments.documents.map(document => ({
+          ...document,
+          fileName: path.basename(document.file.originalname)
+            .replace(/[^\w.-]/g, '_')
+            .slice(0, 255) || 'document',
+        })),
+        verificationToken,
+      });
+
+      try {
+        await savePostgresSacramentDetails(postgresPool, policy.name, requestId, details);
+      } catch (error) {
+        logError(error, { context: 'saveSacramentDetails', requestId, serviceId: numericServiceId });
+      }
+
+      const verificationLink = `${req.protocol}://${req.get('host')}/api/service-requests/verify?token=${verificationToken}`;
+      const { subject, html } = serviceBookingEmail({
+        firstName,
+        requestId,
+        scheduledDate,
+        scheduledTime,
+        notes,
+        verificationLink,
+      });
+      await sendEmail(email, subject, html);
+      return res.json({ requestId, status: 'PendingVerification', verificationLink });
+    }
+
     const pool = getPool();
     const policy = await getServicePolicy(pool, numericServiceId, scheduledDate);
     const documentFieldResult = await pool.request()
@@ -1558,6 +1852,10 @@ app.post('/api/service-requests', (req, res, next) => {
 
     res.json({ requestId, status: 'PendingVerification', verificationLink });
   } catch (error) {
+    if (postgresServicesEnabled && error?.code === '23505'
+      && error?.constraint === 'UX_ServiceRequest_ActiveSlot') {
+      return res.status(409).json({ message: 'That appointment slot is already booked.' });
+    }
     console.error('Booking error:', error);
     res.status(500).json({ message: 'Unable to create booking.' });
   }
@@ -1577,16 +1875,32 @@ app.get('/api/service-requests/verify', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired verification token.' });
     }
 
-    const pool = getPool();
-    await pool.request().input('requestId', sql.Int, requestId).query(`
-      UPDATE dbo.ServiceRequest
-      SET Status = N'PendingReview'
-      WHERE ServiceRequestId = @requestId AND Status = N'PendingVerification'
-    `);
+    let status;
+    if (postgresServicesEnabled) {
+      const postgresPool = getPostgresPool();
+      await postgresPool.query(`
+        UPDATE "public"."ServiceRequest"
+        SET "Status" = 'PendingReview'
+        WHERE "ServiceRequestId" = $1 AND "Status" = 'PendingVerification'
+      `, [requestId]);
+      const result = await postgresPool.query(`
+        SELECT "Status" AS status
+        FROM "public"."ServiceRequest"
+        WHERE "ServiceRequestId" = $1
+      `, [requestId]);
+      status = result.rows[0]?.status;
+    } else {
+      const pool = getPool();
+      await pool.request().input('requestId', sql.Int, requestId).query(`
+        UPDATE dbo.ServiceRequest
+        SET Status = N'PendingReview'
+        WHERE ServiceRequestId = @requestId AND Status = N'PendingVerification'
+      `);
 
-    const result = await pool.request().input('requestId', sql.Int, requestId)
-      .query('SELECT Status FROM dbo.ServiceRequest WHERE ServiceRequestId=@requestId');
-    const status = result.recordset[0]?.Status;
+      const result = await pool.request().input('requestId', sql.Int, requestId)
+        .query('SELECT Status FROM dbo.ServiceRequest WHERE ServiceRequestId=@requestId');
+      status = result.recordset[0]?.Status;
+    }
     if (status === 'PendingReview') {
       return res.json({ message: 'Email verified. Your request is awaiting parish staff review and confirmation.' });
     }
@@ -1674,6 +1988,15 @@ app.get('/api/vatican-news', async (_req, res) => {
 });
 
 app.get('/api/events', async (_req, res) => {
+  if (postgresEventsEnabled) {
+    try {
+      return res.json(await listPostgresEvents(getPostgresPool()));
+    } catch (error) {
+      logError(error, { context: 'eventsLookupPostgres' });
+      return res.status(500).json({ message: 'Unable to load events.' });
+    }
+  }
+
   try {
     const pool = getPool();
     const request = pool.request();
@@ -1725,18 +2048,40 @@ app.get('/api/events', async (_req, res) => {
 app.post('/api/events', requireAdmin, async (req, res) => {
   const { title, titleTl, description, descriptionTl, detail, detailTl, date, time, location, locationTl, photoUrl } = req.body;
 
-  if (!title || !date) {
+  if (typeof title !== 'string' || !title.trim() || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
   }
 
-  // Validate title length
-  if (String(title).trim().length < 3) {
+  if (title.trim().length < 3) {
     return res.status(400).json({ message: 'Event title must be at least 3 characters.' });
   }
 
-  // Validate date format
   if (!isValidDate(date)) {
     return res.status(400).json({ message: 'Please provide a valid event date.' });
+  }
+
+  const event = {
+    title,
+    titleTl: titleTl || '',
+    description: description || '',
+    descriptionTl: descriptionTl || '',
+    detail: detail || '',
+    detailTl: detailTl || '',
+    date,
+    time: time || '',
+    location: location || '',
+    locationTl: locationTl || '',
+    photoUrl: photoUrl || '',
+  };
+
+  if (postgresEventsEnabled) {
+    try {
+      const created = await createPostgresEvent(getPostgresPool(), event);
+      return res.status(201).json(created);
+    } catch (error) {
+      logError(error, { context: 'createEventPostgres' });
+      return res.status(500).json({ message: 'Unable to create event.' });
+    }
   }
 
   try {
@@ -1775,9 +2120,47 @@ app.post('/api/events', requireAdmin, async (req, res) => {
 app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
   const { eventId } = req.params;
   const { title, titleTl, description, descriptionTl, detail, detailTl, date, time, location, locationTl, photoUrl } = req.body;
+  const numericEventId = Number(eventId);
 
-  if (!title || !date) {
+  if (!Number.isSafeInteger(numericEventId) || numericEventId < 1) {
+    return res.status(400).json({ message: 'Please provide a valid event ID.' });
+  }
+
+  if (typeof title !== 'string' || !title.trim() || !date) {
     return res.status(400).json({ message: 'Title and date are required.' });
+  }
+
+  if (title.trim().length < 3) {
+    return res.status(400).json({ message: 'Event title must be at least 3 characters.' });
+  }
+
+  if (!isValidDate(date)) {
+    return res.status(400).json({ message: 'Please provide a valid event date.' });
+  }
+
+  const event = {
+    title,
+    titleTl: titleTl || '',
+    description: description || '',
+    descriptionTl: descriptionTl || '',
+    detail: detail || '',
+    detailTl: detailTl || '',
+    date,
+    time: time || '',
+    location: location || '',
+    locationTl: locationTl || '',
+    photoUrl: photoUrl || '',
+  };
+
+  if (postgresEventsEnabled) {
+    try {
+      const updated = await updatePostgresEvent(getPostgresPool(), numericEventId, event);
+      if (!updated) return res.status(404).json({ message: 'Event not found.' });
+      return res.json(updated);
+    } catch (error) {
+      logError(error, { context: 'updateEventPostgres' });
+      return res.status(500).json({ message: 'Unable to update event.' });
+    }
   }
 
   try {
@@ -1794,7 +2177,7 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
       .input('location', sql.NVarChar(255), location || '')
       .input('locationTl', sql.NVarChar(255), locationTl || '')
       .input('photoUrl', sql.NVarChar(1000), photoUrl || '')
-      .input('eventId', sql.Int, eventId);
+      .input('eventId', sql.Int, numericEventId);
 
     await request.query(`
       UPDATE dbo.Events
@@ -1817,10 +2200,26 @@ app.put('/api/events/:eventId', requireAdmin, async (req, res) => {
 
 app.delete('/api/events/:eventId', requireAdmin, async (req, res) => {
   const { eventId } = req.params;
+  const numericEventId = Number(eventId);
+
+  if (!Number.isSafeInteger(numericEventId) || numericEventId < 1) {
+    return res.status(400).json({ message: 'Please provide a valid event ID.' });
+  }
+
+  if (postgresEventsEnabled) {
+    try {
+      const deleted = await deletePostgresEvent(getPostgresPool(), numericEventId);
+      if (!deleted) return res.status(404).json({ message: 'Event not found.' });
+      return res.json({ success: true });
+    } catch (error) {
+      logError(error, { context: 'deleteEventPostgres' });
+      return res.status(500).json({ message: 'Unable to delete event.' });
+    }
+  }
 
   try {
     const pool = getPool();
-    const request = pool.request().input('eventId', sql.Int, eventId);
+    const request = pool.request().input('eventId', sql.Int, numericEventId);
 
     await request.query(`
       DELETE FROM dbo.Events
@@ -1955,6 +2354,15 @@ app.put('/api/admin/site-content/:page', requireAdmin, requireRole(['Admin', 'Se
 
   try {
     const contentJson = JSON.stringify(content);
+    if (postgresContentEnabled) {
+      await savePostgresSiteContent(
+        getPostgresPool(),
+        page,
+        contentJson,
+        req.staff?.email || String(req.staff?.userId || ''),
+      );
+      return res.json({ content });
+    }
     await getPool().request()
       .input('key', sql.NVarChar(50), page)
       .input('content', sql.NVarChar(sql.MAX), contentJson)
@@ -1996,6 +2404,10 @@ app.post('/api/contact', contactRateLimit, async (req, res) => {
   }
 
   try {
+    if (postgresContentEnabled) {
+      await createPostgresContactMessage(getPostgresPool(), { name, email, phone: phone || null, message });
+      return res.json({ success: true });
+    }
     await getPool().request()
       .input('name', sql.NVarChar(200), name)
       .input('email', sql.NVarChar(320), email)
@@ -2012,6 +2424,9 @@ app.post('/api/contact', contactRateLimit, async (req, res) => {
 // Any signed-in staff role may read and mark messages; only senior roles may delete.
 app.get('/api/admin/contact-messages', requireAdmin, requireRole(staffRolePriority), async (_req, res) => {
   try {
+    if (postgresContentEnabled) {
+      return res.json(await listPostgresContactMessages(getPostgresPool()));
+    }
     const result = await getPool().request().query(`
       SELECT ContactMessageId, Name, Email, Phone, Message, IsRead, CreatedAt
       FROM dbo.ContactMessages
@@ -2038,6 +2453,10 @@ app.patch('/api/admin/contact-messages/:id', requireAdmin, requireRole(staffRole
     return res.status(400).json({ message: 'Invalid request.' });
   }
   try {
+    if (postgresContentEnabled) {
+      await setPostgresContactMessageRead(getPostgresPool(), id, req.body.isRead);
+      return res.json({ success: true });
+    }
     await getPool().request()
       .input('id', sql.Int, id)
       .input('isRead', sql.Bit, req.body.isRead ? 1 : 0)
@@ -2055,6 +2474,10 @@ app.delete('/api/admin/contact-messages/:id', requireAdmin, requireRole(['Parish
     return res.status(400).json({ message: 'Invalid request.' });
   }
   try {
+    if (postgresContentEnabled) {
+      await deletePostgresContactMessage(getPostgresPool(), id);
+      return res.json({ success: true });
+    }
     await getPool().request()
       .input('id', sql.Int, id)
       .query('DELETE FROM dbo.ContactMessages WHERE ContactMessageId = @id');
@@ -2085,7 +2508,7 @@ app.post('/api/admin/login', authRateLimit, async (req, res) => {
   })) {
     logAuth('local_development_login', { ip: req.ip });
     return res.json({
-      token: createStaffToken(0, 'Admin'),
+      token: createStaffToken(0, adminTokenSigningSecret),
       user: {
         id: 0,
         userName: localAdminUsername,
@@ -2102,25 +2525,50 @@ app.post('/api/admin/login', authRateLimit, async (req, res) => {
   }
 
   try {
-    const result = await getPool().request()
-      .input('login', sql.NVarChar(510), email)
-      .query(`
-        SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, u.MustChangePassword, r.Name AS RoleName
-        FROM dbo.AspNetUsers u
-        INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
-        INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
-        WHERE u.EmailAddress = @login OR u.UserName = @login
-      `);
-    const user = result.recordset[0];
-
-    const supportedRoles = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
-    if (!user || !supportedRoles.includes(user.RoleName) || !verifyAspNetPassword(password, user.PasswordHash)) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+    let user;
+    if (identityDatabaseConfig.provider === 'postgres') {
+      user = await authenticatePostgresStaff(
+        getPostgresPool(),
+        email,
+        password,
+        verifyAspNetPassword,
+      );
+      if (!user) return res.status(401).json({ message: 'Invalid email or password.' });
+    } else {
+      const result = await getPool().request()
+        .input('login', sql.NVarChar(510), email)
+        .query(`
+          SELECT TOP 1 u.UserId, u.EmailAddress, u.PasswordHash, u.MustChangePassword, r.Name AS RoleName
+          FROM dbo.AspNetUsers u
+          INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
+          INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+          WHERE u.EmailAddress = @login OR u.UserName = @login
+        `);
+      const sqlServerUser = result.recordset[0];
+      const supportedRoles = ['Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff'];
+      if (
+        !sqlServerUser ||
+        !supportedRoles.includes(sqlServerUser.RoleName) ||
+        !verifyAspNetPassword(password, sqlServerUser.PasswordHash)
+      ) {
+        return res.status(401).json({ message: 'Invalid email or password.' });
+      }
+      user = {
+        userId: sqlServerUser.UserId,
+        email: sqlServerUser.EmailAddress,
+        role: sqlServerUser.RoleName,
+        mustChangePassword: Boolean(sqlServerUser.MustChangePassword),
+      };
     }
 
     return res.json({
-      token: createStaffToken(user.UserId, user.RoleName),
-      user: { id: user.UserId, email: user.EmailAddress, role: user.RoleName, mustChangePassword: Boolean(user.MustChangePassword) },
+      token: createStaffToken(user.userId, adminTokenSigningSecret),
+      user: {
+        id: user.userId,
+        email: user.email,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      },
     });
   } catch (error) {
     console.error('Admin login error:', error);
@@ -2136,17 +2584,29 @@ app.post('/api/admin/forgot-password', authRateLimit, async (req, res) => {
   }
 
   try {
-    const accountResult = await getPool().request()
-      .input('email', sql.NVarChar(255), email)
-      .query(`
-        SELECT TOP 1 u.UserId, u.EmailAddress, u.UserName
-        FROM dbo.AspNetUsers u
-        INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
-        INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
-        WHERE u.EmailAddress = @email
-          AND r.Name IN ('Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff')
-      `);
-    const account = accountResult.recordset[0];
+    let account;
+    if (identityDatabaseConfig.provider === 'postgres') {
+      account = await findPostgresStaffForPasswordReset(getPostgresPool(), email);
+    } else {
+      const accountResult = await getPool().request()
+        .input('email', sql.NVarChar(255), email)
+        .query(`
+          SELECT TOP 1 u.UserId, u.EmailAddress, u.UserName
+          FROM dbo.AspNetUsers u
+          INNER JOIN dbo.AspNetUserRoles ur ON ur.UserId = u.UserId
+          INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
+          WHERE u.EmailAddress = @email
+            AND r.Name IN ('Admin', 'ParishPriest', 'Secretary', 'Bookkeeper', 'Staff')
+        `);
+      const sqlServerAccount = accountResult.recordset[0];
+      if (sqlServerAccount) {
+        account = {
+          userId: sqlServerAccount.UserId,
+          email: sqlServerAccount.EmailAddress,
+          userName: sqlServerAccount.UserName,
+        };
+      }
+    }
 
     if (!account) {
       return res.status(404).json({ message: 'No staff account was found for that email address.' });
@@ -2155,49 +2615,61 @@ app.post('/api/admin/forgot-password', authRateLimit, async (req, res) => {
     if (account && resend) {
       const token = createPasswordResetToken();
       const tokenHash = hashPasswordResetToken(token);
-      const transaction = new sql.Transaction(getPool());
-      let transactionStarted = false;
-      try {
-        await transaction.begin();
-        transactionStarted = true;
-        await transaction.request()
-          .input('userId', sql.Int, account.UserId)
-          .query(`
-            UPDATE dbo.PasswordResetTokens
-            SET UsedAt = SYSUTCDATETIME()
-            WHERE UserId = @userId AND UsedAt IS NULL
-          `);
-        await transaction.request()
-          .input('userId', sql.Int, account.UserId)
-          .input('tokenHash', sql.Char(64), tokenHash)
-          .query(`
-            INSERT INTO dbo.PasswordResetTokens (UserId, TokenHash, ExpiresAt)
-            VALUES (@userId, @tokenHash, DATEADD(MINUTE, 30, SYSUTCDATETIME()))
-          `);
-        await transaction.commit();
-        transactionStarted = false;
-      } catch (error) {
-        if (transactionStarted) {
-          try { await transaction.rollback(); } catch (rollbackError) {
-            logError(rollbackError, { context: 'forgotPasswordRollback' });
+      if (identityDatabaseConfig.provider === 'postgres') {
+        await createPostgresPasswordReset(getPostgresPool(), account.userId, tokenHash);
+      } else {
+        const transaction = new sql.Transaction(getPool());
+        let transactionStarted = false;
+        try {
+          await transaction.begin();
+          transactionStarted = true;
+          await transaction.request()
+            .input('userId', sql.Int, account.userId)
+            .query(`
+              UPDATE dbo.PasswordResetTokens
+              SET UsedAt = SYSUTCDATETIME()
+              WHERE UserId = @userId AND UsedAt IS NULL
+            `);
+          await transaction.request()
+            .input('userId', sql.Int, account.userId)
+            .input('tokenHash', sql.Char(64), tokenHash)
+            .query(`
+              INSERT INTO dbo.PasswordResetTokens (UserId, TokenHash, ExpiresAt)
+              VALUES (@userId, @tokenHash, DATEADD(MINUTE, 30, SYSUTCDATETIME()))
+            `);
+          await transaction.commit();
+          transactionStarted = false;
+        } catch (error) {
+          if (transactionStarted) {
+            try { await transaction.rollback(); } catch (rollbackError) {
+              logError(rollbackError, { context: 'forgotPasswordRollback' });
+            }
           }
+          throw error;
         }
-        throw error;
       }
 
       const resetUrl = new URL('/admin/reset-password', process.env.FRONTEND_URL || 'http://localhost:5173');
       resetUrl.searchParams.set('token', token);
       const { subject, html } = passwordResetEmail({
-        userName: account.UserName,
+        userName: account.userName,
         resetLink: resetUrl.toString(),
       });
-      if (!await sendEmail(account.EmailAddress, subject, html)) {
-        try {
-          await getPool().request()
-            .input('tokenHash', sql.Char(64), tokenHash)
-            .query('UPDATE dbo.PasswordResetTokens SET UsedAt = SYSUTCDATETIME() WHERE TokenHash = @tokenHash');
-        } catch (error) {
-          logError(error, { context: 'invalidateUndeliveredPasswordReset' });
+      if (!await sendEmail(account.email, subject, html)) {
+        if (identityDatabaseConfig.provider === 'postgres') {
+          try {
+            await invalidatePostgresPasswordReset(getPostgresPool(), tokenHash);
+          } catch (error) {
+            logError(error, { context: 'invalidateUndeliveredPasswordReset' });
+          }
+        } else {
+          try {
+            await getPool().request()
+              .input('tokenHash', sql.Char(64), tokenHash)
+              .query('UPDATE dbo.PasswordResetTokens SET UsedAt = SYSUTCDATETIME() WHERE TokenHash = @tokenHash');
+          } catch (error) {
+            logError(error, { context: 'invalidateUndeliveredPasswordReset' });
+          }
         }
       }
     } else if (account) {
@@ -2222,6 +2694,23 @@ app.post('/api/admin/reset-password', authRateLimit, async (req, res) => {
   }
   if (newPassword === defaultStaffPassword()) {
     return res.status(400).json({ message: 'Choose a password that is different from the default password.' });
+  }
+
+  if (identityDatabaseConfig.provider === 'postgres') {
+    try {
+      const changed = await resetPostgresStaffPassword(
+        getPostgresPool(),
+        hashPasswordResetToken(token),
+        hashAspNetPassword(newPassword),
+      );
+      if (!changed) {
+        return res.status(400).json({ message: 'This password reset link is invalid or has expired.' });
+      }
+      return res.json({ message: 'Your password has been reset. You can now sign in with your new password.' });
+    } catch (error) {
+      logError(error, { context: 'resetPassword' });
+      return res.status(500).json({ message: 'Unable to reset the password. Please request a new reset link.' });
+    }
   }
 
   let transaction;
@@ -2283,10 +2772,12 @@ app.post('/api/admin/reset-password', authRateLimit, async (req, res) => {
 
 app.get('/api/admin/verify', requireAdmin, async (req, res) => {
   const staff = req.staff;
-  let profile = { userName: '', email: '' };
+  let profile = identityDatabaseConfig.provider === 'postgres'
+    ? { userName: staff.userName || '', email: staff.email || '' }
+    : { userName: '', email: '' };
   if (staff.userId === 0) {
     profile.userName = process.env.LOCAL_ADMIN_USERNAME || '';
-  } else if (staff.userId > 0) {
+  } else if (staff.userId > 0 && identityDatabaseConfig.provider === 'sqlserver') {
     try {
       const result = await getPool().request().input('id', sql.Int, staff.userId)
         .query('SELECT UserName, EmailAddress FROM dbo.AspNetUsers WHERE UserId = @id');
@@ -2323,32 +2814,48 @@ app.post('/api/admin/change-password', authRateLimit, requireAdmin, async (req, 
     return res.status(400).json({ message: 'Choose a new password that is different from your current and default password.' });
   }
   try {
-    const result = await getPool().request().input('id', sql.Int, req.staff.userId)
-      .query('SELECT UserName, PasswordHash FROM dbo.AspNetUsers WHERE UserId = @id');
-    const user = result.recordset[0];
-    if (!user || !verifyAspNetPassword(currentPassword, user.PasswordHash)) {
-      return res.status(401).json({ message: 'Your current password is incorrect.' });
-    }
-    const updateResult = await getPool().request()
-      .input('id', sql.Int, req.staff.userId)
-      .input('hash', sql.NVarChar(1024), hashAspNetPassword(newPassword))
-      .query('UPDATE dbo.AspNetUsers SET PasswordHash = @hash, MustChangePassword = 0 WHERE UserId = @id');
-    if (updateResult.rowsAffected[0] !== 1) {
-      return res.status(500).json({ message: 'Unable to change password.' });
-    }
-    try {
-      await getPool().request()
-        .input('action', sql.VarChar(40), 'ChangeOwnPassword')
-        .input('target', sql.Int, req.staff.userId)
-        .input('targetName', sql.NVarChar(512), user.UserName)
-        .input('by', sql.NVarChar(512), user.UserName)
-        .input('details', sql.NVarChar(sql.MAX), null)
-        .query(`
-          INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
-          VALUES (@action, @target, @targetName, @by, @details)
-        `);
-    } catch (auditError) {
-      logError(auditError, { context: 'auditChangeOwnPassword', userId: req.staff.userId });
+    if (identityDatabaseConfig.provider === 'postgres') {
+      const result = await changePostgresStaffPassword(
+        getPostgresPool(),
+        req.staff.userId,
+        currentPassword,
+        newPassword,
+        { verifyPassword: verifyAspNetPassword, hashPassword: hashAspNetPassword },
+      );
+      if (!result.changed) {
+        return res.status(401).json({ message: 'Your current password is incorrect.' });
+      }
+      if (result.auditError) {
+        logError(result.auditError, { context: 'auditChangeOwnPassword', userId: req.staff.userId });
+      }
+    } else {
+      const result = await getPool().request().input('id', sql.Int, req.staff.userId)
+        .query('SELECT UserName, PasswordHash FROM dbo.AspNetUsers WHERE UserId = @id');
+      const user = result.recordset[0];
+      if (!user || !verifyAspNetPassword(currentPassword, user.PasswordHash)) {
+        return res.status(401).json({ message: 'Your current password is incorrect.' });
+      }
+      const updateResult = await getPool().request()
+        .input('id', sql.Int, req.staff.userId)
+        .input('hash', sql.NVarChar(1024), hashAspNetPassword(newPassword))
+        .query('UPDATE dbo.AspNetUsers SET PasswordHash = @hash, MustChangePassword = 0 WHERE UserId = @id');
+      if (updateResult.rowsAffected[0] !== 1) {
+        return res.status(500).json({ message: 'Unable to change password.' });
+      }
+      try {
+        await getPool().request()
+          .input('action', sql.VarChar(40), 'ChangeOwnPassword')
+          .input('target', sql.Int, req.staff.userId)
+          .input('targetName', sql.NVarChar(512), user.UserName)
+          .input('by', sql.NVarChar(512), user.UserName)
+          .input('details', sql.NVarChar(sql.MAX), null)
+          .query(`
+            INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
+            VALUES (@action, @target, @targetName, @by, @details)
+          `);
+      } catch (auditError) {
+        logError(auditError, { context: 'auditChangeOwnPassword', userId: req.staff.userId });
+      }
     }
     return res.json({ message: 'Password changed.' });
   } catch (error) {
@@ -2365,6 +2872,15 @@ app.put('/api/admin/profile', requireAdmin, async (req, res) => {
     return res.status(400).json({ message: 'A username and valid email address are required.' });
   }
   try {
+    if (identityDatabaseConfig.provider === 'postgres') {
+      const result = await updatePostgresStaffProfile(getPostgresPool(), req.staff.userId, userName, email);
+      if (result.duplicate) {
+        return res.status(409).json({ message: 'Another account already uses this email address.' });
+      }
+      if (!result.updated) return res.status(404).json({ message: 'Staff account not found.' });
+      return res.json({ userName, email });
+    }
+
     const duplicate = await getPool().request()
       .input('id', sql.Int, req.staff.userId)
       .input('email', sql.NVarChar(510), email)
@@ -2386,6 +2902,9 @@ app.get('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin'])
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
   try {
+    if (identityDatabaseConfig.provider === 'postgres') {
+      return res.json({ overrides: await getPostgresUserPermissions(getPostgresPool(), id) });
+    }
     const result = await getPool().request().input('id', sql.Int, id)
       .query('SELECT ModuleName, CanView, CanEdit FROM dbo.UserModulePermissions WHERE UserId = @id');
     res.json({ overrides: Object.fromEntries(result.recordset.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }])) });
@@ -2408,6 +2927,16 @@ app.put('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin'])
   let transaction;
   let transactionStarted = false;
   try {
+    if (identityDatabaseConfig.provider === 'postgres') {
+      const updated = await updatePostgresUserPermissions(
+        getPostgresPool(),
+        id,
+        overrides,
+        staffName(req),
+      );
+      if (!updated) return res.status(404).json({ message: 'Staff account not found.' });
+      return res.json({ message: 'Permissions updated.' });
+    }
     transaction = new sql.Transaction(getPool());
     await transaction.begin();
     transactionStarted = true;
@@ -2452,6 +2981,12 @@ app.put('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin'])
 
 app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 'Secretary']), async (req, res) => {
   try {
+    if (identityDatabaseConfig.provider === 'postgres') {
+      return res.json(await getPostgresStaffUsers(
+        getPostgresPool(),
+        req.staff.role === 'Admin',
+      ));
+    }
     const result = await getPool().request()
       .input('includeDetails', sql.Bit, req.staff.role === 'Admin' ? 1 : 0)
       .query(`
@@ -2486,7 +3021,18 @@ app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 
 });
 
 app.get('/api/admin/audit/user-management', requireAdmin, requireRole(['Admin']), async (req, res) => {
-  try { const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100)); const result = await getPool().request().input('limit', sql.Int, limit).query('SELECT TOP (@limit) * FROM dbo.UserManagementAudit ORDER BY ChangedAt DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'userAudit' }); res.status(500).json({ message: 'Unable to load user audit history.' }); }
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    if (identityDatabaseConfig.provider === 'postgres') {
+      return res.json(await listPostgresUserManagementAudit(getPostgresPool(), limit));
+    }
+    const result = await getPool().request().input('limit', sql.Int, limit)
+      .query('SELECT TOP (@limit) * FROM dbo.UserManagementAudit ORDER BY ChangedAt DESC');
+    res.json(result.recordset);
+  } catch (error) {
+    logError(error, { context: 'userAudit' });
+    res.status(500).json({ message: 'Unable to load user audit history.' });
+  }
 });
 
 app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, res) => {
@@ -2499,6 +3045,29 @@ app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, r
   if (!username || username.length > 256 || !isValidEmail(normalizedEmail) || normalizedEmail.length > 510 ||
       typeof password !== 'string' || password.length < 8 || !validRoles.includes(selectedRole)) {
     return res.status(400).json({ message: 'A username, valid email, and valid role are required, and a default password of at least eight characters must be configured.' });
+  }
+
+  if (identityDatabaseConfig.provider === 'postgres') {
+    try {
+      const result = await createPostgresStaffUser(getPostgresPool(), {
+        userName: username,
+        email: normalizedEmail,
+        role: selectedRole,
+        password,
+        changedBy: staffName(req),
+        hashPassword: hashAspNetPassword,
+      });
+      if ('duplicate' in result) {
+        return res.status(409).json({ message: 'An account with this email address already exists.' });
+      }
+      if ('roleMissing' in result) {
+        return res.status(500).json({ message: 'Role is not configured in the database.' });
+      }
+      return res.status(201).json({ userId: result.userId });
+    } catch (error) {
+      logError(error, { context: 'createAdminUser' });
+      return res.status(500).json({ message: 'Unable to create staff account.' });
+    }
   }
 
   let transaction;
@@ -2596,6 +3165,38 @@ app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin', 'ParishPries
   }
   if (!hasEmail && !hasPassword && !requestedRoles) {
     return res.status(400).json({ message: 'At least one account change is required.' });
+  }
+
+  if (identityDatabaseConfig.provider === 'postgres') {
+    try {
+      const result = await updatePostgresStaffUser(getPostgresPool(), {
+        userId: id,
+        email,
+        hasEmail,
+        password: hasPassword ? password : undefined,
+        resetToDefault,
+        requestedRoles,
+        changedBy: staffName(req),
+        hashPassword: hashAspNetPassword,
+        allowAdminTarget: req.staff.role === 'Admin',
+      });
+      if ('duplicate' in result) {
+        return res.status(409).json({ message: 'Another account already uses this email address.' });
+      }
+      if ('roleMissing' in result) {
+        return res.status(400).json({ message: `Role ${result.role} is not configured.` });
+      }
+      if ('missing' in result) {
+        return res.status(404).json({ message: 'Staff account not found.' });
+      }
+      if ('targetIsAdmin' in result) {
+        return res.status(403).json({ message: 'Only Admin users can change an Admin account.' });
+      }
+      return res.json({ message: 'Staff account updated.' });
+    } catch (error) {
+      logError(error, { context: 'updateAdminUser' });
+      return res.status(500).json({ message: 'Unable to update staff account.' });
+    }
   }
 
   let transaction;
@@ -2710,6 +3311,17 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'A valid staff account ID is required.' });
 
+  if (identityDatabaseConfig.provider === 'postgres') {
+    try {
+      const deleted = await deletePostgresStaffUser(getPostgresPool(), id, staffName(req));
+      if (!deleted) return res.status(404).json({ message: 'Staff account not found.' });
+      return res.json({ message: 'Staff account deleted.' });
+    } catch (error) {
+      logError(error, { context: 'deleteAdminUser' });
+      return res.status(500).json({ message: 'Unable to delete staff account.' });
+    }
+  }
+
   let transaction;
   let transactionStarted = false;
   try {
@@ -2759,8 +3371,24 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
   }
 });
 
-app.use(createPrayerRouter({ getPool, sql, requireAdmin, requireRole, logError }));
-app.use(createBlockedSlotsRouter({ getPool, sql, requireAdmin, requireRole, logError }));
+app.use(createPrayerRouter({
+  getPool,
+  sql,
+  requireAdmin,
+  requireRole,
+  logError,
+  postgresEnabled: postgresContentEnabled,
+  getPostgresPool,
+}));
+app.use(createBlockedSlotsRouter({
+  getPool,
+  getPostgresPool,
+  postgresEnabled: postgresServicesEnabled,
+  sql,
+  requireAdmin,
+  requireRole,
+  logError,
+}));
 app.use(createAdminReportingRouter({
   getPool,
   sql,
@@ -2773,10 +3401,26 @@ app.use(createAdminReportingRouter({
   requireAdminWithQueryToken,
   getArchiveFile,
   deleteArchiveFile,
+  postgresCertificatesEnabled,
+  postgresOperationsEnabled,
+  postgresSacramentalEnabled,
+  getPostgresPool,
+}));
+app.use(createFinanceWorkflowRouter({
+  transitionFinanceEntry: (id, action, changedBy) => postgresOperationsEnabled
+    ? transitionPostgresFinanceEntry(getPostgresPool(), id, action, changedBy)
+    : transitionSqlServerFinanceEntry(getPool(), sql, id, action, changedBy),
+  requireAdmin,
+  requireRole,
+  logError,
+  staffName: req => staffName(req),
 }));
 
 app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
+    if (postgresContentEnabled) {
+      return res.json(await getPostgresAdminPrayers(getPostgresPool()));
+    }
     const pool = getPool();
     const request = pool.request();
 
@@ -2808,6 +3452,10 @@ app.delete('/api/prayers/:prayerId', requireAdmin, requireRole(['ParishPriest', 
   const { prayerId } = req.params;
 
   try {
+    if (postgresContentEnabled) {
+      await deletePostgresPrayer(getPostgresPool(), Number(prayerId));
+      return res.json({ success: true });
+    }
     const pool = getPool();
     const request = pool.request().input('prayerId', sql.Int, prayerId);
 
@@ -2825,6 +3473,10 @@ app.delete('/api/prayers/:prayerId', requireAdmin, requireRole(['ParishPriest', 
 
 app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
+    if (postgresServicesEnabled) {
+      return res.json(await listPostgresAdminServiceRequests(getPostgresPool()));
+    }
+
     const pool = getPool();
     const request = pool.request();
 
@@ -2961,15 +3613,16 @@ app.get('/api/admin/service-requests/:requestId/documents/:fieldKey', requireAdm
   }
 
   try {
-    const result = await getPool().request()
+    const document = postgresServicesEnabled
+      ? await getPostgresServiceRequestDocument(getPostgresPool(), requestId, req.params.fieldKey)
+      : (await getPool().request()
       .input('requestId', sql.Int, requestId)
       .input('fieldKey', sql.VarChar(100), req.params.fieldKey)
       .query(`
         SELECT OriginalFileName, ContentType, FileData
         FROM dbo.ServiceRequestDocument
         WHERE ServiceRequestId=@requestId AND FieldKey=@fieldKey
-      `);
-    const document = result.recordset[0];
+      `)).recordset[0];
     if (!document) return res.status(404).json({ message: 'Document not found.' });
 
     const fileName = path.basename(document.OriginalFileName).replace(/[^\w.-]/g, '_') || 'document';
@@ -2988,6 +3641,10 @@ app.get('/api/admin/service-requests/:requestId/documents/:fieldKey', requireAdm
 
 app.get('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (_req, res) => {
   try {
+    if (postgresServicesEnabled) {
+      return res.json(await listPostgresAdminServiceFields(getPostgresPool()));
+    }
+
     const result = await getPool().request().query(`
       SELECT f.FieldDefinitionId, f.ServiceId, s.Name AS ServiceName, f.FieldKey, f.Label, f.FieldType, f.OptionsJson, f.IsRequired, f.SortOrder, f.IsActive
       FROM dbo.ServiceFieldDefinition f
@@ -3022,6 +3679,20 @@ app.post('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest',
     return res.status(400).json({ message: 'Unsupported booking field type.' });
   }
   try {
+    if (postgresServicesEnabled) {
+      const id = await createPostgresServiceField(getPostgresPool(), {
+        serviceId: numericServiceId,
+        key: String(key),
+        label: String(label),
+        type: String(type || 'text'),
+        optionsJson: Array.isArray(options) ? JSON.stringify(options) : null,
+        required: !!required,
+        sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
+        active: active === undefined ? true : !!active,
+      });
+      return res.status(201).json({ id });
+    }
+
     const result = await getPool().request()
       .input('serviceId', sql.Int, numericServiceId)
       .input('key', sql.VarChar(100), String(key))
@@ -3053,6 +3724,18 @@ app.put('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPries
     return res.status(400).json({ message: 'Unsupported booking field type.' });
   }
   try {
+    if (postgresServicesEnabled) {
+      await updatePostgresServiceField(getPostgresPool(), id, {
+        label: String(label),
+        type: String(type || 'text'),
+        optionsJson: Array.isArray(options) ? JSON.stringify(options) : null,
+        required: !!required,
+        sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
+        active: active === undefined ? true : !!active,
+      });
+      return res.json({ message: 'Field definition updated.' });
+    }
+
     await getPool().request()
       .input('id', sql.Int, id)
       .input('label', sql.NVarChar(200), String(label))
@@ -3079,6 +3762,11 @@ app.delete('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPr
     return res.status(400).json({ message: 'Invalid field definition ID.' });
   }
   try {
+    if (postgresServicesEnabled) {
+      await deletePostgresServiceField(getPostgresPool(), id);
+      return res.json({ message: 'Field definition deleted.' });
+    }
+
     await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.ServiceFieldDefinition WHERE FieldDefinitionId=@id');
     res.json({ message: 'Field definition deleted.' });
   } catch (error) {
@@ -3099,6 +3787,11 @@ app.put('/api/admin/service-requests/:requestId', requireAdmin, requireRole(['Pa
   }
 
   try {
+    if (postgresServicesEnabled) {
+      await updatePostgresAdminServiceRequest(getPostgresPool(), requestId, String(status), adminNotes);
+      return res.json({ success: true, status });
+    }
+
     const pool = getPool();
     const request = pool.request()
       .input('requestId', sql.Int, requestId)
@@ -3159,6 +3852,11 @@ app.delete('/api/admin/service-requests/:requestId', requireAdmin, requireRole([
   }
 
   try {
+    if (postgresServicesEnabled) {
+      await deletePostgresAdminServiceRequest(getPostgresPool(), requestId);
+      return res.json({ success: true });
+    }
+
     await deleteServiceRequest(new sql.Transaction(getPool()), requestId);
     res.json({ success: true });
   } catch (error) {
@@ -3189,6 +3887,10 @@ const sqlBitToBoolean = (value) => {
 
 app.get('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (_req, res) => {
   try {
+    if (postgresOperationsEnabled) {
+      return res.json(await listPostgresSchedules(getPostgresPool()));
+    }
+
     const result = await getPool().request().query(`SELECT MassScheduleId AS id, Title AS title, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Notes AS notes, Status AS status FROM dbo.MassSchedule ORDER BY MassDate, MassTime`);
     res.json(result.recordset);
   } catch (error) { logError(error, { context: 'operationSchedule' }); res.status(500).json({ message: 'Unable to load schedules.' }); }
@@ -3198,6 +3900,23 @@ app.post('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPri
   const { title, date, time, location, priestUsername, notes, status } = req.body || {};
   if (!title || !date || !time || !location || !priestUsername) return res.status(400).json({ message: 'Schedule title, date, time, location, and minister are required.' });
   try {
+    if (postgresOperationsEnabled) {
+      const postgresPool = getPostgresPool();
+      const existing = await listPostgresScheduleSlots(postgresPool, date, time);
+      const conflict = findScheduleConflict({ date, time, location, priestUsername }, existing);
+      if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+      const result = await createPostgresSchedule(postgresPool, {
+        title,
+        date,
+        time,
+        location,
+        priestUsername,
+        notes: notes || null,
+        status: status || 'Scheduled',
+      });
+      return res.status(201).json(result);
+    }
+
     const pool = getPool();
     const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query(`SELECT MassScheduleId AS id, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Status AS status FROM dbo.MassSchedule WHERE MassDate=@date AND MassTime=@time`);
     const conflict = findScheduleConflict({ date, time, location, priestUsername }, clash.recordset);
@@ -3212,6 +3931,23 @@ app.put('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['Parish
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid schedule ID.' });
   try {
+    if (postgresOperationsEnabled) {
+      const postgresPool = getPostgresPool();
+      const existing = await listPostgresScheduleSlots(postgresPool, date, time);
+      const conflict = findScheduleConflict({ date, time, location, priestUsername, excludeId: id }, existing);
+      if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+      await updatePostgresSchedule(postgresPool, id, {
+        title,
+        date,
+        time,
+        location,
+        priestUsername,
+        notes: notes || null,
+        status: status || 'Scheduled',
+      });
+      return res.json({ message: 'Schedule updated.' });
+    }
+
     const pool = getPool();
     const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query(`SELECT MassScheduleId AS id, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Status AS status FROM dbo.MassSchedule WHERE MassDate=@date AND MassTime=@time`);
     const conflict = findScheduleConflict({ date, time, location, priestUsername, excludeId: id }, clash.recordset);
@@ -3225,6 +3961,12 @@ app.delete('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['Par
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid schedule ID.' });
   try {
+    if (postgresOperationsEnabled) {
+      const deleted = await deletePostgresSchedule(getPostgresPool(), id);
+      if (!deleted) return res.status(404).json({ message: 'Schedule not found.' });
+      return res.json({ message: 'Schedule deleted.' });
+    }
+
     const result = await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.MassSchedule WHERE MassScheduleId=@id');
     if (!result.rowsAffected[0]) return res.status(404).json({ message: 'Schedule not found.' });
     res.json({ message: 'Schedule deleted.' });
@@ -3232,13 +3974,35 @@ app.delete('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['Par
 });
 
 app.get('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
-  try { const result = await getPool().request().query('SELECT * FROM dbo.MassIntentions ORDER BY IntentionDate, IntentionTime'); res.json(result.recordset); } catch (error) { logError(error, { context: 'massIntentions' }); res.status(500).json({ message: 'Unable to load Mass intentions.' }); }
+  try {
+    if (postgresOperationsEnabled) {
+      return res.json(await listPostgresMassIntentions(getPostgresPool()));
+    }
+    const result = await getPool().request().query('SELECT * FROM dbo.MassIntentions ORDER BY IntentionDate, IntentionTime');
+    res.json(result.recordset);
+  } catch (error) { logError(error, { context: 'massIntentions' }); res.status(500).json({ message: 'Unable to load Mass intentions.' }); }
 });
 
 app.post('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
   const { date, time, offering, requestedBy, intentionText } = req.body || {};
   if (!date || !time || !requestedBy || !intentionText) return res.status(400).json({ message: 'Mass intention date, time, requester, and intention are required.' });
   try {
+    if (postgresOperationsEnabled) {
+      const postgresPool = getPostgresPool();
+      const existing = await listPostgresIntentionSlots(postgresPool, date, time);
+      const conflict = findIntentionConflict({ date, time }, existing);
+      if (conflict.conflict) return res.status(409).json({ message: conflict.message });
+      const created = await createPostgresMassIntention(postgresPool, {
+        date,
+        time,
+        offering: Number(offering || 0),
+        requestedBy,
+        intentionText,
+        createdBy: staffName(req),
+      });
+      return res.status(201).json(created);
+    }
+
     const pool = getPool();
     const clash = await pool.request().input('date', sql.Date, date).input('time', sql.VarChar(10), time).query('SELECT MassIntentionId AS id, IntentionDate AS date, IntentionTime AS time, Status AS status FROM dbo.MassIntentions WHERE IntentionDate=@date AND IntentionTime=@time');
     const conflict = findIntentionConflict({ date, time }, clash.recordset);
@@ -3252,17 +4016,43 @@ app.put('/api/admin/operations/mass-intentions/:id', requireAdmin, requireRole([
   const status = String(req.body?.status || '');
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid Mass intention ID.' });
   if (!['Scheduled', 'Completed', 'Cancelled'].includes(status)) return res.status(400).json({ message: 'Invalid intention status.' });
-  try { await getPool().request().input('id', sql.Int, id).input('status', sql.VarChar(30), status).query('UPDATE dbo.MassIntentions SET Status=@status, UpdatedAt=SYSUTCDATETIME() WHERE MassIntentionId=@id'); res.json({ message: 'Mass intention updated.' }); } catch (error) { logError(error, { context: 'updateMassIntention' }); res.status(500).json({ message: 'Unable to update Mass intention.' }); }
+  try {
+    if (postgresOperationsEnabled) {
+      await updatePostgresMassIntentionStatus(getPostgresPool(), id, status);
+      return res.json({ message: 'Mass intention updated.' });
+    }
+    await getPool().request().input('id', sql.Int, id).input('status', sql.VarChar(30), status).query('UPDATE dbo.MassIntentions SET Status=@status, UpdatedAt=SYSUTCDATETIME() WHERE MassIntentionId=@id');
+    res.json({ message: 'Mass intention updated.' });
+  } catch (error) { logError(error, { context: 'updateMassIntention' }); res.status(500).json({ message: 'Unable to update Mass intention.' }); }
 });
 
 app.get('/api/admin/operations/finance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (_req, res) => {
-  try { const result = await getPool().request().query('SELECT TOP 200 * FROM dbo.FinancialEntries ORDER BY EntryDate DESC, FinancialEntryId DESC'); res.json(result.recordset); } catch (error) { logError(error, { context: 'financeEntries' }); res.status(500).json({ message: 'Unable to load financial entries.' }); }
+  try {
+    if (postgresOperationsEnabled) {
+      return res.json(await listPostgresFinanceEntries(getPostgresPool()));
+    }
+    const result = await getPool().request().query('SELECT TOP 200 * FROM dbo.FinancialEntries ORDER BY EntryDate DESC, FinancialEntryId DESC');
+    res.json(result.recordset);
+  } catch (error) { logError(error, { context: 'financeEntries' }); res.status(500).json({ message: 'Unable to load financial entries.' }); }
 });
 
 app.post('/api/admin/operations/finance', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
   const { date, entryType, description, amount } = req.body || {};
   if (!date || !entryType || !description || Number(amount) <= 0) return res.status(400).json({ message: 'A valid finance date, type, description, and amount are required.' });
-  try { const result = await getPool().request().input('date', sql.Date, date).input('type', sql.VarChar(30), entryType).input('description', sql.NVarChar(500), description).input('amount', sql.Decimal(12, 2), Number(amount)).input('enteredBy', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.FinancialEntries (EntryDate, EntryType, Description, Amount, EnteredBy) OUTPUT INSERTED.FinancialEntryId VALUES (@date,@type,@description,@amount,@enteredBy)`); res.status(201).json(result.recordset[0]); } catch (error) { logError(error, { context: 'createFinanceEntry' }); res.status(500).json({ message: 'Unable to create finance entry.' }); }
+  try {
+    if (postgresOperationsEnabled) {
+      const created = await createPostgresFinanceEntry(getPostgresPool(), {
+        date,
+        entryType,
+        description,
+        amount: Number(amount),
+        enteredBy: staffName(req),
+      });
+      return res.status(201).json(created);
+    }
+    const result = await getPool().request().input('date', sql.Date, date).input('type', sql.VarChar(30), entryType).input('description', sql.NVarChar(500), description).input('amount', sql.Decimal(12, 2), Number(amount)).input('enteredBy', sql.NVarChar(256), staffName(req)).query(`INSERT INTO dbo.FinancialEntries (EntryDate, EntryType, Description, Amount, EnteredBy) OUTPUT INSERTED.FinancialEntryId VALUES (@date,@type,@description,@amount,@enteredBy)`);
+    res.status(201).json(result.recordset[0]);
+  } catch (error) { logError(error, { context: 'createFinanceEntry' }); res.status(500).json({ message: 'Unable to create finance entry.' }); }
 });
 
 app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper']), async (req, res) => {
@@ -3270,6 +4060,17 @@ app.put('/api/admin/operations/finance/:id', requireAdmin, requireRole(['ParishP
   const { date, entryType, description, amount, status } = req.body;
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid finance entry ID.' });
   try {
+    if (postgresOperationsEnabled) {
+      await updatePostgresFinanceEntry(getPostgresPool(), id, {
+        date,
+        entryType,
+        description,
+        amount: Number(amount),
+        status,
+      });
+      return res.json({ message: 'Finance entry updated.' });
+    }
+
     const pool = getPool();
     await pool.request()
       .input('id', sql.Int, id)
@@ -3295,6 +4096,11 @@ app.delete('/api/admin/operations/finance/:id', requireAdmin, requireRole(['Pari
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid finance entry ID.' });
   try {
+    if (postgresOperationsEnabled) {
+      await deletePostgresFinanceEntry(getPostgresPool(), id);
+      return res.json({ message: 'Finance entry deleted.' });
+    }
+
     await getPool().request().input('id', sql.Int, id).query('DELETE FROM dbo.FinancialEntries WHERE FinancialEntryId=@id');
     res.json({ message: 'Finance entry deleted.' });
   } catch (error) { logError(error, { context: 'deleteFinanceEntry' }); res.status(500).json({ message: 'Unable to delete finance entry.' }); }
@@ -3316,6 +4122,13 @@ app.post('/api/admin/operations/audit/clear', requireAdmin, requireRole(['Admin'
 
 app.get('/api/admin/operations/health', requireAdmin, requireRole(['Admin']), async (_req, res) => {
   try {
+    if (postgresOperationsEnabled) {
+      return res.json({
+        healthy: true,
+        details: await getPostgresAdminHealth(getPostgresPool()),
+      });
+    }
+
     const result = await getPool().request().query('SELECT 1 AS HealthCheck');
     res.json({ healthy: true, details: result.recordset });
   } catch (error) {
@@ -3326,6 +4139,10 @@ app.get('/api/admin/operations/health', requireAdmin, requireRole(['Admin']), as
 
 app.get('/api/admin/operations/status', requireAdmin, requireRole(['Admin']), async (_req, res) => {
   try {
+    if (postgresOperationsEnabled) {
+      return res.json(await getPostgresAdminStatus(getPostgresPool()));
+    }
+
     const result = await getPool().request().query(`
       SELECT
         (SELECT COUNT(*) FROM dbo.ServiceRequest WHERE Status IN ('PendingVerification', 'PendingReview')) AS PendingVerifications,
@@ -3497,22 +4314,19 @@ app.delete('/api/admin/operations/email-logs', requireAdmin, requireRole(['Admin
 
 app.get('/api/admin/operations/system-info', requireAdmin, requireRole(['Admin']), async (_req, res) => {
   try {
+    if (postgresOperationsEnabled) {
+      return res.json(await getPostgresAdminSystemInfo(getPostgresPool(), Math.floor(process.uptime())));
+    }
+
     const [dbVersion, serverTime, uptime] = await Promise.all([
       getPool().request().query('SELECT @@VERSION AS version'),
       getPool().request().query('SELECT SYSDATETIME() AS serverTime'),
-      new Promise(resolve => {
-        const start = Date.now();
-        setInterval(() => {
-          const diff = Date.now() - start;
-          resolve(diff);
-        }, 1000);
-      }),
     ]);
 
     res.json({
       version: dbVersion.recordset[0]?.version || 'Unknown',
       serverTime: serverTime.recordset[0]?.serverTime || new Date(),
-      uptime: Math.floor(uptime / 1000),
+      uptime: Math.floor(process.uptime()),
     });
   } catch (error) {
     logError(error, { context: 'systemInfo' });
@@ -3530,17 +4344,34 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   if (process.env.LOCAL_ADMIN_PREVIEW_ONLY === '1') {
     logger.info('Local preview mode: database startup and scheduled jobs are disabled.');
     return;
   }
+  if (postgresConnectionEnabled) {
+    initializePostgresPool().then(() => {
+      if (postgresOperationsEnabled) startFinanceReportSchedule();
+      if (postgresServicesEnabled) {
+        startNoShowVoidSchedule();
+        startTokenCleanupSchedule();
+        startBlockedSlotCleanupSchedule();
+      }
+    }).catch(err => {
+      console.error('PostgreSQL initialization failed:', err.code || err.name || 'Error');
+      logger.warn(postgresEventsEnabled || postgresOperationsEnabled
+        ? 'A PostgreSQL-backed feature or scheduled finance report is unavailable until the connection is restored.'
+        : 'Continuing with the SQL Server fallback; Supabase is not connected.');
+    });
+  }
   initializePool(config).then(() => {
-    startFinanceReportSchedule();
-    startNoShowVoidSchedule();
-    startTokenCleanupSchedule();
-    startBlockedSlotCleanupSchedule();
+    if (!postgresOperationsEnabled) startFinanceReportSchedule();
+    if (!postgresServicesEnabled) {
+      startNoShowVoidSchedule();
+      startTokenCleanupSchedule();
+      startBlockedSlotCleanupSchedule();
+    }
   }).catch(err => {
     console.error('Database initialization failed:', err);
     if (process.env.NODE_ENV === 'development') {
@@ -3550,3 +4381,37 @@ app.listen(PORT, () => {
     process.exit(1);
   });
 });
+
+let shutdownPromise;
+const shutdown = (signal) => {
+  if (shutdownPromise) return shutdownPromise;
+
+  shutdownPromise = (async () => {
+    logger.info(`Received ${signal}; shutting down.`);
+    scheduledJobs.forEach(clearInterval);
+
+    await new Promise(resolve => {
+      server.close(error => {
+        if (error) {
+          console.error('HTTP server shutdown failed:', error);
+          process.exitCode = 1;
+        }
+        resolve();
+      });
+    });
+
+    for (const closeDatabasePool of [closePool, closePostgresPool]) {
+      try {
+        await closeDatabasePool();
+      } catch (error) {
+        console.error('Database pool shutdown failed:', error);
+        process.exitCode = 1;
+      }
+    }
+  })();
+
+  return shutdownPromise;
+};
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));

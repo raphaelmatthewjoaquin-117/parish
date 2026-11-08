@@ -37,4 +37,20 @@ export function createAdminReportingRouter(options: {
     filename: string
   }>
   deleteArchiveFile?: (fileUrl: string) => Promise<void>
+  postgresCertificatesEnabled?: boolean
+  postgresOperationsEnabled?: boolean
+  postgresSacramentalEnabled?: boolean
+  getPostgresPool?: () => {
+    query(
+      query: string,
+      values?: unknown[],
+    ): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+    connect(): Promise<{
+      query(
+        query: string,
+        values?: unknown[],
+      ): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+      release(): void
+    }>
+  }
 }): Router

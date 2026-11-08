@@ -9,7 +9,12 @@ const servers: Array<ReturnType<express.Express['listen']>> = []
 function createTestApi(query: (
   statement: string,
   inputs: Map<string, unknown>,
-) => { recordset: Array<Record<string, unknown>> } | Promise<{ recordset: Array<Record<string, unknown>> }>) {
+) => { recordset: Array<Record<string, unknown>> } | Promise<{ recordset: Array<Record<string, unknown>> }>,
+  postgres?: {
+    query: (statement: string, values?: unknown[]) =>
+      Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>
+  },
+) {
   const app = express()
   app.use(express.json())
   app.use(createPrayerRouter({
@@ -30,6 +35,10 @@ function createTestApi(query: (
     requireAdmin: (_req, _res, next) => next(),
     requireRole: () => (_req, _res, next) => next(),
     logError: vi.fn(),
+    postgresEnabled: Boolean(postgres),
+    getPostgresPool: () => ({
+      query: postgres?.query ?? (async () => ({ rows: [], rowCount: 0 })),
+    }),
   }))
 
   const server = app.listen(0)
@@ -69,6 +78,35 @@ describe('prayer API routes', () => {
         createdAt: '2026-10-28',
       },
     ])
+  })
+
+  it('uses the PostgreSQL repository for public prayer listings when enabled', async () => {
+    const sqlServerQuery = vi.fn(async () => ({ recordset: [] }))
+    const postgresQuery = vi.fn(async () => ({
+      rowCount: 1,
+      rows: [{
+        prayerId: 7,
+        name: 'Private name',
+        category: 'healing',
+        request: 'Please pray for healing.',
+        anonymous: true,
+        createdAt: '2026-10-28',
+      }],
+    }))
+    const api = createTestApi(sqlServerQuery, { query: postgresQuery })
+
+    const response = await fetch(`${api}/api/prayers`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([{
+      id: 7,
+      name: 'Anonymous',
+      category: 'healing',
+      request: 'Please pray for healing.',
+      createdAt: '2026-10-28',
+    }])
+    expect(sqlServerQuery).not.toHaveBeenCalled()
+    expect(postgresQuery).toHaveBeenCalledOnce()
   })
 
   it('rejects invalid prayer requests before writing to the database', async () => {
