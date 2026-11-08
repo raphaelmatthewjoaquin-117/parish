@@ -52,7 +52,22 @@ export function createSupabaseStorage(env = process.env, fetcher = fetch) {
 
   async function checkResponse(response, operation) {
     if (response.ok) return
-    const error = new Error(`Supabase Storage ${operation} failed with status ${response.status}.`)
+    let detail = ''
+    try {
+      const body = await response.clone().json()
+      const message = body?.message || body?.error || body?.error_description
+      if (typeof message === 'string') {
+        detail = message
+          .replaceAll(apiKey, '[redacted]')
+          .replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted database URL]')
+          .slice(0, 300)
+      }
+    } catch {
+      // Some Storage errors do not include a JSON response body.
+    }
+    const error = new Error(
+      `Supabase Storage ${operation} failed with status ${response.status}${detail ? `: ${detail}` : ''}.`,
+    )
     error.statusCode = response.status
     throw error
   }

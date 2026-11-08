@@ -91,6 +91,21 @@ describe('Supabase Storage', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
+  it('includes the Storage API error message when a bucket check is rejected', async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json(
+      { message: 'Bucket access denied' },
+      { status: 400 },
+    ))
+    const storage = createSupabaseStorage({
+      SUPABASE_URL: 'https://project.supabase.co',
+      SUPABASE_SECRET_KEY: 'sb_secret_do-not-leak',
+    }, fetcher)
+
+    await expect(storage.checkBucket('public', true)).rejects.toThrow(
+      'Supabase Storage bucket check failed with status 400: Bucket access denied.',
+    )
+  })
+
   it('rejects downloads above the caller-provided size limit', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('too large', {
       status: 200,
