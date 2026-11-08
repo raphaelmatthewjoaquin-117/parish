@@ -164,7 +164,7 @@ in the Render dashboard, not in Git or chat.
 | `CERTIFICATE_DATABASE`, `SERVICE_DATABASE`, `OPERATIONS_DATABASE` | Set each to `postgres` |
 | `SACRAMENTAL_DATABASE` | Set to `postgres` |
 | `SUPABASE_URL` | Supabase project API URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only Supabase key; never put it in Vercel or frontend variables |
+| `SUPABASE_SECRET_KEY` | Supabase server-only secret key (`sb_secret_...`); never put it in Vercel or frontend variables |
 | `SUPABASE_PUBLIC_BUCKET` | `parish-public-assets` |
 | `SUPABASE_PRIVATE_BUCKET` | `parish-private-documents` |
 | `RESEND_API_KEY` | Optional; set only if production email is enabled |
@@ -180,7 +180,7 @@ running.
 
 Create the `parish-public-assets` Storage bucket with public access enabled
 and `parish-private-documents` with public access disabled before deploying.
-The API uses the service key only on the server. Public images are served only
+The API uses the secret key only on the server. Public images are served only
 after the PostgreSQL content references them; archive and certificate files
 remain behind admin authorization.
 

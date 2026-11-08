@@ -519,7 +519,8 @@ const azureStorageAccountKey = (process.env.AZURE_STORAGE_ACCOUNT_KEY || '').tri
 const azureStorageContainer = (process.env.AZURE_STORAGE_CONTAINER_NAME || 'uploads').trim();
 const azureStorageConnectionString = (process.env.AZURE_STORAGE_CONNECTION_STRING || '').trim();
 const supabaseStorageConfigured = Boolean(
-  process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+  process.env.SUPABASE_URL?.trim()
+    && (process.env.SUPABASE_SECRET_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()),
 );
 const supabaseStorage = supabaseStorageConfigured
   ? createSupabaseStorage(process.env)

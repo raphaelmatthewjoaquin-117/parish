@@ -13,9 +13,11 @@ function encodeObjectName(name) {
 
 export function createSupabaseStorage(env = process.env, fetcher = fetch) {
   const rawUrl = env.SUPABASE_URL?.trim()
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-  if (!rawUrl || !serviceKey) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured.')
+  const secretKey = env.SUPABASE_SECRET_KEY?.trim()
+  const legacyServiceKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  const apiKey = secretKey || legacyServiceKey
+  if (!rawUrl || !apiKey) {
+    throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY must be configured.')
   }
 
   let baseUrl
@@ -39,10 +41,8 @@ export function createSupabaseStorage(env = process.env, fetcher = fetch) {
     public: env.SUPABASE_PUBLIC_BUCKET?.trim() || 'parish-public-assets',
     private: env.SUPABASE_PRIVATE_BUCKET?.trim() || 'parish-private-documents',
   }
-  const headers = {
-    apikey: serviceKey,
-    Authorization: `Bearer ${serviceKey}`,
-  }
+  const headers = { apikey: apiKey }
+  if (!secretKey) headers.Authorization = `Bearer ${legacyServiceKey}`
 
   function objectUrl(kind, name) {
     const bucket = buckets[kind]

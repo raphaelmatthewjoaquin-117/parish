@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSupabaseStorage } from './supabase-storage.js'
 
 describe('Supabase Storage', () => {
+  it('uses the current secret key only as an apikey, not as a JWT bearer token', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    const storage = createSupabaseStorage({
+      SUPABASE_URL: 'https://project.supabase.co',
+      SUPABASE_SECRET_KEY: 'sb_secret_server-only',
+    }, fetcher)
+
+    await storage.upload('private', 'report.pdf', Buffer.from('document'), 'application/pdf')
+
+    expect(fetcher.mock.calls[0][1].headers).toMatchObject({
+      apikey: 'sb_secret_server-only',
+    })
+    expect(fetcher.mock.calls[0][1].headers).not.toHaveProperty('Authorization')
+  })
+
   it('uploads and downloads private objects with the server-side service key', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
