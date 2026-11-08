@@ -11,6 +11,19 @@ describe('ResetPasswordPage', () => {
     }))
   })
 
+  it('renders the reset form inside its labelled page section', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/reset-password?token=abc123']}>
+        <Routes>
+          <Route path="/admin/reset-password" element={<ResetPasswordPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('region', { name: 'Choose a new password' })).toBeTruthy()
+    expect(screen.getByRole('form', { name: 'Choose a new password' })).toBeTruthy()
+  })
+
   it('submits the reset token and new password', async () => {
     render(
       <MemoryRouter initialEntries={['/admin/reset-password?token=abc123']}>
