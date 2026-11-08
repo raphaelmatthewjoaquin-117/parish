@@ -4496,13 +4496,15 @@ const server = app.listen(PORT, () => {
     return;
   }
   if (postgresOnlyMode) {
+    let startupStage = 'PostgreSQL connection and runtime-role validation';
     initializePostgresPool().then(async postgresPool => {
+      startupStage = 'required Events table check';
       await checkPostgresReadiness(postgresPool);
       if (supabaseStorage) {
-        await Promise.all([
-          supabaseStorage.checkBucket('public', true),
-          supabaseStorage.checkBucket('private', false),
-        ]);
+        startupStage = 'public Supabase Storage bucket check';
+        await supabaseStorage.checkBucket('public', true);
+        startupStage = 'private Supabase Storage bucket check';
+        await supabaseStorage.checkBucket('private', false);
       }
       supabaseStorageReady = true;
       if (postgresOperationsEnabled) startFinanceReportSchedule();
@@ -4512,7 +4514,10 @@ const server = app.listen(PORT, () => {
         startBlockedSlotCleanupSchedule();
       }
     }).catch(err => {
-      console.error('PostgreSQL-only startup failed:', err.code || err.name || 'Error');
+      const message = err instanceof Error
+        ? err.message.replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted database URL]')
+        : 'Unknown error';
+      console.error(`PostgreSQL-only startup failed during ${startupStage}:`, message);
       process.exit(1);
     });
     return;
