@@ -155,7 +155,7 @@ in the Render dashboard, not in Git or chat.
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `PORT` | Let Render provide it |
-| `FRONTEND_URL` | Exact HTTPS origin of the Vercel site, with no path |
+| `FRONTEND_URL` | One or more HTTPS frontend origins, comma-separated, with no paths |
 | `ADMIN_TOKEN` | Long, random secret |
 | `ADMIN_TOKEN_SIGNING_SECRET` | Separate random secret of at least 32 characters |
 | `DATABASE_URL` | Restricted PostgreSQL runtime connection string; never the owner role |
@@ -206,9 +206,11 @@ Set production variables in Vercel's dashboard. Do not put
 `NODE_ENV=production` in a `.env` file used by Vite; Vite warns on that
 configuration. The API's `NODE_ENV=production` belongs in Render's settings.
 
-Use the exact Vercel site origin for Render's `FRONTEND_URL`. The API's CORS
-policy allows that production origin and permits the `PATCH` method used by
-admin screens. Keep localhost origins for local development only.
+Use the exact Vercel site origin(s) for Render's `FRONTEND_URL`, separated by
+commas when both a production domain and a preview domain must call the API.
+The first origin is used for password-reset links. The API's CORS policy allows
+only those production origins and permits the `PATCH` method used by admin
+screens. Keep localhost origins for local development only.
 
 ### Rotate the exposed Azure Storage key
 

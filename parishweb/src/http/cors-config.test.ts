@@ -17,11 +17,29 @@ describe('createCorsOptions', () => {
     expect(allowed.mock.calls[1][0]).toBeInstanceOf(Error)
   })
 
+  it('allows each explicitly configured production frontend origin', () => {
+    const options = createCorsOptions(
+      'https://parish.example, https://parish-preview.vercel.app',
+      true,
+    )
+    const allowed = vi.fn()
+
+    options.origin('https://parish.example', allowed)
+    options.origin('https://parish-preview.vercel.app', allowed)
+    options.origin('https://untrusted.example', allowed)
+
+    expect(allowed).toHaveBeenNthCalledWith(1, null, true)
+    expect(allowed).toHaveBeenNthCalledWith(2, null, true)
+    expect(allowed.mock.calls[2][0]).toBeInstanceOf(Error)
+  })
+
   it('requires a public HTTPS frontend origin in production', () => {
     expect(() => createCorsOptions(undefined, true))
       .toThrow('FRONTEND_URL must be configured in production.')
     expect(() => createCorsOptions('http://parish.example', true))
-      .toThrow('FRONTEND_URL must be a public HTTPS origin in production.')
+      .toThrow('FRONTEND_URL must contain public HTTPS origins in production.')
+    expect(() => createCorsOptions('https://parish.example, http://preview.example', true))
+      .toThrow('FRONTEND_URL must contain public HTTPS origins in production.')
   })
 
   it('does not allow the local development origin in production', () => {

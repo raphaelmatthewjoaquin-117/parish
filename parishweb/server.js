@@ -2783,7 +2783,8 @@ app.post('/api/admin/forgot-password', authRateLimit, async (req, res) => {
         }
       }
 
-      const resetUrl = new URL('/admin/reset-password', process.env.FRONTEND_URL || 'http://localhost:5173');
+      const resetOrigin = process.env.FRONTEND_URL?.split(',')[0].trim() || 'http://localhost:5173';
+      const resetUrl = new URL('/admin/reset-password', resetOrigin);
       resetUrl.searchParams.set('token', token);
       const { subject, html } = passwordResetEmail({
         userName: account.userName,
