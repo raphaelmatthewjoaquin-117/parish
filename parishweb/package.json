@@ -9,6 +9,7 @@
     "server:local": "node scripts/start-local-server.js",
     "start": "node server.js",
     "admin:bootstrap": "node scripts/bootstrap-admin.js",
+    "admin:bootstrap:postgres": "node scripts/bootstrap-postgres-admin.js",
     "admin:reset-password": "node scripts/reset-admin-password.js",
     "db:configure-runtime": "node scripts/configure-postgres-runtime.js",
     "db:verify-identity": "node scripts/verify-identity-access.js",
