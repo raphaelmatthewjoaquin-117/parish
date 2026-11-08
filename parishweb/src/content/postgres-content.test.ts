@@ -29,7 +29,7 @@ describe('PostgreSQL public content repositories', () => {
   it('loads website content by key and returns null when no page is stored', async () => {
     const pool = createPool([{ rows: [{ contentJson: '{"title":"Welcome"}' }] }, { rows: [] }]);
 
-    await expect(getPostgresSiteContent(pool, 'home')).resolves.toBe('{"title":"Welcome"}');
+    await expect(getPostgresSiteContent(pool, 'home')).resolves.toEqual({ title: 'Welcome' });
     await expect(getPostgresSiteContent(pool, 'home')).resolves.toBeNull();
     expect(pool.query).toHaveBeenNthCalledWith(1, expect.stringContaining('"ContentKey" = $1'), ['home']);
   });

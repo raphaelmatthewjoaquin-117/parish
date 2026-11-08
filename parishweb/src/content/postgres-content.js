@@ -4,7 +4,8 @@ export async function getPostgresSiteContent(pool, key) {
     FROM "public"."SiteContent"
     WHERE "ContentKey" = $1
   `, [key]);
-  return result.rows[0]?.contentJson ?? null;
+  const contentJson = result.rows[0]?.contentJson;
+  return contentJson == null ? null : JSON.parse(contentJson);
 }
 
 export async function savePostgresSiteContent(pool, key, contentJson, updatedBy) {

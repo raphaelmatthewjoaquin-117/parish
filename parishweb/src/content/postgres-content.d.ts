@@ -2,7 +2,7 @@ import type { PostgresPool } from '../db/postgres-pool.js';
 
 type PostgresQueryClient = Pick<PostgresPool, 'query'>;
 
-export function getPostgresSiteContent(pool: PostgresQueryClient, key: string): Promise<string | null>;
+export function getPostgresSiteContent(pool: PostgresQueryClient, key: string): Promise<unknown>;
 
 export function savePostgresSiteContent(
   pool: PostgresQueryClient,

@@ -2465,6 +2465,10 @@ app.get('/api/site-content/:page', async (req, res) => {
   }
 
   try {
+    if (postgresContentEnabled) {
+      const content = await getPostgresSiteContent(getPostgresPool(), page);
+      return res.json({ content });
+    }
     const result = await getPool().request()
       .input('key', sql.NVarChar(50), page)
       .query('SELECT ContentJson FROM dbo.SiteContent WHERE ContentKey = @key');
