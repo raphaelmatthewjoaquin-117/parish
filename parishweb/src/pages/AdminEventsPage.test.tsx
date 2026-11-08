@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminEventsPage } from './AdminEventsPage'
 
@@ -83,6 +83,37 @@ describe('AdminEventsPage service request status filter', () => {
     expect(within(requestTable).getByText('Alex Confirmed')).toBeTruthy()
     expect(within(requestTable).getByRole('button', { name: 'View request from Alex Confirmed' })).toBeTruthy()
     expect(within(requestTable).queryAllByRole('button', { name: /Confirm request|Delete request/ })).toHaveLength(0)
+  })
+
+  it('refreshes service requests automatically while the request tab is open', async () => {
+    let requestFetches = 0
+    const newRequest = {
+      ...requests[0],
+      id: 13,
+      firstName: 'Morgan',
+      lastName: 'New',
+    }
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/api/admin/verify')
+        ? { user: { role: 'Secretary' } }
+        : url.endsWith('/api/admin/service-requests')
+          ? (++requestFetches === 1 ? requests : [...requests, newRequest])
+          : []
+      return { ok: true, json: async () => body } as Response
+    }))
+    const setIntervalSpy = vi.spyOn(window, 'setInterval')
+
+    render(<AdminEventsPage initialTab="service-requests" embedded />)
+    expect(await screen.findByText('Alex Confirmed')).toBeTruthy()
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000)
+
+    const refreshServiceRequests = setIntervalSpy.mock.calls.find(([, delay]) => delay === 30_000)?.[0]
+    act(() => refreshServiceRequests?.())
+
+    expect(await screen.findByText('Morgan New')).toBeTruthy()
+    expect(requestFetches).toBe(2)
   })
 
   it('keeps confirm and delete actions in the service request detail modal', async () => {

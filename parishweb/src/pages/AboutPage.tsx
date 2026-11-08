@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiClient, getMediaUrl } from '../api/client'
 import { defaultAboutContent, localize, type AboutContent } from '../content/siteContent'
+import { useSiteRefresh } from '../hooks/useSiteRefresh'
 import type { Language } from '../i18n'
 import '../PagesCSS/AboutPage.css'
 
@@ -15,16 +16,21 @@ const withNewFieldDefaults = (saved: AboutContent): AboutContent => ({
 const getImageUrl = getMediaUrl
 
 export function AboutPage({ language = 'en' }: { language?: Language }) {
+  const refreshKey = useSiteRefresh()
   const [content, setContent] = useState(defaultAboutContent)
   const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
+    let active = true
     apiClient.siteContent.get<AboutContent>('about')
       .then(({ content: saved }) => {
+        if (!active) return
         if (saved) setContent(withNewFieldDefaults(saved))
+        setLoadError(false)
       })
-      .catch(() => setLoadError(true))
-  }, [])
+      .catch(() => { if (active) setLoadError(true) })
+    return () => { active = false }
+  }, [refreshKey])
 
   const timeline = content.timeline ?? []
   const intro = content.intro?.trim() ? localize(content.intro, content.introTl, language) : ''

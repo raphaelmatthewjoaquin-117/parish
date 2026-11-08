@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import '../PagesCSS/ServicePage.css';
 import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client';
+import { useSiteRefresh } from '../hooks/useSiteRefresh';
 import type { ServicePageContent } from '../content/siteContent';
 import { isValidServicePageContent } from '../service-page-content.js';
 import { isCertificateDateBlocked, isCertificateTimeBlocked, type CertificateBlockedSlot } from '../certificate-availability';
@@ -69,6 +70,7 @@ type LookupResult = { certificateType: string; preferredDate: string; preferredT
 type FieldDef = { key: string; label: string; type: string; options?: string[]; required: boolean };
 
 export default function ServicePage(): React.JSX.Element {
+  const refreshKey = useSiteRefresh()
   const [active, setActive] = useState<string>(() => getInitialTab());
   const [services, setServices] = useState<Service[]>(FALLBACK_SERVICES);
   const [servicePageContent, setServicePageContent] = useState<ServicePageContent>({});
@@ -155,15 +157,17 @@ export default function ServicePage(): React.JSX.Element {
   }, [bookingResult]);
 
   useEffect(() => {
+    let active = true;
     apiClient.siteContent.get<ServicePageContent>('services')
       .then(({ content }) => {
         if (content && !isValidServicePageContent(content)) {
           throw new Error('The saved service page content has an invalid format.');
         }
-        setServicePageContent(content ?? {});
+        if (active) setServicePageContent(content ?? {});
       })
       .catch(error => console.error('Unable to load saved service page content.', error));
-  }, []);
+    return () => { active = false; };
+  }, [refreshKey]);
 
   const loadServices = useCallback(() => {
     fetch(`${API_URL}/api/services`)

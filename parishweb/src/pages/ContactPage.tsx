@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import { defaultContactContent, localize, type ContactCard, type ContactContent } from '../content/siteContent'
+import { useSiteRefresh } from '../hooks/useSiteRefresh'
 import type { Language } from '../i18n'
 import '../PagesCSS/ContactPage.css'
 
@@ -25,6 +26,7 @@ const cardIcons: Record<ContactCard['type'], React.ReactNode> = {
 }
 
 export function ContactPage({ language = 'en' }: { language?: Language }) {
+  const refreshKey = useSiteRefresh()
   const [content, setContent] = useState<ContactContent>(defaultContactContent)
   const [formData, setFormData] = useState({
     name: '',
@@ -39,9 +41,9 @@ export function ContactPage({ language = 'en' }: { language?: Language }) {
     let active = true
     apiClient.siteContent.get<ContactContent>('contact')
       .then(({ content: saved }) => { if (active && saved) setContent(saved) })
-      .catch(() => undefined)
+      .catch(error => console.error('Unable to load saved contact content.', error))
     return () => { active = false }
-  }, [])
+  }, [refreshKey])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -4,6 +4,7 @@ import './App.css'
 import { apiClient } from './api/client'
 import { ParishFaqBot } from './components/ParishFaqBot'
 import { defaultFooterContent, type FooterContent } from './content/siteContent'
+import { useSiteRefresh } from './hooks/useSiteRefresh'
 import logo from './images/SDP logo.png'
 import { observeTranslations, type Language } from './i18n'
 
@@ -38,6 +39,7 @@ function AppShell() {
   const [footerContent, setFooterContent] = useState<FooterContent>(defaultFooterContent)
   const location = useLocation()
   const isAdminPage = location.pathname.startsWith('/admin')
+  const refreshKey = useSiteRefresh(!isAdminPage)
   const hasAdminSession = Boolean(window.localStorage.getItem('adminToken'))
 
   const closeMobileMenu = () => setMobileMenuOpen(false)
@@ -75,7 +77,7 @@ function AppShell() {
         console.error('Unable to load saved footer content.', error)
       })
     return () => { active = false }
-  }, [])
+  }, [refreshKey])
 
   useEffect(() => {
     const pageShell = pageShellRef.current

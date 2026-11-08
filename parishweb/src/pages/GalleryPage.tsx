@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useParams } from 'react-router-dom'
 import { apiClient, getMediaUrl } from '../api/client'
+import { useSiteRefresh } from '../hooks/useSiteRefresh'
 import {
   defaultGalleryContent,
   galleryPhotoUrl,
@@ -126,6 +127,7 @@ function Lightbox({
 }
 
 export function GalleryPage({ language = 'en' }: { language?: Language }) {
+  const refreshKey = useSiteRefresh()
   const { albumId } = useParams()
   const [content, setContent] = useState(defaultGalleryContent)
   const [contentLoaded, setContentLoaded] = useState(false)
@@ -133,16 +135,21 @@ export function GalleryPage({ language = 'en' }: { language?: Language }) {
   const [lightbox, setLightbox] = useState<LightboxState>(null)
 
   useEffect(() => {
+    let active = true
     apiClient.siteContent.get<GalleryContent>('gallery')
       .then(({ content: saved }) => {
+        if (!active) return
         if (saved) setContent(saved)
+        setLoadError(false)
         setContentLoaded(true)
       })
       .catch(() => {
+        if (!active) return
         setLoadError(true)
         setContentLoaded(true)
       })
-  }, [])
+    return () => { active = false }
+  }, [refreshKey])
 
   if (albumId) {
     if (!contentLoaded) {

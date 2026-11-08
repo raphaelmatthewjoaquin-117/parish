@@ -156,6 +156,7 @@ const formatServiceRequestStatus = (status: string) => ({
   ConflictVoided: 'Schedule conflict',
 }[status] || status.replace(/([a-z])([A-Z])/g, '$1 $2'))
 
+const SERVICE_REQUEST_REFRESH_INTERVAL_MS = 30_000
 const getPhotoUrl = getMediaUrl
 
 export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, onAuthenticated, overrides }: AdminEventsPageProps) {
@@ -381,9 +382,11 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
   }
 
   // Service Request functions
-  const loadServiceRequests = () => {
-    setServiceRequestsLoading(true)
-    setError(null)
+  const loadServiceRequests = (background = false) => {
+    if (!background) {
+      setServiceRequestsLoading(true)
+      setError(null)
+    }
 
     fetch(`${API_URL}/api/admin/service-requests`, {
       headers: { 'x-admin-token': adminToken },
@@ -399,11 +402,14 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
           throw new Error('Invalid service requests response')
         }
         setServiceRequests(data as ServiceRequestItem[])
+        if (background) setError(null)
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Unable to load service requests')
       })
-      .finally(() => setServiceRequestsLoading(false))
+      .finally(() => {
+        if (!background) setServiceRequestsLoading(false)
+      })
   }
 
   const loadMasses = () => {
@@ -750,6 +756,19 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
     }, 0)
     return () => window.clearTimeout(timer)
   // These loaders are selected by the active tab and role at runtime.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, activeTab, staffRole])
+
+  useEffect(() => {
+    if (!authenticated || !['dashboard', 'service-requests'].includes(activeTab)) return
+    if (activeTab === 'dashboard' && !['Admin', 'Secretary', 'ParishPriest', 'Staff'].includes(staffRole)) return
+
+    const interval = window.setInterval(
+      () => loadServiceRequests(true),
+      SERVICE_REQUEST_REFRESH_INTERVAL_MS,
+    )
+    return () => window.clearInterval(interval)
+  // The loader is selected by the active tab and role at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, activeTab, staffRole])
 
@@ -1429,7 +1448,7 @@ export function AdminEventsPage({ initialTab = 'dashboard', embedded = false, on
               <button
                 type="button"
                 className="service-request-refresh"
-                onClick={loadServiceRequests}
+                onClick={() => loadServiceRequests()}
                 disabled={serviceRequestsLoading}
               >
                 {serviceRequestsLoading ? 'Refreshing…' : 'Refresh requests'}

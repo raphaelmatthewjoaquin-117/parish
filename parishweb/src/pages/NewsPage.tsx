@@ -6,6 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import { EventDetailsModal } from '../components/EventDetailsModal'
 import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client'
 import { localize, type NewsContent } from '../content/siteContent'
+import { useSiteRefresh } from '../hooks/useSiteRefresh'
 import type { Language } from '../i18n'
 import '../PagesCSS/NewsPage.css'
 
@@ -29,6 +30,7 @@ type NewsArticle = NewsContent['articles'][number]
 const getPhotoUrl = getMediaUrl
 
 export function NewsPage({ language = 'en' }: { language?: Language }) {
+  const refreshKey = useSiteRefresh()
   const [events, setEvents] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +40,7 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
   const [newsError, setNewsError] = useState<string | null>(null)
 
   useEffect(() => {
+    let active = true
     fetch(`${API_URL}/api/events`)
       .then(response => {
         if (!response.ok) {
@@ -70,19 +73,26 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
           return result
         }, [])
 
-        setEvents(loaded)
+        if (active) {
+          setEvents(loaded)
+          setError(null)
+        }
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Unable to load events')
+        if (active) setError(err instanceof Error ? err.message : 'Unable to load events')
       })
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [refreshKey])
 
   useEffect(() => {
     let active = true
     apiClient.siteContent.get<NewsContent>('news')
       .then(({ content }) => {
-        if (active) setNews(content?.articles ?? [])
+        if (active) {
+          setNews(content?.articles ?? [])
+          setNewsError(null)
+        }
       })
       .catch((err: unknown) => {
         if (active) setNewsError(err instanceof Error ? err.message : 'Unable to load church news.')
@@ -91,7 +101,7 @@ export function NewsPage({ language = 'en' }: { language?: Language }) {
         if (active) setNewsLoading(false)
       })
     return () => { active = false }
-  }, [])
+  }, [refreshKey])
 
   const calendarEvents = events.map(event => ({
     title: localize(event.title, event.titleTl, language),

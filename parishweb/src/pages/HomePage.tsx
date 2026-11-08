@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { EventDetailsModal } from '../components/EventDetailsModal'
 import { API_BASE_URL as API_URL, apiClient, getMediaUrl } from '../api/client'
 import { defaultGalleryContent, localize, type GalleryContent } from '../content/siteContent'
+import { useSiteRefresh } from '../hooks/useSiteRefresh'
 import type { Language } from '../i18n'
 import parishLogo from '../images/SDP logo.png'
 import '../PagesCSS/HomePage.css'
@@ -36,6 +37,7 @@ const getGalleryPhotoUrl = getMediaUrl
 
 
 export function HomePage({ language = 'en' }: { language?: Language }) {
+  const refreshKey = useSiteRefresh()
   const [events, setEvents] = useState<EventItem[]>([])
   const [vaticanNews, setVaticanNews] = useState<VaticanNewsItem[]>([])
   const [galleryImage, setGalleryImage] = useState(defaultGalleryContent.items[0]?.image ?? '')
@@ -48,6 +50,7 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
 
   useEffect(() => {
+    let active = true
     fetch(`${API_URL}/api/events`)
       .then(response => {
         if (!response.ok) {
@@ -80,13 +83,17 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
           return result
         }, [])
 
-        setEvents(loaded)
+        if (active) {
+          setEvents(loaded)
+          setError(null)
+        }
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Unable to load events')
+        if (active) setError(err instanceof Error ? err.message : 'Unable to load events')
       })
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [refreshKey])
 
   useEffect(() => {
     fetch(`${API_URL}/api/vatican-news`)
@@ -105,19 +112,24 @@ export function HomePage({ language = 'en' }: { language?: Language }) {
   }, [])
 
   useEffect(() => {
+    let active = true
     apiClient.siteContent.get<GalleryContent>('gallery')
       .then(({ content }) => {
+        if (!active) return
         const featuredPhoto = content?.items.find(item => item.image)
         if (featuredPhoto) {
           setGalleryImage(featuredPhoto.image)
           setGalleryImageAlt(featuredPhoto.title)
         }
+        setGalleryError(false)
       })
       .catch((err: unknown) => {
+        if (!active) return
         console.error('Unable to load the homepage gallery preview.', err)
         setGalleryError(true)
       })
-  }, [])
+    return () => { active = false }
+  }, [refreshKey])
 
   return (
     <>
